@@ -101,7 +101,7 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-open-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-jetbrains-mono), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono);
   --color-background: var(--background);
   --color-foreground: var(--foreground);

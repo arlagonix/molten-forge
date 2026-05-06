@@ -139,6 +139,12 @@ import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
+const SUBMITTED_USER_MESSAGE_VISIBLE_TAIL_PX = 56;
+const SUBMITTED_USER_MESSAGE_EXTRA_SPACE_PX = 24;
+const SUBMIT_SCROLL_SPACER_MIN_PX = 180;
+const SUBMIT_SCROLL_SPACER_MAX_PX = 320;
+
+
 const UserMessageEditor = memo(function UserMessageEditor({
   initialContent,
   disabled,
@@ -408,10 +414,13 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [submitPositionVersion, setSubmitPositionVersion] = useState(0);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const submitScrollSpacerRef = useRef<HTMLDivElement | null>(null);
   const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
   const reasoningScrollElementRefs = useRef(new Map<string, HTMLDivElement>());
+  const pendingSubmittedUserMessageIdRef = useRef<string | null>(null);
   const chatComposerRef = useRef<ChatComposerHandle | null>(null);
   const generationRefs = useRef<Record<string, ActiveGeneration>>({});
   const modelLoadStatusTimerRef = useRef<number | null>(null);
@@ -888,10 +897,97 @@ export default function Home() {
     });
   }
 
+  function clearSubmitScrollSpacer() {
+    const spacerElement = submitScrollSpacerRef.current;
+    if (!spacerElement) return;
+
+    spacerElement.style.height = "0px";
+  }
+
+  function setSubmitScrollSpacerHeight(height: number) {
+    const spacerElement = submitScrollSpacerRef.current;
+    if (!spacerElement) return;
+
+    spacerElement.style.height = `${Math.max(0, Math.ceil(height))}px`;
+  }
+
+  function requestSubmittedUserMessagePosition(messageId: string) {
+    pendingSubmittedUserMessageIdRef.current = messageId;
+    setSubmitPositionVersion((currentVersion) => currentVersion + 1);
+  }
+
+  function positionSubmittedUserMessage(messageId: string) {
+    const scrollElement = chatScrollRef.current;
+    const messageElement = messageElementRefs.current.get(messageId);
+
+    if (!scrollElement || !messageElement) return;
+
+    const scrollRect = scrollElement.getBoundingClientRect();
+    const messageRect = messageElement.getBoundingClientRect();
+    const targetScrollTop = Math.max(
+      0,
+      scrollElement.scrollTop +
+        messageRect.bottom -
+        scrollRect.top -
+        SUBMITTED_USER_MESSAGE_VISIBLE_TAIL_PX,
+    );
+
+    const currentMaxScrollTop = Math.max(
+      0,
+      scrollElement.scrollHeight - scrollElement.clientHeight,
+    );
+
+    // If the message is already near the bottom, there may be no free scrollable
+    // space after it. Add a temporary spacer so the browser can actually move the
+    // message upward and leave room for the assistant answer.
+    const requiredExtraSpace =
+      targetScrollTop - currentMaxScrollTop + SUBMITTED_USER_MESSAGE_EXTRA_SPACE_PX;
+    const comfortableExtraSpace = Math.min(
+      SUBMIT_SCROLL_SPACER_MAX_PX,
+      Math.max(SUBMIT_SCROLL_SPACER_MIN_PX, scrollElement.clientHeight * 0.32),
+    );
+
+    // Keep a modest spacer even when the browser already has enough room.
+    // This lets the viewport sit slightly lower than the actual content end,
+    // which prevents a short response from snapping the chat back downward.
+    setSubmitScrollSpacerHeight(
+      Math.max(requiredExtraSpace, comfortableExtraSpace),
+    );
+
+    const nextMaxScrollTop = Math.max(
+      0,
+      scrollElement.scrollHeight - scrollElement.clientHeight,
+    );
+    const nextScrollTop = Math.min(targetScrollTop, nextMaxScrollTop);
+
+    isAutoScrollingRef.current = true;
+    scrollElement.scrollTo({ top: nextScrollTop, behavior: "smooth" });
+    lastChatScrollTopRef.current = nextScrollTop;
+
+    window.setTimeout(() => {
+      isAutoScrollingRef.current = false;
+      syncChatScrollableState();
+      updateNearBottomState(isChatNearBottom(24));
+    }, 260);
+  }
+
   useLayoutEffect(() => {
     syncChatScrollableState();
     updateNearBottomState(isChatNearBottom(24));
   }, [messages]);
+
+  useLayoutEffect(() => {
+    const pendingMessageId = pendingSubmittedUserMessageIdRef.current;
+    if (!pendingMessageId) return;
+
+    pendingSubmittedUserMessageIdRef.current = null;
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        positionSubmittedUserMessage(pendingMessageId);
+      });
+    });
+  }, [messages.length, submitPositionVersion]);
 
   useLayoutEffect(() => {
     const scrollElement = chatScrollRef.current;
@@ -971,6 +1067,7 @@ export default function Home() {
 
   function scrollChatToBottom() {
     shouldStickToBottomRef.current = true;
+    clearSubmitScrollSpacer();
     updateNearBottomState(true);
     scrollToBottomSmooth();
   }
@@ -1668,8 +1765,9 @@ export default function Home() {
         });
       }
 
-      if (chatId === activeChatId && shouldStickToBottomRef.current) {
-        scheduleChatScrollToBottom();
+      if (chatId === activeChatId) {
+        syncChatScrollableState();
+        updateNearBottomState(isChatNearBottom(24));
       }
     }
   }
@@ -1725,9 +1823,9 @@ export default function Home() {
       assistantMessage,
     ];
 
-    shouldStickToBottomRef.current = true;
-    lastScrollStateRef.current = true;
-    setIsNearChatBottom(true);
+    shouldStickToBottomRef.current = false;
+    clearSubmitScrollSpacer();
+    requestSubmittedUserMessagePosition(userChatMessage.id);
     updateChat(activeChat.id, (chat) => ({
       ...chat,
       title:
@@ -1786,9 +1884,12 @@ export default function Home() {
     const responseStartedAtMs = performance.now();
     const responseStartedAt = new Date().toISOString();
 
+    clearSubmitScrollSpacer();
+    requestSubmittedUserMessagePosition(userMessageSource.id);
+
     updateActiveChatMessages(
       (currentMessages) =>
-        currentMessages.map((message) => {
+        currentMessages.slice(0, assistantIndex + 1).map((message) => {
           if (
             message.id !== assistantMessageId ||
             message.role !== "assistant"
@@ -1817,9 +1918,9 @@ export default function Home() {
       { touch: false },
     );
 
-    shouldStickToBottomRef.current = true;
-    lastScrollStateRef.current = true;
-    setIsNearChatBottom(true);
+    shouldStickToBottomRef.current = false;
+    setExpandedReasoningIds({});
+    setExpandedMetricsIds({});
 
     await runAssistantVariant({
       chatId: activeChat.id,
@@ -2029,9 +2130,9 @@ export default function Home() {
       assistantMessage,
     ];
 
-    shouldStickToBottomRef.current = true;
-    lastScrollStateRef.current = true;
-    setIsNearChatBottom(true);
+    shouldStickToBottomRef.current = false;
+    clearSubmitScrollSpacer();
+    requestSubmittedUserMessagePosition(editedUserMessage.id);
     setExpandedReasoningIds({});
     setExpandedMetricsIds({});
     setEditingMessageId(null);
@@ -2076,6 +2177,7 @@ export default function Home() {
     shouldStickToBottomRef.current = true;
     lastScrollStateRef.current = true;
     setIsNearChatBottom(true);
+    clearSubmitScrollSpacer();
     focusDraftTextarea();
 
     try {
@@ -2095,6 +2197,7 @@ export default function Home() {
     shouldStickToBottomRef.current = true;
     lastScrollStateRef.current = true;
     setIsNearChatBottom(true);
+    clearSubmitScrollSpacer();
   }
 
   async function clearCurrentChat() {
@@ -2111,6 +2214,7 @@ export default function Home() {
     }));
     setExpandedReasoningIds({});
     setExpandedMetricsIds({});
+    clearSubmitScrollSpacer();
     showSuccess("Chat cleared.");
   }
 
@@ -2889,6 +2993,11 @@ export default function Home() {
                 ref={chatBottomRef}
                 aria-hidden="true"
                 className="h-px w-full shrink-0"
+              />
+              <div
+                ref={submitScrollSpacerRef}
+                aria-hidden="true"
+                className="h-0 w-full shrink-0"
               />
             </div>
           </div>
