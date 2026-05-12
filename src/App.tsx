@@ -2634,7 +2634,7 @@ export default function Home() {
                                   className={cn(
                                     "min-w-0 text-xs leading-5",
                                     isExpanded
-                                      ? "max-h-[32rem] overflow-y-auto overflow-x-hidden pr-1"
+                                      ? "overflow-y-auto overflow-x-hidden pr-1"
                                       : "flex max-h-40 flex-col justify-end overflow-hidden",
                                   )}
                                 >
@@ -2695,10 +2695,10 @@ export default function Home() {
                             >
                               <div
                                 className={cn(
-                                  "min-w-0 text-sm leading-6 [overflow-wrap:anywhere]",
+                                  "min-w-0 text-sm leading-6 [overflow-wrap:anywhere] w-full",
                                   message.role === "user"
-                                    ? "max-h-[28rem] max-w-[85%] overflow-y-auto overflow-x-hidden chat-message-scrollbar bg-primary px-4 py-3 text-primary-foreground shadow-xs"
-                                    : "w-full min-w-0 max-w-full overflow-visible bg-card px-4 py-3 text-card-foreground shadow-xs",
+                                    ? "max-h-[32rem] overflow-y-auto overflow-x-hidden chat-message-scrollbar bg-primary px-4 py-3 text-primary-foreground shadow-xs"
+                                    : "min-w-0 max-w-full overflow-visible bg-card px-4 py-3 text-card-foreground shadow-xs",
                                   status === "error" && "border-destructive/50",
                                 )}
                               >
