@@ -143,12 +143,9 @@ const APP_NAME = "Chat Forge";
 const APP_VERSION_LABEL = `v${__APP_VERSION__}`;
 const APP_TITLE = `${APP_NAME} ${APP_VERSION_LABEL}`;
 
-const SUBMITTED_USER_MESSAGE_VISIBLE_TAIL_PX = 56;
-const SUBMITTED_USER_MESSAGE_EXTRA_SPACE_PX = 24;
-const SUBMIT_SCROLL_SPACER_MIN_PX = 180;
-const SUBMIT_SCROLL_SPACER_MAX_PX = 320;
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
-const STREAMING_AUTO_SCROLL_INTERVAL_MS = 1000;
+const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
+const STICKY_SCROLL_SUPPRESSION_MS = 1000;
 
 const UserMessageEditor = memo(function UserMessageEditor({
   initialContent,
@@ -415,23 +412,27 @@ export default function Home() {
     Record<string, boolean>
   >({});
   const [isNearChatBottom, setIsNearChatBottom] = useState(true);
+  const [showScrollToBottomButton, setShowScrollToBottomButton] =
+    useState(false);
   const [isChatScrollable, setIsChatScrollable] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [submitPositionVersion, setSubmitPositionVersion] = useState(0);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
-  const submitScrollSpacerRef = useRef<HTMLDivElement | null>(null);
   const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
   const reasoningScrollElementRefs = useRef(new Map<string, HTMLDivElement>());
-  const pendingSubmittedUserMessageIdRef = useRef<string | null>(null);
+  const pendingChatBottomScrollRef = useRef(false);
   const chatComposerRef = useRef<ChatComposerHandle | null>(null);
   const generationRefs = useRef<Record<string, ActiveGeneration>>({});
   const modelLoadStatusTimerRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
+  const stickyScrollFrameRef = useRef<number | null>(null);
   const autoScrollResetTimeoutRef = useRef<number | null>(null);
+  const manualScrollSuppressionTimeoutRef = useRef<number | null>(null);
   const isAutoScrollingRef = useRef(false);
+  const manualScrollSuppressedUntilRef = useRef(0);
+  const lastChatScrollTopRef = useRef(0);
   const isResizingChatRef = useRef(false);
   const isChatScrollableRef = useRef(false);
   const streamBuffersRef = useRef<Record<string, StreamBuffer>>({});
@@ -439,7 +440,7 @@ export default function Home() {
   const didHydrateRef = useRef(false);
 
   // Auto-scroll state: enabled by default, disabled when user scrolls up
-  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const [, setAutoScrollEnabled] = useState(true);
   const autoScrollEnabledRef = useRef(true);
 
   const { resolvedTheme, setTheme } = useTheme();
@@ -658,8 +659,14 @@ export default function Home() {
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current);
       }
+      if (stickyScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(stickyScrollFrameRef.current);
+      }
       if (autoScrollResetTimeoutRef.current !== null) {
         window.clearTimeout(autoScrollResetTimeoutRef.current);
+      }
+      if (manualScrollSuppressionTimeoutRef.current !== null) {
+        window.clearTimeout(manualScrollSuppressionTimeoutRef.current);
       }
       Object.values(streamFlushTimeoutRefs.current).forEach((timeoutId) =>
         window.clearTimeout(timeoutId),
@@ -765,11 +772,6 @@ export default function Home() {
     return nextIsScrollable;
   }
 
-  function isChatNearBottom(threshold = 24) {
-    if (!canChatScroll()) return true;
-    return getChatDistanceFromBottom() <= threshold;
-  }
-
   function setChatAutoScrollEnabled(enabled: boolean) {
     autoScrollEnabledRef.current = enabled;
     setAutoScrollEnabled((currentEnabled) =>
@@ -777,7 +779,62 @@ export default function Home() {
     );
   }
 
-  function markProgrammaticChatScroll(durationMs = 500) {
+  function isStickyScrollSuppressed() {
+    return Date.now() < manualScrollSuppressedUntilRef.current;
+  }
+
+  function isChatNearBottomForSticky() {
+    return (
+      !canChatScroll() ||
+      getChatDistanceFromBottom() <= CHAT_BOTTOM_THRESHOLD_PX
+    );
+  }
+
+  function clearStickyScrollSuppression() {
+    manualScrollSuppressedUntilRef.current = 0;
+
+    if (manualScrollSuppressionTimeoutRef.current !== null) {
+      window.clearTimeout(manualScrollSuppressionTimeoutRef.current);
+      manualScrollSuppressionTimeoutRef.current = null;
+    }
+  }
+
+  function suppressStickyScroll() {
+    manualScrollSuppressedUntilRef.current =
+      Date.now() + STICKY_SCROLL_SUPPRESSION_MS;
+    setChatAutoScrollEnabled(false);
+
+    if (manualScrollSuppressionTimeoutRef.current !== null) {
+      window.clearTimeout(manualScrollSuppressionTimeoutRef.current);
+    }
+
+    manualScrollSuppressionTimeoutRef.current = window.setTimeout(() => {
+      manualScrollSuppressionTimeoutRef.current = null;
+
+      if (!isChatNearBottomForSticky()) return;
+
+      setChatAutoScrollEnabled(true);
+      scheduleStickyScrollToBottom();
+    }, STICKY_SCROLL_SUPPRESSION_MS);
+  }
+
+  function syncChatScrollState() {
+    syncChatScrollableState();
+
+    const distanceFromBottom = getChatDistanceFromBottom();
+    const isNearBottom =
+      !canChatScroll() || distanceFromBottom <= CHAT_BOTTOM_THRESHOLD_PX;
+
+    setIsNearChatBottom(isNearBottom);
+    setShowScrollToBottomButton(
+      canChatScroll() &&
+        distanceFromBottom > SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX,
+    );
+
+    return { distanceFromBottom, isNearBottom };
+  }
+
+  function markProgrammaticChatScroll(durationMs = 80) {
     isAutoScrollingRef.current = true;
 
     if (autoScrollResetTimeoutRef.current !== null) {
@@ -790,36 +847,55 @@ export default function Home() {
     }, durationMs);
   }
 
-  function scrollToBottomNow() {
+  function scrollToBottomInstant() {
     const scrollElement = chatScrollRef.current;
     if (!scrollElement) return;
 
-    markProgrammaticChatScroll(80);
     const nextScrollTop = Math.max(
       0,
       scrollElement.scrollHeight - scrollElement.clientHeight,
     );
+
+    if (Math.abs(scrollElement.scrollTop - nextScrollTop) <= 1) return;
+
+    markProgrammaticChatScroll();
     scrollElement.scrollTop = nextScrollTop;
+    lastChatScrollTopRef.current = nextScrollTop;
   }
 
-  function scrollToBottomSmooth() {
-    const scrollElement = chatScrollRef.current;
-    if (!scrollElement) return;
+  function scheduleStickyScrollToBottom({ force = false } = {}) {
+    if (!force) {
+      if (!autoScrollEnabledRef.current) return;
+      if (isStickyScrollSuppressed()) return;
+    }
 
-    markProgrammaticChatScroll(500);
-    const nextScrollTop = Math.max(
-      0,
-      scrollElement.scrollHeight - scrollElement.clientHeight,
-    );
-    scrollElement.scrollTo({ top: nextScrollTop, behavior: "smooth" });
+    if (stickyScrollFrameRef.current !== null) return;
+
+    stickyScrollFrameRef.current = window.requestAnimationFrame(() => {
+      stickyScrollFrameRef.current = null;
+
+      if (!force) {
+        if (!autoScrollEnabledRef.current) return;
+        if (isStickyScrollSuppressed()) return;
+      }
+
+      scrollToBottomInstant();
+      syncChatScrollableState();
+      setIsNearChatBottom(true);
+      setShowScrollToBottomButton(false);
+    });
   }
 
   const handleAssistantVisualProgress = useCallback(
     (chatId: string) => {
       if (chatId !== activeChatId) return;
 
-      syncChatScrollableState();
-      setIsNearChatBottom(isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX));
+      if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+        scheduleStickyScrollToBottom();
+        return;
+      }
+
+      syncChatScrollState();
     },
     [activeChatId, generatingChatIds],
   );
@@ -874,108 +950,38 @@ export default function Home() {
     });
   }
 
-  function clearSubmitScrollSpacer() {
-    const spacerElement = submitScrollSpacerRef.current;
-    if (!spacerElement) return;
-
-    spacerElement.style.height = "0px";
-  }
-
-  function clearSubmitScrollSpacerAfterUserDetach() {
-    // The submit spacer is only needed to make the freshly submitted
-    // user message sit comfortably above the composer while generation starts.
-    // Once the user intentionally leaves the bottom, the spacer should fade out
-    // instead of staying as permanent empty space at the end of the chat.
-    clearSubmitScrollSpacer();
-  }
-
-  function setSubmitScrollSpacerHeight(height: number) {
-    const spacerElement = submitScrollSpacerRef.current;
-    if (!spacerElement) return;
-
-    spacerElement.style.height = `${Math.max(0, Math.ceil(height))}px`;
-  }
-
-  function requestSubmittedUserMessagePosition(messageId: string) {
-    pendingSubmittedUserMessageIdRef.current = messageId;
-    setSubmitPositionVersion((currentVersion) => currentVersion + 1);
-  }
-
-  function positionSubmittedUserMessage(messageId: string) {
-    const scrollElement = chatScrollRef.current;
-    const messageElement = messageElementRefs.current.get(messageId);
-
-    if (!scrollElement || !messageElement) return;
-
-    const scrollRect = scrollElement.getBoundingClientRect();
-    const messageRect = messageElement.getBoundingClientRect();
-    const targetScrollTop = Math.max(
-      0,
-      scrollElement.scrollTop +
-        messageRect.bottom -
-        scrollRect.top -
-        SUBMITTED_USER_MESSAGE_VISIBLE_TAIL_PX,
-    );
-
-    const currentMaxScrollTop = Math.max(
-      0,
-      scrollElement.scrollHeight - scrollElement.clientHeight,
-    );
-
-    const requiredExtraSpace =
-      targetScrollTop -
-      currentMaxScrollTop +
-      SUBMITTED_USER_MESSAGE_EXTRA_SPACE_PX;
-    const comfortableExtraSpace = Math.min(
-      SUBMIT_SCROLL_SPACER_MAX_PX,
-      Math.max(SUBMIT_SCROLL_SPACER_MIN_PX, scrollElement.clientHeight * 0.32),
-    );
-
-    setSubmitScrollSpacerHeight(
-      Math.max(requiredExtraSpace, comfortableExtraSpace),
-    );
-
-    const nextMaxScrollTop = Math.max(
-      0,
-      scrollElement.scrollHeight - scrollElement.clientHeight,
-    );
-    const nextScrollTop = Math.min(targetScrollTop, nextMaxScrollTop);
-
-    isAutoScrollingRef.current = true;
-    scrollElement.scrollTo({ top: nextScrollTop, behavior: "smooth" });
-
-    window.setTimeout(() => {
-      isAutoScrollingRef.current = false;
-      syncChatScrollableState();
-      setIsNearChatBottom(isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX));
-    }, 260);
+  function requestChatBottomScrollAfterRender() {
+    pendingChatBottomScrollRef.current = true;
   }
 
   useLayoutEffect(() => {
     syncChatScrollableState();
-    setIsNearChatBottom(isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX));
+
+    if (pendingChatBottomScrollRef.current) {
+      pendingChatBottomScrollRef.current = false;
+      scheduleStickyScrollToBottom({ force: true });
+      return;
+    }
+
+    if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+      scheduleStickyScrollToBottom();
+      return;
+    }
+
+    syncChatScrollState();
   }, [messages]);
-
-  useLayoutEffect(() => {
-    const pendingMessageId = pendingSubmittedUserMessageIdRef.current;
-    if (!pendingMessageId) return;
-
-    pendingSubmittedUserMessageIdRef.current = null;
-
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        positionSubmittedUserMessage(pendingMessageId);
-      });
-    });
-  }, [messages.length, submitPositionVersion]);
 
   useLayoutEffect(() => {
     const scrollElement = chatScrollRef.current;
     if (!scrollElement) return;
 
     function handleResize() {
-      syncChatScrollableState();
-      setIsNearChatBottom(isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX));
+      if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+        scheduleStickyScrollToBottom();
+        return;
+      }
+
+      syncChatScrollState();
     }
 
     const resizeObserver = new ResizeObserver(handleResize);
@@ -990,33 +996,51 @@ export default function Home() {
 
   useEffect(() => {
     if (!activeChatId) return;
-    if (!autoScrollEnabled) return;
     if (!generatingChatIds.includes(activeChatId)) return;
+    if (!autoScrollEnabledRef.current) return;
+    if (isStickyScrollSuppressed()) return;
 
-    const intervalId = window.setInterval(() => {
-      if (!autoScrollEnabledRef.current) return;
-
-      syncChatScrollableState();
-      scrollToBottomSmooth();
-      setIsNearChatBottom(true);
-    }, STREAMING_AUTO_SCROLL_INTERVAL_MS);
-
-    return () => window.clearInterval(intervalId);
-  }, [activeChatId, autoScrollEnabled, generatingChatIds]);
+    scheduleStickyScrollToBottom();
+  }, [activeChatId, generatingChatIds, messages]);
 
   useEffect(() => {
-    if (!activeChatId) return;
-    if (generatingChatIds.includes(activeChatId)) return;
-    if (autoScrollEnabledRef.current) return;
+    function handleDocumentKeyDown(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
 
-    clearSubmitScrollSpacer();
-  }, [activeChatId, generatingChatIds]);
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      const isTypingTarget =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable;
+
+      if (isTypingTarget) return;
+
+      if (
+        event.key === "ArrowUp" ||
+        event.key === "PageUp" ||
+        event.key === "Home"
+      ) {
+        suppressStickyScroll();
+      }
+    }
+
+    document.addEventListener("keydown", handleDocumentKeyDown, {
+      capture: true,
+    });
+
+    return () => {
+      document.removeEventListener("keydown", handleDocumentKeyDown, {
+        capture: true,
+      });
+    };
+  }, []);
 
   function scrollChatToBottom() {
+    clearStickyScrollSuppression();
     setChatAutoScrollEnabled(true);
-    clearSubmitScrollSpacer();
     setIsNearChatBottom(true);
-    scrollToBottomSmooth();
+    setShowScrollToBottomButton(false);
+    scheduleStickyScrollToBottom({ force: true });
   }
 
   function handleChatScroll() {
@@ -1029,18 +1053,22 @@ export default function Home() {
       const scrollElement = chatScrollRef.current;
       if (!scrollElement) return;
 
-      syncChatScrollableState();
+      const previousScrollTop = lastChatScrollTopRef.current;
+      const currentScrollTop = scrollElement.scrollTop;
+      lastChatScrollTopRef.current = currentScrollTop;
 
-      const isNearBottom = isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX);
-      setIsNearChatBottom(isNearBottom);
+      const { isNearBottom } = syncChatScrollState();
 
-      // If this scroll was not triggered by the auto-scroll logic,
-      // update the auto-scroll enable flag based on user intent.
       if (!isAutoScrollingRef.current) {
-        setChatAutoScrollEnabled(isNearBottom);
+        if (currentScrollTop < previousScrollTop) {
+          suppressStickyScroll();
+          return;
+        }
 
-        if (!isNearBottom) {
-          clearSubmitScrollSpacerAfterUserDetach();
+        if (isNearBottom && !isStickyScrollSuppressed()) {
+          setChatAutoScrollEnabled(true);
+        } else if (!isNearBottom) {
+          setChatAutoScrollEnabled(false);
         }
       }
     });
@@ -1050,8 +1078,7 @@ export default function Home() {
     closeMessageContextMenu();
 
     if (event.deltaY < 0) {
-      setChatAutoScrollEnabled(false);
-      clearSubmitScrollSpacerAfterUserDetach();
+      suppressStickyScroll();
     }
   }
 
@@ -1185,7 +1212,6 @@ export default function Home() {
         reasoning: buffered.reasoning || undefined,
       },
     );
-
   }
 
   function flushAllBufferedAssistantVariants() {
@@ -1763,8 +1789,11 @@ export default function Home() {
       }
 
       if (chatId === activeChatId) {
-        syncChatScrollableState();
-        setIsNearChatBottom(isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX));
+        if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+          scheduleStickyScrollToBottom();
+        } else {
+          syncChatScrollState();
+        }
       }
     }
   }
@@ -1820,10 +1849,10 @@ export default function Home() {
       assistantMessage,
     ];
 
-    // Enable auto-scroll for this new generation
+    // Enable sticky bottom behavior for this new generation.
+    clearStickyScrollSuppression();
     setChatAutoScrollEnabled(true);
-    clearSubmitScrollSpacer();
-    requestSubmittedUserMessagePosition(userChatMessage.id);
+    requestChatBottomScrollAfterRender();
     updateChat(activeChat.id, (chat) => ({
       ...chat,
       title:
@@ -1882,8 +1911,7 @@ export default function Home() {
     const responseStartedAtMs = performance.now();
     const responseStartedAt = new Date().toISOString();
 
-    clearSubmitScrollSpacer();
-    requestSubmittedUserMessagePosition(userMessageSource.id);
+    requestChatBottomScrollAfterRender();
 
     updateActiveChatMessages(
       (currentMessages) =>
@@ -1916,6 +1944,7 @@ export default function Home() {
       { touch: false },
     );
 
+    clearStickyScrollSuppression();
     setChatAutoScrollEnabled(true);
     setExpandedReasoningIds({});
     setExpandedMetricsIds({});
@@ -2129,8 +2158,7 @@ export default function Home() {
     ];
 
     setChatAutoScrollEnabled(true);
-    clearSubmitScrollSpacer();
-    requestSubmittedUserMessagePosition(editedUserMessage.id);
+    requestChatBottomScrollAfterRender();
     setExpandedReasoningIds({});
     setExpandedMetricsIds({});
     setEditingMessageId(null);
@@ -2174,7 +2202,6 @@ export default function Home() {
     setExpandedMetricsIds({});
     setChatAutoScrollEnabled(true);
     setIsNearChatBottom(true);
-    clearSubmitScrollSpacer();
     focusDraftTextarea();
 
     try {
@@ -2193,7 +2220,6 @@ export default function Home() {
     setExpandedMetricsIds({});
     setChatAutoScrollEnabled(true);
     setIsNearChatBottom(true);
-    clearSubmitScrollSpacer();
   }
 
   async function clearCurrentChat() {
@@ -2210,7 +2236,6 @@ export default function Home() {
     }));
     setExpandedReasoningIds({});
     setExpandedMetricsIds({});
-    clearSubmitScrollSpacer();
     showSuccess("Chat cleared.");
   }
 
@@ -2322,7 +2347,9 @@ export default function Home() {
                 <DropdownMenuItem onClick={clearCurrentChat}>
                   <Trash2 className="size-4" />
                   <span className="flex-1">Clear current chat</span>
-                  <span className="text-xs text-muted-foreground">Ctrl+Delete</span>
+                  <span className="text-xs text-muted-foreground">
+                    Ctrl+Delete
+                  </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -2991,15 +3018,10 @@ export default function Home() {
                 aria-hidden="true"
                 className="h-px w-full shrink-0"
               />
-              <div
-                ref={submitScrollSpacerRef}
-                aria-hidden="true"
-                className="h-0 w-full shrink-0 transition-[height] duration-300 ease-out"
-              />
             </div>
           </div>
 
-          {hasMessages && isChatScrollable && !isNearChatBottom && (
+          {hasMessages && isChatScrollable && showScrollToBottomButton && (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 right-[-74px] z-10 px-3 md:px-4">
               <div className="mx-auto flex w-full max-w-3xl justify-end">
                 <Button
