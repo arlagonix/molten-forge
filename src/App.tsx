@@ -5,7 +5,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  ChevronUp,
   ChevronsUpDown,
   Copy,
   Eye,
@@ -146,6 +145,7 @@ const APP_TITLE = `${APP_NAME} ${APP_VERSION_LABEL}`;
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
+const STICKY_SCROLL_SETTLE_FRAMES = 3;
 
 const UserMessageEditor = memo(function UserMessageEditor({
   initialContent,
@@ -191,7 +191,7 @@ const UserMessageEditor = memo(function UserMessageEditor({
             }}
             autoFocus
             disabled={disabled}
-            className="min-h-32 w-full resize-y rounded-none border-0 bg-transparent p-0 text-primary-foreground shadow-none outline-none placeholder:text-primary-foreground/60 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-80"
+            className="min-h-[32rem] max-h-[32rem] w-full resize-y rounded-none border-0 bg-transparent p-0 text-primary-foreground shadow-none outline-none placeholder:text-primary-foreground/60 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-80"
           />
         </div>
       </article>
@@ -405,9 +405,6 @@ export default function Home() {
     useState(false);
   const [sidebarModelSearchValue, setSidebarModelSearchValue] = useState("");
   const [isApiKeyVisible, setIsApiKeyVisible] = useState(false);
-  const [expandedReasoningIds, setExpandedReasoningIds] = useState<
-    Record<string, boolean>
-  >({});
   const [expandedMetricsIds, setExpandedMetricsIds] = useState<
     Record<string, boolean>
   >({});
@@ -421,18 +418,20 @@ export default function Home() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
-  const reasoningScrollElementRefs = useRef(new Map<string, HTMLDivElement>());
   const pendingChatBottomScrollRef = useRef(false);
   const chatComposerRef = useRef<ChatComposerHandle | null>(null);
   const generationRefs = useRef<Record<string, ActiveGeneration>>({});
   const modelLoadStatusTimerRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
   const stickyScrollFrameRef = useRef<number | null>(null);
+  const stickyScrollSettleFramesRef = useRef(0);
+  const stickyScrollForceRef = useRef(false);
   const autoScrollResetTimeoutRef = useRef<number | null>(null);
   const manualScrollSuppressionTimeoutRef = useRef<number | null>(null);
   const isAutoScrollingRef = useRef(false);
   const manualScrollSuppressedUntilRef = useRef(0);
   const lastChatScrollTopRef = useRef(0);
+  const manualScrollInputUntilRef = useRef(0);
   const isResizingChatRef = useRef(false);
   const isChatScrollableRef = useRef(false);
   const streamBuffersRef = useRef<Record<string, StreamBuffer>>({});
@@ -440,7 +439,7 @@ export default function Home() {
   const didHydrateRef = useRef(false);
 
   // Auto-scroll state: enabled by default, disabled when user scrolls up
-  const [, setAutoScrollEnabled] = useState(true);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const autoScrollEnabledRef = useRef(true);
 
   const { resolvedTheme, setTheme } = useTheme();
@@ -783,11 +782,9 @@ export default function Home() {
     return Date.now() < manualScrollSuppressedUntilRef.current;
   }
 
-  function isChatNearBottomForSticky() {
-    return (
-      !canChatScroll() ||
-      getChatDistanceFromBottom() <= CHAT_BOTTOM_THRESHOLD_PX
-    );
+  function isChatNearBottom(threshold = CHAT_BOTTOM_THRESHOLD_PX) {
+    if (!canChatScroll()) return true;
+    return getChatDistanceFromBottom() <= threshold;
   }
 
   function clearStickyScrollSuppression() {
@@ -811,11 +808,37 @@ export default function Home() {
     manualScrollSuppressionTimeoutRef.current = window.setTimeout(() => {
       manualScrollSuppressionTimeoutRef.current = null;
 
-      if (!isChatNearBottomForSticky()) return;
+      if (!isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX)) return;
 
       setChatAutoScrollEnabled(true);
       scheduleStickyScrollToBottom();
     }, STICKY_SCROLL_SUPPRESSION_MS);
+  }
+
+  function markManualScrollInput(durationMs = 200) {
+    manualScrollInputUntilRef.current = Date.now() + durationMs;
+  }
+
+  function hasRecentManualScrollInput() {
+    return Date.now() < manualScrollInputUntilRef.current;
+  }
+
+  function isActiveChatGenerating() {
+    return Boolean(activeChatId && generatingChatIds.includes(activeChatId));
+  }
+
+  function getStickyScrollSettleFrames() {
+    return isActiveChatGenerating() ? STICKY_SCROLL_SETTLE_FRAMES : 1;
+  }
+
+  function armStickyScrollToBottom() {
+    clearStickyScrollSuppression();
+    markProgrammaticChatScroll(350);
+    setChatAutoScrollEnabled(true);
+    setIsNearChatBottom(true);
+    setShowScrollToBottomButton(false);
+    requestChatBottomScrollAfterRender();
+    scheduleStickyScrollToBottom({ force: true });
   }
 
   function syncChatScrollState() {
@@ -863,27 +886,61 @@ export default function Home() {
     lastChatScrollTopRef.current = nextScrollTop;
   }
 
-  function scheduleStickyScrollToBottom({ force = false } = {}) {
+  function scheduleStickyScrollToBottom({
+    force = false,
+    settleFrames,
+  }: { force?: boolean; settleFrames?: number } = {}) {
     if (!force) {
       if (!autoScrollEnabledRef.current) return;
       if (isStickyScrollSuppressed()) return;
     }
 
+    stickyScrollForceRef.current = stickyScrollForceRef.current || force;
+    stickyScrollSettleFramesRef.current = Math.max(
+      stickyScrollSettleFramesRef.current,
+      Math.max(1, settleFrames ?? getStickyScrollSettleFrames()),
+    );
+
     if (stickyScrollFrameRef.current !== null) return;
 
-    stickyScrollFrameRef.current = window.requestAnimationFrame(() => {
+    const runStickyScrollFrame = () => {
       stickyScrollFrameRef.current = null;
 
-      if (!force) {
-        if (!autoScrollEnabledRef.current) return;
-        if (isStickyScrollSuppressed()) return;
+      const shouldForce = stickyScrollForceRef.current;
+
+      if (!shouldForce) {
+        if (!autoScrollEnabledRef.current) {
+          stickyScrollSettleFramesRef.current = 0;
+          return;
+        }
+
+        if (isStickyScrollSuppressed()) {
+          stickyScrollSettleFramesRef.current = 0;
+          return;
+        }
       }
 
       scrollToBottomInstant();
       syncChatScrollableState();
       setIsNearChatBottom(true);
       setShowScrollToBottomButton(false);
-    });
+
+      stickyScrollSettleFramesRef.current = Math.max(
+        0,
+        stickyScrollSettleFramesRef.current - 1,
+      );
+
+      if (stickyScrollSettleFramesRef.current > 0) {
+        stickyScrollFrameRef.current =
+          window.requestAnimationFrame(runStickyScrollFrame);
+        return;
+      }
+
+      stickyScrollForceRef.current = false;
+    };
+
+    stickyScrollFrameRef.current =
+      window.requestAnimationFrame(runStickyScrollFrame);
   }
 
   const handleAssistantVisualProgress = useCallback(
@@ -929,25 +986,6 @@ export default function Home() {
         messageElementRefs.current.delete(messageId);
       }
     };
-  }
-
-  function registerReasoningScrollElement(messageId: string) {
-    return (element: HTMLDivElement | null) => {
-      if (element) {
-        reasoningScrollElementRefs.current.set(messageId, element);
-      } else {
-        reasoningScrollElementRefs.current.delete(messageId);
-      }
-    };
-  }
-
-  function scrollReasoningToBottom(messageId: string) {
-    window.requestAnimationFrame(() => {
-      const scrollElement = reasoningScrollElementRefs.current.get(messageId);
-      if (!scrollElement) return;
-
-      scrollElement.scrollTop = scrollElement.scrollHeight;
-    });
   }
 
   function requestChatBottomScrollAfterRender() {
@@ -1020,6 +1058,7 @@ export default function Home() {
         event.key === "PageUp" ||
         event.key === "Home"
       ) {
+        markManualScrollInput(1000);
         suppressStickyScroll();
       }
     }
@@ -1036,11 +1075,7 @@ export default function Home() {
   }, []);
 
   function scrollChatToBottom() {
-    clearStickyScrollSuppression();
-    setChatAutoScrollEnabled(true);
-    setIsNearChatBottom(true);
-    setShowScrollToBottomButton(false);
-    scheduleStickyScrollToBottom({ force: true });
+    armStickyScrollToBottom();
   }
 
   function handleChatScroll() {
@@ -1060,14 +1095,26 @@ export default function Home() {
       const { isNearBottom } = syncChatScrollState();
 
       if (!isAutoScrollingRef.current) {
-        if (currentScrollTop < previousScrollTop) {
+        if (
+          currentScrollTop < previousScrollTop &&
+          hasRecentManualScrollInput()
+        ) {
           suppressStickyScroll();
           return;
         }
 
         if (isNearBottom && !isStickyScrollSuppressed()) {
           setChatAutoScrollEnabled(true);
-        } else if (!isNearBottom) {
+        } else if (!isNearBottom && hasRecentManualScrollInput()) {
+          setChatAutoScrollEnabled(false);
+        } else if (
+          !isNearBottom &&
+          isActiveChatGenerating() &&
+          autoScrollEnabledRef.current &&
+          !isStickyScrollSuppressed()
+        ) {
+          scheduleStickyScrollToBottom();
+        } else if (!isNearBottom && !isActiveChatGenerating()) {
           setChatAutoScrollEnabled(false);
         }
       }
@@ -1076,6 +1123,7 @@ export default function Home() {
 
   function handleChatWheel(event: ReactWheelEvent<HTMLDivElement>) {
     closeMessageContextMenu();
+    markManualScrollInput();
 
     if (event.deltaY < 0) {
       suppressStickyScroll();
@@ -1084,6 +1132,20 @@ export default function Home() {
 
   function handleChatPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     const target = event.target instanceof Element ? event.target : null;
+    const scrollElement = chatScrollRef.current;
+
+    if (scrollElement) {
+      const rect = scrollElement.getBoundingClientRect();
+      const scrollbarGutterWidth =
+        scrollElement.offsetWidth - scrollElement.clientWidth;
+
+      if (
+        scrollbarGutterWidth > 0 &&
+        event.clientX >= rect.right - scrollbarGutterWidth - 2
+      ) {
+        markManualScrollInput(1000);
+      }
+    }
 
     if (!target?.closest("[data-message-context-menu]")) {
       closeMessageContextMenu();
@@ -1131,13 +1193,6 @@ export default function Home() {
   ) {
     if (!activeChatId) return;
     updateChatMessages(activeChatId, updater, options);
-  }
-
-  function toggleReasoning(messageId: string) {
-    setExpandedReasoningIds((current) => ({
-      ...current,
-      [messageId]: !current[messageId],
-    }));
   }
 
   function toggleMetrics(messageId: string) {
@@ -1670,6 +1725,10 @@ export default function Home() {
       [chatId]: assistantMessageId,
     }));
 
+    if (chatId === activeChatId) {
+      armStickyScrollToBottom();
+    }
+
     toast.dismiss();
 
     try {
@@ -1688,6 +1747,10 @@ export default function Home() {
               content: delta,
             },
           );
+
+          if (chatId === activeChatId) {
+            scheduleStickyScrollToBottom();
+          }
         },
         onReasoningDelta: (delta) => {
           appendBufferedAssistantVariant(
@@ -1698,6 +1761,10 @@ export default function Home() {
               reasoning: delta,
             },
           );
+
+          if (chatId === activeChatId) {
+            scheduleStickyScrollToBottom();
+          }
         },
       });
 
@@ -1790,7 +1857,7 @@ export default function Home() {
 
       if (chatId === activeChatId) {
         if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
-          scheduleStickyScrollToBottom();
+          scheduleStickyScrollToBottom({ force: true });
         } else {
           syncChatScrollState();
         }
@@ -1850,9 +1917,7 @@ export default function Home() {
     ];
 
     // Enable sticky bottom behavior for this new generation.
-    clearStickyScrollSuppression();
-    setChatAutoScrollEnabled(true);
-    requestChatBottomScrollAfterRender();
+    armStickyScrollToBottom();
     updateChat(activeChat.id, (chat) => ({
       ...chat,
       title:
@@ -1911,7 +1976,7 @@ export default function Home() {
     const responseStartedAtMs = performance.now();
     const responseStartedAt = new Date().toISOString();
 
-    requestChatBottomScrollAfterRender();
+    armStickyScrollToBottom();
 
     updateActiveChatMessages(
       (currentMessages) =>
@@ -1944,9 +2009,7 @@ export default function Home() {
       { touch: false },
     );
 
-    clearStickyScrollSuppression();
-    setChatAutoScrollEnabled(true);
-    setExpandedReasoningIds({});
+    armStickyScrollToBottom();
     setExpandedMetricsIds({});
 
     await runAssistantVariant({
@@ -2064,18 +2127,12 @@ export default function Home() {
     setCopiedMessageId((currentMessageId) =>
       currentMessageId === messageId ? null : currentMessageId,
     );
-    setExpandedReasoningIds((current) => {
-      const next = { ...current };
-      delete next[messageId];
-      return next;
-    });
     setExpandedMetricsIds((current) => {
       const next = { ...current };
       delete next[messageId];
       return next;
     });
     messageElementRefs.current.delete(messageId);
-    reasoningScrollElementRefs.current.delete(messageId);
     showSuccess("Message deleted.");
   }
 
@@ -2157,9 +2214,9 @@ export default function Home() {
       assistantMessage,
     ];
 
+    clearStickyScrollSuppression();
     setChatAutoScrollEnabled(true);
     requestChatBottomScrollAfterRender();
-    setExpandedReasoningIds({});
     setExpandedMetricsIds({});
     setEditingMessageId(null);
 
@@ -2198,10 +2255,11 @@ export default function Home() {
     setActiveChatId(chat.id);
     chatComposerRef.current?.clear();
     setEditingMessageId(null);
-    setExpandedReasoningIds({});
     setExpandedMetricsIds({});
+    clearStickyScrollSuppression();
     setChatAutoScrollEnabled(true);
     setIsNearChatBottom(true);
+    setShowScrollToBottomButton(false);
     focusDraftTextarea();
 
     try {
@@ -2216,10 +2274,11 @@ export default function Home() {
     setActiveChatId(chatId);
     chatComposerRef.current?.clear();
     setEditingMessageId(null);
-    setExpandedReasoningIds({});
     setExpandedMetricsIds({});
+    clearStickyScrollSuppression();
     setChatAutoScrollEnabled(true);
     setIsNearChatBottom(true);
+    setShowScrollToBottomButton(false);
   }
 
   async function clearCurrentChat() {
@@ -2234,7 +2293,6 @@ export default function Home() {
       messages: [],
       updatedAt: now,
     }));
-    setExpandedReasoningIds({});
     setExpandedMetricsIds({});
     showSuccess("Chat cleared.");
   }
@@ -2262,7 +2320,6 @@ export default function Home() {
 
     setChats(nextChats);
     setActiveChatId(nextActiveId);
-    setExpandedReasoningIds({});
     setExpandedMetricsIds({});
 
     try {
@@ -2537,7 +2594,7 @@ export default function Home() {
           >
             <div
               className={cn(
-                "mx-auto flex w-full min-w-0 max-w-3xl flex-col",
+                "mx-auto flex w-full min-w-0 max-w-3xl flex-col [overflow-anchor:none]",
                 hasMessages ? "gap-4" : "h-full",
               )}
             >
@@ -2600,57 +2657,13 @@ export default function Home() {
                       {message.role === "assistant" &&
                         reasoning.trim() &&
                         (() => {
-                          const isExpanded = Boolean(
-                            expandedReasoningIds[message.id],
-                          );
-                          const reasoningLineCount = reasoning
-                            .trimEnd()
-                            .split(/\r?\n/).length;
-                          const canToggle = reasoningLineCount > 6;
-
                           return (
                             <article className="flex min-w-0 max-w-full justify-start">
                               <div className="w-full min-w-0 max-w-full overflow-hidden border border-dashed bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
-                                <div className="mb-2 flex items-center justify-between gap-3">
-                                  <div className="text-xs font-medium uppercase tracking-wide">
-                                    Thinking
-                                    {isMessageStreaming ? "..." : ""}
-                                  </div>
-                                  {canToggle && (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-6 rounded-none px-2 text-xs text-muted-foreground"
-                                      onClick={() =>
-                                        toggleReasoning(message.id)
-                                      }
-                                    >
-                                      {isExpanded ? (
-                                        <>
-                                          <ChevronUp className="size-3" />
-                                          Shrink
-                                        </>
-                                      ) : (
-                                        <>
-                                          <ChevronDown className="size-3" />
-                                          Expand
-                                        </>
-                                      )}
-                                    </Button>
-                                  )}
+                                <div className="mb-2 text-xs font-medium uppercase tracking-wide">
+                                  Thinking{isMessageStreaming ? "..." : ""}
                                 </div>
-                                <div
-                                  ref={registerReasoningScrollElement(
-                                    message.id,
-                                  )}
-                                  className={cn(
-                                    "min-w-0 text-xs leading-5",
-                                    isExpanded
-                                      ? "overflow-y-auto overflow-x-hidden pr-1"
-                                      : "flex max-h-40 flex-col justify-end overflow-hidden",
-                                  )}
-                                >
+                                <div className="min-w-0 overflow-visible text-xs leading-5">
                                   <SmoothAssistantMessageContent
                                     content={reasoning}
                                     className="chat-markdown-compact shrink-0"
@@ -2661,12 +2674,11 @@ export default function Home() {
                                       visualFlushRequests[message.id] ?? 0
                                     }
                                     forceInstant={Boolean(content)}
-                                    onVisualProgress={() => {
+                                    onVisualProgress={() =>
                                       handleAssistantVisualProgress(
                                         activeChat?.id ?? "",
-                                      );
-                                      scrollReasoningToBottom(message.id);
-                                    }}
+                                      )
+                                    }
                                     onVisualStreamingChange={(isStreaming) =>
                                       handleAssistantVisualStreamingChange(
                                         `${message.id}:reasoning`,
@@ -3021,23 +3033,26 @@ export default function Home() {
             </div>
           </div>
 
-          {hasMessages && isChatScrollable && showScrollToBottomButton && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 right-[-74px] z-10 px-3 md:px-4">
-              <div className="mx-auto flex w-full max-w-3xl justify-end">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="icon"
-                  className="pointer-events-auto rounded-none shadow-md opacity-80 hover:opacity-100"
-                  onClick={() => scrollChatToBottom()}
-                  title="Scroll to bottom"
-                  aria-label="Scroll to bottom"
-                >
-                  <ChevronDown className="size-4" />
-                </Button>
+          {hasMessages &&
+            isChatScrollable &&
+            !isNearChatBottom &&
+            showScrollToBottomButton && (
+              <div className="pointer-events-none absolute inset-x-0 bottom-0 right-[-74px] z-10 px-3 md:px-4">
+                <div className="mx-auto flex w-full max-w-3xl justify-end">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="icon"
+                    className="pointer-events-auto rounded-none shadow-md opacity-80 hover:opacity-100"
+                    onClick={() => scrollChatToBottom()}
+                    title="Scroll to bottom"
+                    aria-label="Scroll to bottom"
+                  >
+                    <ChevronDown className="size-4" />
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
         </div>
 
         <ChatComposer
