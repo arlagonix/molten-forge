@@ -12,6 +12,8 @@ import {
   MessageSquareText,
   Moon,
   MoreVertical,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Plus,
   RefreshCcw,
@@ -146,6 +148,7 @@ const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
 const STICKY_SCROLL_SETTLE_FRAMES = 3;
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
 
 const UserMessageEditor = memo(function UserMessageEditor({
   initialContent,
@@ -414,6 +417,13 @@ export default function Home() {
   const [isChatScrollable, setIsChatScrollable] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+
+    return (
+      window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true"
+    );
+  });
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
@@ -447,6 +457,13 @@ export default function Home() {
   useEffect(() => {
     document.title = APP_TITLE;
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      SIDEBAR_COLLAPSED_STORAGE_KEY,
+      String(isSidebarCollapsed),
+    );
+  }, [isSidebarCollapsed]);
 
   useEffect(() => {
     if (!messageContextMenu) return;
@@ -2342,14 +2359,28 @@ export default function Home() {
   }
 
   return (
-    <main className="flex h-dvh min-h-0 overflow-hidden bg-background text-foreground">
+    <main className="relative flex h-dvh min-h-0 overflow-hidden bg-background text-foreground">
       <aside
         data-sidebar
-        className="flex w-80 shrink-0 flex-col border-r bg-card/80"
+        className={cn(
+          "w-80 shrink-0 flex-col border-r bg-card/80",
+          isSidebarCollapsed ? "flex md:hidden" : "flex",
+        )}
       >
         <div className="border-b py-3 pl-3 pr-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="hidden shrink-0 rounded-none md:inline-flex"
+              onClick={() => setIsSidebarCollapsed(true)}
+              title="Hide sidebar"
+            >
+              <PanelLeftClose className="size-4" />
+            </Button>
+
+            <div className="min-w-0 flex-1">
               <h1 className="flex min-w-0 items-baseline gap-1 truncate text-sm font-semibold leading-5">
                 <span className="truncate">{APP_NAME}</span>
                 <span className="shrink-0 text-muted-foreground">
@@ -2404,9 +2435,6 @@ export default function Home() {
                 <DropdownMenuItem onClick={clearCurrentChat}>
                   <Trash2 className="size-4" />
                   <span className="flex-1">Clear current chat</span>
-                  <span className="text-xs text-muted-foreground">
-                    Ctrl+Delete
-                  </span>
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -2576,6 +2604,31 @@ export default function Home() {
           </Button>
         </div>
       </aside>
+
+      {isSidebarCollapsed ? (
+        <div className="absolute left-2 top-2 z-30 hidden items-center gap-1 border bg-card/95 p-1 shadow-sm md:flex">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="rounded-none"
+            onClick={() => setIsSidebarCollapsed(false)}
+            title="Show sidebar"
+          >
+            <PanelLeftOpen className="size-4" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="rounded-none"
+            onClick={createNewChat}
+            title="New chat (Ctrl+N)"
+          >
+            <Plus className="size-4" />
+          </Button>
+        </div>
+      ) : null}
 
       <section className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] bg-background">
         <div
