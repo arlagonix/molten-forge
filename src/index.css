@@ -61,6 +61,8 @@
   --code-title: oklch(0.38 0.09 245);
   --code-attr: oklch(0.46 0.1 35);
   --code-built-in: oklch(0.43 0.11 300);
+
+  --radius: 0.5rem;
 }
 
 .dark {
@@ -89,7 +91,7 @@
   --input: #3c3c3c;
   --ring: #637f95;
 
-  --code-bg: #1e1e1e;
+  --code-bg: #252526;
   --code-fg: #d4d4d4;
   --code-comment: #6a9955;
   --code-keyword: #c586c0;
@@ -248,15 +250,15 @@
   }
 
   .chat-markdown p {
-    @apply my-2;
+    @apply my-4;
   }
 
   .chat-markdown-compact p {
-    @apply my-1;
+    @apply my-2;
   }
 
   .chat-markdown ul {
-    @apply my-0 pl-5;
+    @apply my-2 pl-5;
   }
 
   .chat-markdown ol {
@@ -265,7 +267,7 @@
 
   .chat-markdown-compact ul,
   .chat-markdown-compact ol {
-    @apply my-0 pl-6;
+    @apply my-1 pl-6;
   }
 
   .chat-markdown ul {
@@ -277,7 +279,11 @@
   }
 
   .chat-markdown li {
-    @apply my-0;
+    @apply my-2;
+  }
+
+  .chat-markdown-compact li {
+    @apply my-1;
   }
 
   .chat-markdown li > p {
@@ -320,7 +326,7 @@
   }
 
   .chat-markdown table {
-    @apply my-3 block max-w-full table-auto border-collapse overflow-hidden;
+    @apply my-3 block max-w-full table-auto border-collapse overflow-hidden rounded-lg;
   }
 
   .chat-markdown th,
@@ -337,7 +343,7 @@
   }
 
   .chat-markdown .chat-code-block {
-    @apply relative my-4 w-full min-w-0 max-w-full border;
+    @apply relative my-4 w-full min-w-0 max-w-full border rounded-lg;
     background: var(--code-bg);
     border-color: var(--border);
     color: var(--code-fg);
@@ -357,6 +363,7 @@
     padding: 8px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--code-bg);
+    border-radius: var(--radius) var(--radius) 0 0;
   }
 
   .chat-markdown .chat-code-language {
@@ -368,7 +375,7 @@
   }
 
   .chat-markdown .chat-code-action {
-    @apply h-7 w-7 rounded-none border-0 bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground;
+    @apply h-7 w-7 rounded-lg border-0 bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground;
   }
 
   .chat-markdown .chat-code-action-active {
@@ -422,7 +429,6 @@
   .chat-markdown .hljs-comment,
   .chat-markdown .hljs-quote {
     color: var(--code-comment);
-    font-style: italic;
   }
 
   .chat-markdown .hljs-keyword,
@@ -471,7 +477,7 @@
   }
 
   .chat-markdown .hljs-emphasis {
-    font-style: italic;
+    font-style: oblique 8deg;
   }
 
   .chat-markdown .hljs-strong {

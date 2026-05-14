@@ -178,7 +178,7 @@ const UserMessageEditor = memo(function UserMessageEditor({
   return (
     <div className="grid min-w-0 max-w-full gap-2">
       <article className="flex justify-end">
-        <div className="min-w-0 w-full max-w-[85%] overflow-hidden bg-primary px-4 py-3 text-sm leading-6 text-primary-foreground shadow-xs [overflow-wrap:anywhere]">
+        <div className="min-w-0 w-full overflow-hidden bg-primary rounded-lg px-4 py-3 text-sm leading-6 text-primary-foreground shadow-xs [overflow-wrap:anywhere]">
           <Textarea
             value={content}
             onChange={(event) => setContent(event.target.value)}
@@ -195,7 +195,7 @@ const UserMessageEditor = memo(function UserMessageEditor({
             }}
             autoFocus
             disabled={disabled}
-            className="min-h-[32rem] max-h-[32rem] w-full resize-y rounded-none border-0 bg-transparent p-0 text-primary-foreground shadow-none outline-none placeholder:text-primary-foreground/60 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-80"
+            className="min-h-[12rem] max-h-[32rem] w-full resize-y rounded-none border-0 !bg-transparent p-0 text-primary-foreground shadow-none outline-none placeholder:text-primary-foreground/60 focus-visible:ring-0 focus-visible:ring-offset-0 disabled:cursor-not-allowed disabled:opacity-80"
           />
         </div>
       </article>
@@ -205,7 +205,7 @@ const UserMessageEditor = memo(function UserMessageEditor({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 rounded-none px-2 text-xs text-muted-foreground"
+          className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
           onClick={handleSave}
           disabled={disabled || !trimmedContent}
           title="Save edit and regenerate"
@@ -217,7 +217,7 @@ const UserMessageEditor = memo(function UserMessageEditor({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-6 rounded-none px-2 text-xs text-muted-foreground"
+          className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
           onClick={onCancel}
           disabled={disabled}
           title="Cancel edit"
@@ -308,7 +308,7 @@ const ChatComposer = memo(
         className="bg-background px-3 py-3 md:px-4 md:py-4"
         data-draft-input
       >
-        <div className="mx-auto w-full max-w-3xl border bg-card p-3 pt-0 shadow-sm">
+        <div className="mx-auto w-full max-w-3xl border rounded-lg bg-card p-3 pt-0 shadow-sm">
           <div className="mx-auto grid w-full gap-2">
             <Textarea
               ref={textareaRef}
@@ -333,7 +333,7 @@ const ChatComposer = memo(
                   type="button"
                   variant="secondary"
                   onClick={onStop}
-                  className="shrink-0 rounded-none"
+                  className="shrink-0 rounded-lg"
                   title="Stop generation"
                 >
                   <Square className="size-4" />
@@ -343,7 +343,7 @@ const ChatComposer = memo(
                 <Button
                   type="submit"
                   disabled={!canSend}
-                  className="shrink-0 rounded-none"
+                  className="shrink-0 rounded-lg"
                   title="Send message"
                 >
                   <Send className="size-4" />
@@ -2391,7 +2391,7 @@ export default function Home() {
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="rounded-none"
+          className="rounded-lg"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             window.requestAnimationFrame(() => {
@@ -2442,7 +2442,7 @@ export default function Home() {
             role="combobox"
             disabled={!activeChat || isSending}
             aria-expanded={isSidebarModelComboboxOpen}
-            className="model-picker-trigger h-9 w-full max-w-[14rem] justify-between overflow-hidden rounded-none px-3 text-left font-normal"
+            className="model-picker-trigger h-9 w-full max-w-[14rem] justify-between overflow-hidden rounded-lg px-3 text-left font-normal"
             title={
               isSending
                 ? "Wait until this chat finishes generating"
@@ -2464,7 +2464,7 @@ export default function Home() {
         </PopoverTrigger>
         <PopoverContent
           align="start"
-          className="w-[min(var(--radix-popover-trigger-width),24rem)] rounded-none p-0"
+          className="w-[min(var(--radix-popover-trigger-width),24rem)] rounded-lg p-0"
         >
           <Command shouldFilter={false}>
             <CommandInput
@@ -2538,7 +2538,7 @@ export default function Home() {
               type="button"
               variant="ghost"
               size="icon-sm"
-              className="hidden shrink-0 rounded-none md:inline-flex"
+              className="hidden shrink-0 rounded-lg md:inline-flex"
               onClick={() => setIsSidebarCollapsed(true)}
               title="Hide sidebar"
             >
@@ -2554,7 +2554,7 @@ export default function Home() {
               </h1>
             </div>
 
-            {renderAppOptionsMenu("shrink-0 rounded-none")}
+            {renderAppOptionsMenu("shrink-0 rounded-lg")}
           </div>
         </div>
 
@@ -2572,7 +2572,7 @@ export default function Home() {
                       role="button"
                       tabIndex={0}
                       className={cn(
-                        "group flex min-w-0 cursor-pointer items-center gap-1 border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "group flex min-w-0 cursor-pointer items-center gap-1 border rounded-lg px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         chat.id === activeChat?.id
                           ? "border-primary/30 bg-accent text-accent-foreground"
                           : "border-transparent hover:border-border hover:bg-muted/60",
@@ -2601,7 +2601,7 @@ export default function Home() {
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="h-7 w-7 shrink-0 rounded-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                        className="h-7 w-7 shrink-0 rounded-lg opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                         onClick={(event) => {
                           event.stopPropagation();
                           removeChat(chat.id);
@@ -2622,7 +2622,7 @@ export default function Home() {
           <Button
             type="button"
             variant="secondary"
-            className="w-full justify-center rounded-none"
+            className="w-full justify-center rounded-lg"
             onClick={createNewChat}
             title="New chat (Ctrl+N)"
           >
@@ -2633,12 +2633,12 @@ export default function Home() {
       </aside>
 
       {isSidebarCollapsed ? (
-        <div className="absolute left-2 top-2 z-30 hidden items-center gap-1 border bg-card/95 p-1 shadow-sm md:flex">
+        <div className="absolute left-2 top-2 z-30 hidden items-center gap-1 rounded-lg border bg-card/95 p-1 shadow-sm md:flex">
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="rounded-none"
+            className="rounded-lg"
             onClick={() => setIsSidebarCollapsed(false)}
             title="Show sidebar"
           >
@@ -2648,13 +2648,13 @@ export default function Home() {
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="rounded-none"
+            className="rounded-lg"
             onClick={createNewChat}
             title="New chat (Ctrl+N)"
           >
             <Plus className="size-4" />
           </Button>
-          {renderAppOptionsMenu("rounded-none")}
+          {renderAppOptionsMenu("rounded-lg")}
         </div>
       ) : null}
 
@@ -2682,7 +2682,7 @@ export default function Home() {
             >
               {!hasMessages ? (
                 <div className="flex h-full items-center justify-center px-3">
-                  <div className="max-w-md border bg-card p-6 text-center shadow-xs">
+                  <div className="max-w-md rounded-lg border bg-card p-6 text-center shadow-xs">
                     <h2 className="text-sm font-semibold">
                       Start a conversation
                     </h2>
@@ -2692,7 +2692,7 @@ export default function Home() {
                     </p>
                     <div className="mt-4 flex justify-center gap-2">
                       <Button
-                        className="rounded-none"
+                        className="rounded-lg"
                         variant="secondary"
                         onClick={() => setSettingsOpen(true)}
                       >
@@ -2741,7 +2741,7 @@ export default function Home() {
                         (() => {
                           return (
                             <article className="flex min-w-0 max-w-full justify-start">
-                              <div className="w-full min-w-0 max-w-full overflow-hidden border border-dashed bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+                              <div className="w-full min-w-0 max-w-full overflow-hidden border border-dashed rounded-lg bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere] ">
                                 <div className="mb-2 text-xs font-medium uppercase tracking-wide">
                                   Thinking{isMessageStreaming ? "..." : ""}
                                 </div>
@@ -2802,10 +2802,10 @@ export default function Home() {
                             >
                               <div
                                 className={cn(
-                                  "min-w-0 text-sm leading-6 [overflow-wrap:anywhere] w-full",
+                                  "min-w-0 text-sm leading-6 [overflow-wrap:anywhere] w-full rounded-lg",
                                   message.role === "user"
                                     ? "max-h-[32rem] overflow-y-auto overflow-x-hidden chat-message-scrollbar bg-primary px-4 py-3 text-primary-foreground shadow-xs"
-                                    : "min-w-0 max-w-full overflow-visible bg-card px-4 py-3 text-card-foreground shadow-xs",
+                                    : "min-w-0 max-w-full overflow-visible px-0 py-3 text-card-foreground shadow-xs",
                                   status === "error" && "border-destructive/50",
                                 )}
                               >
@@ -2841,7 +2841,7 @@ export default function Home() {
                             {messageContextMenu?.messageId === message.id && (
                               <div
                                 data-message-context-menu
-                                className="fixed z-50 min-w-55 border bg-popover p-1 text-sm text-popover-foreground shadow-md"
+                                className="fixed z-50 min-w-55 rounded-lg border bg-popover p-1 text-sm text-popover-foreground shadow-md"
                                 style={{
                                   left: messageContextMenu.x,
                                   top: messageContextMenu.y,
@@ -2854,7 +2854,7 @@ export default function Home() {
                                   <>
                                     <button
                                       type="button"
-                                      className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                                       onClick={() => {
                                         void copyLinkHref(
                                           messageContextMenu.linkHref,
@@ -2870,7 +2870,7 @@ export default function Home() {
                                 )}
                                 <button
                                   type="button"
-                                  className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                                   disabled={
                                     !messageContextMenu.selectedText.trim() &&
                                     !content.trim()
@@ -2894,7 +2894,7 @@ export default function Home() {
                                 {message.role === "assistant" && (
                                   <button
                                     type="button"
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                                     disabled={isSending}
                                     onClick={() => {
                                       void regenerateAssistantMessage(
@@ -2912,7 +2912,7 @@ export default function Home() {
                                 {message.role === "user" && (
                                   <button
                                     type="button"
-                                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                                     disabled={isSending}
                                     onClick={() => {
                                       startEditingUserMessage(message.id);
@@ -2926,7 +2926,7 @@ export default function Home() {
                                 <div className="-mx-1 my-1 h-px bg-border" />
                                 <button
                                   type="button"
-                                  className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-destructive/20"
+                                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-destructive/20"
                                   disabled={isSending}
                                   onClick={() => {
                                     deleteMessage(message.id);
@@ -2949,7 +2949,7 @@ export default function Home() {
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-6 rounded-none px-2 text-xs text-muted-foreground"
+                              className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
                               onClick={() =>
                                 copyMessageContent(message.id, message.content)
                               }
@@ -2973,7 +2973,7 @@ export default function Home() {
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-6 rounded-none px-2 text-xs text-muted-foreground"
+                              className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
                               onClick={() =>
                                 startEditingUserMessage(message.id)
                               }
@@ -3017,7 +3017,7 @@ export default function Home() {
                                     type="button"
                                     variant="ghost"
                                     size="icon-sm"
-                                    className="h-6 w-6 rounded-none text-muted-foreground"
+                                    className="h-6 w-6 rounded-lg text-muted-foreground"
                                     onClick={() =>
                                       selectAssistantVariant(
                                         message.id,
@@ -3039,7 +3039,7 @@ export default function Home() {
                                     type="button"
                                     variant="ghost"
                                     size="icon-sm"
-                                    className="h-6 w-6 rounded-none text-muted-foreground"
+                                    className="h-6 w-6 rounded-lg text-muted-foreground"
                                     onClick={() =>
                                       selectAssistantVariant(
                                         message.id,
@@ -3061,7 +3061,7 @@ export default function Home() {
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                className="h-6 rounded-none px-2 text-xs text-muted-foreground"
+                                className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
                                 onClick={() =>
                                   copyMessageContent(message.id, content)
                                 }
@@ -3085,7 +3085,7 @@ export default function Home() {
                                 type="button"
                                 variant="ghost"
                                 size="sm"
-                                className="h-6 rounded-none px-2 text-xs text-muted-foreground"
+                                className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
                                 onClick={() =>
                                   regenerateAssistantMessage(message.id)
                                 }
@@ -3125,7 +3125,7 @@ export default function Home() {
                     type="button"
                     variant="secondary"
                     size="icon"
-                    className="pointer-events-auto rounded-none shadow-md opacity-80 hover:opacity-100"
+                    className="pointer-events-auto rounded-lg shadow-md opacity-80 hover:opacity-100"
                     onClick={() => scrollChatToBottom()}
                     title="Scroll to bottom"
                     aria-label="Scroll to bottom"
@@ -3167,7 +3167,7 @@ export default function Home() {
                   type="button"
                   variant="secondary"
                   size="sm"
-                  className="h-7 rounded-none px-2 text-xs"
+                  className="h-7 rounded-lg px-2 text-xs"
                   onClick={addProvider}
                 >
                   <Plus className="size-3.5" />
@@ -3182,7 +3182,7 @@ export default function Home() {
                     role="button"
                     tabIndex={0}
                     className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       item.id === activeProvider.id
                         ? "border-primary/30 bg-accent text-accent-foreground"
                         : "border-transparent hover:border-border hover:bg-muted/60",
@@ -3219,14 +3219,14 @@ export default function Home() {
                           type="button"
                           variant="ghost"
                           size="icon-sm"
-                          className="h-7 w-7 shrink-0 rounded-none opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+                          className="h-7 w-7 shrink-0 rounded-lg opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
                           onClick={(event) => event.stopPropagation()}
                           title="Provider actions"
                         >
                           <MoreVertical className="size-3.5" />
                         </Button>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="rounded-none">
+                      <DropdownMenuContent align="end" className="rounded-lg">
                         <DropdownMenuItem
                           onClick={(event) => {
                             event.stopPropagation();
@@ -3282,7 +3282,7 @@ export default function Home() {
                       onChange={(event) =>
                         updateProviderSetting({ name: event.target.value })
                       }
-                      placeholder="LM Studio"
+                      placeholder="Provide the provider name"
                     />
                   </div>
 
@@ -3309,7 +3309,7 @@ export default function Home() {
                         onChange={(event) =>
                           updateProviderSetting({ apiKey: event.target.value })
                         }
-                        placeholder="not-needed"
+                        placeholder="Provide your API key"
                         type={isApiKeyVisible ? "text" : "password"}
                         className="pr-10"
                       />
@@ -3317,7 +3317,7 @@ export default function Home() {
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-none text-muted-foreground"
+                        className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-lg text-muted-foreground"
                         onClick={() =>
                           setIsApiKeyVisible((current) => !current)
                         }
@@ -3335,7 +3335,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 border bg-card p-3">
+                <div className="grid gap-3 rounded-lg border bg-card p-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <Label>Visible models</Label>
@@ -3349,7 +3349,7 @@ export default function Home() {
                         type="button"
                         variant="secondary"
                         size="sm"
-                        className="rounded-none"
+                        className="rounded-lg"
                         onClick={() => loadModelsFromProvider(activeProvider)}
                         disabled={
                           isLoadingModels || !activeProvider.baseUrl.trim()
@@ -3367,7 +3367,7 @@ export default function Home() {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="rounded-none"
+                        className="rounded-lg"
                         onClick={() =>
                           updateProviderSetting({
                             enabledModelIds: normalizeProviderModels(
@@ -3383,7 +3383,7 @@ export default function Home() {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="rounded-none"
+                        className="rounded-lg"
                         onClick={() =>
                           updateProviderSetting({
                             enabledModelIds: [],
@@ -3399,7 +3399,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="max-h-64 overflow-y-auto border bg-background p-2">
+                  <div className="max-h-64 overflow-y-auto rounded-lg border bg-background p-2">
                     {(activeProvider.models ?? []).length > 0 ? (
                       <div className="grid gap-1">
                         {(activeProvider.models ?? []).map((model) => {
@@ -3410,7 +3410,7 @@ export default function Home() {
                           return (
                             <label
                               key={model}
-                              className="flex min-w-0 cursor-pointer items-center gap-2 px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
+                              className="flex min-w-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-accent hover:text-accent-foreground"
                             >
                               <input
                                 type="checkbox"
@@ -3453,7 +3453,7 @@ export default function Home() {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="rounded-none"
+                      className="rounded-lg"
                       onClick={resetActiveModelSettings}
                     >
                       Reset
@@ -3600,7 +3600,7 @@ export default function Home() {
             <Button
               type="button"
               variant="secondary"
-              className="rounded-none"
+              className="rounded-lg"
               onClick={() =>
                 updateProviderSetting({
                   ...defaultProvider,
@@ -3614,7 +3614,7 @@ export default function Home() {
             </Button>
             <Button
               type="button"
-              className="rounded-none"
+              className="rounded-lg"
               onClick={saveSettingsChanges}
             >
               Save
@@ -3624,7 +3624,7 @@ export default function Home() {
       </Dialog>
 
       <Dialog open={systemPromptOpen} onOpenChange={setSystemPromptOpen}>
-        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden rounded-none p-0 sm:max-w-2xl">
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden rounded-lg p-0 sm:max-w-2xl">
           <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
             <DialogTitle>System prompt</DialogTitle>
             <DialogDescription>
@@ -3647,14 +3647,14 @@ export default function Home() {
             <Button
               type="button"
               variant="secondary"
-              className="rounded-none"
+              className="rounded-lg"
               onClick={() => setSystemPrompt("You are a helpful assistant.")}
             >
               Reset
             </Button>
             <Button
               type="button"
-              className="rounded-none"
+              className="rounded-lg"
               onClick={async () => {
                 try {
                   await saveSystemPrompt(systemPrompt);
