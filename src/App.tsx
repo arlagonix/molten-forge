@@ -138,6 +138,7 @@ import {
   deleteTool as deleteStoredTool,
 } from "@/lib/ai-chat/storage";
 import type {
+  ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatMessage,
   ChatToolCall,
@@ -187,7 +188,11 @@ function createBlankToolDraft(): ToolDraft {
     name: "",
     enabled: true,
     description: "",
-    parametersText: JSON.stringify({ type: "object", properties: {}, required: [] }, null, 2),
+    parametersText: JSON.stringify(
+      { type: "object", properties: {}, required: [] },
+      null,
+      2,
+    ),
     command: "",
     argsText: "",
     cwd: "",
@@ -424,6 +429,7 @@ type StreamBuffer = {
   variantId: string;
   content: string;
   reasoning: string;
+  reasoningStepId?: string;
 };
 
 type ActiveGeneration = {
@@ -461,7 +467,8 @@ export default function Home() {
   const [isSavingTool, setIsSavingTool] = useState(false);
   const [isTestingTool, setIsTestingTool] = useState(false);
   const [toolTestArgsText, setToolTestArgsText] = useState("{}");
-  const [toolTestResult, setToolTestResult] = useState<ToolCommandResult | null>(null);
+  const [toolTestResult, setToolTestResult] =
+    useState<ToolCommandResult | null>(null);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -617,8 +624,7 @@ export default function Home() {
     model: "",
   });
   const selectedTool =
-    loadedTools.find((tool) => tool.name === selectedToolName) ??
-    null;
+    loadedTools.find((tool) => tool.name === selectedToolName) ?? null;
   const modelSuggestions = useMemo(() => {
     return normalizeProviderModels([
       ...(activeProvider.models ?? []),
@@ -850,7 +856,10 @@ export default function Home() {
 
     if (isEditingUnsavedTool) return;
 
-    if (!selectedToolName || !loadedTools.some((tool) => tool.name === selectedToolName)) {
+    if (
+      !selectedToolName ||
+      !loadedTools.some((tool) => tool.name === selectedToolName)
+    ) {
       setSelectedToolName(loadedTools[0].name);
     }
   }, [loadedTools, selectedToolName, toolDraft]);
@@ -1341,11 +1350,15 @@ export default function Home() {
       setLoadedTools(tools);
       setToolLoadErrors([]);
       if (showToast) {
-        showSuccess(`Loaded ${tools.length} tool${tools.length === 1 ? "" : "s"}.`);
+        showSuccess(
+          `Loaded ${tools.length} tool${tools.length === 1 ? "" : "s"}.`,
+        );
       }
     } catch (error) {
       console.error("Failed to load tools:", error);
-      setToolLoadErrors([{ source: "Tools storage", message: labelForError(error) }]);
+      setToolLoadErrors([
+        { source: "Tools storage", message: labelForError(error) },
+      ]);
       showError("Failed to load tools", labelForError(error));
     } finally {
       setIsLoadingTools(false);
@@ -1368,9 +1381,34 @@ export default function Home() {
     }
   }
 
-  function renderJsonCodeBlock(value: string) {
+  function renderJsonCodeBlock(
+    value: string,
+    className = "chat-markdown-compact",
+  ) {
     const normalized = formatJsonLikeCodeBlock(value);
-    return <MarkdownMessage content={`~~~json\n${normalized}\n~~~`} />;
+    return (
+      <MarkdownMessage
+        className={className}
+        content={`~~~json\n${normalized}\n~~~`}
+      />
+    );
+  }
+
+  function hasMeaningfulToolInput(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed == null) return false;
+      if (typeof parsed === "object" && !Array.isArray(parsed)) {
+        return Object.keys(parsed).length > 0;
+      }
+      if (Array.isArray(parsed)) return parsed.length > 0;
+      return true;
+    } catch {
+      return Boolean(trimmed);
+    }
   }
 
   function extractTemplatePlaceholders(args: string[]) {
@@ -1411,14 +1449,19 @@ export default function Home() {
       args,
       cwd: draft.cwd.trim() || undefined,
       input: draft.input,
-      timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.round(timeoutMs) : 30000,
+      timeoutMs:
+        Number.isFinite(timeoutMs) && timeoutMs > 0
+          ? Math.round(timeoutMs)
+          : 30000,
     };
   }
 
   function validateToolDraft(tool: LoadedToolInfo) {
     if (!tool.name) throw new Error("Tool name is required.");
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name)) {
-      throw new Error("Tool name must use only letters, numbers, underscores, or hyphens.");
+      throw new Error(
+        "Tool name must use only letters, numbers, underscores, or hyphens.",
+      );
     }
     if (!tool.description) throw new Error("Tool description is required.");
     if (tool.parameters.type !== "object") {
@@ -1433,17 +1476,23 @@ export default function Home() {
         ? Object.keys(tool.parameters.properties as Record<string, unknown>)
         : [];
     const required = Array.isArray(tool.parameters.required)
-      ? tool.parameters.required.filter((item): item is string => typeof item === "string")
+      ? tool.parameters.required.filter(
+          (item): item is string => typeof item === "string",
+        )
       : [];
     const propertySet = new Set(properties);
     const requiredSet = new Set(required);
 
     for (const placeholder of extractTemplatePlaceholders(tool.args)) {
       if (!propertySet.has(placeholder)) {
-        throw new Error(`Unknown placeholder: ${placeholder}. Add it to schema properties or update args.`);
+        throw new Error(
+          `Unknown placeholder: ${placeholder}. Add it to schema properties or update args.`,
+        );
       }
       if (!requiredSet.has(placeholder)) {
-        throw new Error(`Placeholder ${placeholder} is used in args, so it must be listed in schema.required for now.`);
+        throw new Error(
+          `Placeholder ${placeholder} is used in args, so it must be listed in schema.required for now.`,
+        );
       }
     }
   }
@@ -1476,7 +1525,9 @@ export default function Home() {
 
     try {
       await deleteStoredTool(toolDraft.id);
-      setLoadedTools((current) => current.filter((tool) => tool.id !== toolDraft.id));
+      setLoadedTools((current) =>
+        current.filter((tool) => tool.id !== toolDraft.id),
+      );
       setToolDraft(null);
       setSelectedToolName(null);
       setToolTestResult(null);
@@ -1579,6 +1630,7 @@ export default function Home() {
     assistantMessageId: string,
     variantId: string,
     patch: Partial<Pick<ChatAssistantVariant, "content" | "reasoning">>,
+    options: { reasoningStepId?: string } = {},
   ) {
     updateChatMessages(
       chatId,
@@ -1596,14 +1648,26 @@ export default function Home() {
             variants: message.variants.map((variant) => {
               if (variant.id !== variantId) return variant;
 
+              const nextReasoning = patch.reasoning
+                ? `${variant.reasoning ?? ""}${patch.reasoning}`
+                : variant.reasoning;
+              const nextProcessSteps =
+                patch.reasoning && options.reasoningStepId
+                  ? (variant.processSteps ?? []).map((step) =>
+                      step.id === options.reasoningStepId &&
+                      step.type === "thinking"
+                        ? { ...step, content: step.content + patch.reasoning }
+                        : step,
+                    )
+                  : variant.processSteps;
+
               return {
                 ...variant,
                 content: patch.content
                   ? variant.content + patch.content
                   : variant.content,
-                reasoning: patch.reasoning
-                  ? `${variant.reasoning ?? ""}${patch.reasoning}`
-                  : variant.reasoning,
+                reasoning: nextReasoning,
+                processSteps: nextProcessSteps,
               };
             }),
           };
@@ -1638,6 +1702,7 @@ export default function Home() {
         content: buffered.content || undefined,
         reasoning: buffered.reasoning || undefined,
       },
+      { reasoningStepId: buffered.reasoningStepId },
     );
   }
 
@@ -1664,6 +1729,7 @@ export default function Home() {
     assistantMessageId: string,
     variantId: string,
     patch: Partial<Pick<ChatAssistantVariant, "content" | "reasoning">>,
+    options: { reasoningStepId?: string } = {},
   ) {
     const bufferKey = getStreamBufferKey(chatId, assistantMessageId, variantId);
     const buffered = streamBuffersRef.current[bufferKey] ?? {
@@ -1682,6 +1748,7 @@ export default function Home() {
       reasoning: patch.reasoning
         ? buffered.reasoning + patch.reasoning
         : buffered.reasoning,
+      reasoningStepId: options.reasoningStepId ?? buffered.reasoningStepId,
     };
 
     scheduleBufferedAssistantFlush(bufferKey);
@@ -1713,6 +1780,26 @@ export default function Home() {
           };
         }),
       options,
+    );
+  }
+
+  function appendAssistantProcessSteps(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    steps: ChatAssistantProcessStep[],
+  ) {
+    if (!steps.length) return;
+
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: [...(variant.processSteps ?? []), ...steps],
+      }),
+      { touch: false },
     );
   }
 
@@ -2153,6 +2240,17 @@ export default function Home() {
           ...variant,
           toolCalls: [...(variant.toolCalls ?? []), ...toolCalls],
           toolResults: [...(variant.toolResults ?? []), ...toolResults],
+          processSteps: [
+            ...(variant.processSteps ?? []),
+            ...toolCalls.map((toolCall) => ({
+              id: createId(),
+              type: "tool_execution" as const,
+              toolCall,
+              toolResult: toolResults.find(
+                (toolResult) => toolResult.toolCallId === toolCall.id,
+              ),
+            })),
+          ],
         }),
         { touch: false },
       );
@@ -2193,6 +2291,11 @@ export default function Home() {
         | undefined;
 
       for (let toolRound = 0; toolRound <= MAX_TOOL_ROUNDS; toolRound += 1) {
+        const thinkingStepId = createId();
+        appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
+          { id: thinkingStepId, type: "thinking", content: "" },
+        ]);
+
         const streamResult = await streamProviderChat({
           provider: providerForRun,
           systemPrompt,
@@ -2224,6 +2327,7 @@ export default function Home() {
               {
                 reasoning: delta,
               },
+              { reasoningStepId: thinkingStepId },
             );
 
             if (chatId === activeChatId) {
@@ -2369,6 +2473,7 @@ export default function Home() {
           metrics: {
             startedAt: responseStartedAt,
           },
+          processSteps: [],
         },
       ],
       activeVariantIndex: 0,
@@ -2467,6 +2572,7 @@ export default function Home() {
                 metrics: {
                   startedAt: responseStartedAt,
                 },
+                processSteps: [],
               },
             ],
             activeVariantIndex: message.variants.length,
@@ -2668,6 +2774,7 @@ export default function Home() {
           metrics: {
             startedAt: responseStartedAt,
           },
+          processSteps: [],
         },
       ],
       activeVariantIndex: 0,
@@ -3141,6 +3248,8 @@ export default function Home() {
                   const reasoning = activeVariant?.reasoning ?? "";
                   const toolCalls = activeVariant?.toolCalls ?? [];
                   const toolResults = activeVariant?.toolResults ?? [];
+                  const processSteps = activeVariant?.processSteps ?? [];
+                  const hasProcessSteps = processSteps.length > 0;
                   const status = activeVariant?.status;
                   const metrics = activeVariant?.metrics;
                   const isVisuallyStreaming = visualStreamingMessageIds.some(
@@ -3164,12 +3273,134 @@ export default function Home() {
                       data-message-id={message.id}
                       className="grid min-w-0 max-w-full"
                     >
+                      {message.role === "assistant" && hasProcessSteps && (
+                        <div className="grid gap-2">
+                          {processSteps.map((step) => {
+                            if (step.type === "thinking") {
+                              if (!step.content.trim()) return null;
+
+                              const isLatestProcessStep =
+                                processSteps[processSteps.length - 1]?.id ===
+                                step.id;
+                              const isThinkingStreaming =
+                                status === "streaming" &&
+                                isLatestProcessStep &&
+                                !content;
+
+                              return (
+                                <article
+                                  key={step.id}
+                                  className="flex min-w-0 max-w-full justify-start"
+                                >
+                                  <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-dashed bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+                                    <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
+                                      <Brain className="size-3.5" />
+                                      Thinking{isThinkingStreaming ? "..." : ""}
+                                    </div>
+                                    <div className="min-w-0 overflow-visible text-xs leading-5">
+                                      <SmoothAssistantMessageContent
+                                        content={step.content}
+                                        className="chat-markdown-compact shrink-0"
+                                        isApiStreaming={isThinkingStreaming}
+                                        flushVersion={
+                                          visualFlushRequests[
+                                            `${message.id}:${step.id}`
+                                          ] ?? 0
+                                        }
+                                        forceInstant={Boolean(content)}
+                                        onVisualProgress={() =>
+                                          handleAssistantVisualProgress(
+                                            activeChat?.id ?? "",
+                                          )
+                                        }
+                                        onVisualStreamingChange={(
+                                          isStreaming,
+                                        ) =>
+                                          handleAssistantVisualStreamingChange(
+                                            `${message.id}:${step.id}`,
+                                            isStreaming,
+                                          )
+                                        }
+                                      />
+                                    </div>
+                                  </div>
+                                </article>
+                              );
+                            }
+
+                            const result = step.toolResult;
+
+                            return (
+                              <article
+                                key={step.id}
+                                className="flex min-w-0 max-w-full justify-start"
+                              >
+                                <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/25 px-4 py-3 text-xs leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+                                  <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                    <Wrench className="size-3.5" />
+                                    <span>{step.toolCall.function.name}</span>
+                                    <span className="text-muted-foreground/60">
+                                      •
+                                    </span>
+                                    {result ? (
+                                      <span
+                                        className={cn(
+                                          "inline-flex items-center gap-1",
+                                          result.isError
+                                            ? "text-red-600 dark:text-red-400"
+                                            : "text-green-600 dark:text-green-400",
+                                        )}
+                                      >
+                                        {result.isError ? (
+                                          <X className="size-3.5" />
+                                        ) : (
+                                          <Check className="size-3.5" />
+                                        )}
+                                        {result.isError ? "Failed" : "Complete"}
+                                      </span>
+                                    ) : (
+                                      <span className="text-muted-foreground/80">
+                                        Running
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="grid gap-3">
+                                    {hasMeaningfulToolInput(
+                                      step.toolCall.function.arguments || "",
+                                    ) && (
+                                      <div className="grid gap-1.5">
+                                        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                                          Input
+                                        </div>
+                                        {renderJsonCodeBlock(
+                                          step.toolCall.function.arguments ||
+                                            "{}",
+                                        )}
+                                      </div>
+                                    )}
+                                    {result && (
+                                      <div className="grid gap-1.5">
+                                        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                                          Output
+                                        </div>
+                                        {renderJsonCodeBlock(result.content)}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      )}
+
                       {message.role === "assistant" &&
+                        !hasProcessSteps &&
                         reasoning.trim() &&
                         (() => {
                           return (
                             <article className="flex min-w-0 max-w-full justify-start">
-                              <div className="w-full min-w-0 max-w-full overflow-hidden border border-dashed rounded-lg bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere] ">
+                              <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-dashed bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
                                 <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
                                   <Brain className="size-3.5" />
                                   Thinking{isMessageStreaming ? "..." : ""}
@@ -3203,50 +3434,79 @@ export default function Home() {
                           );
                         })()}
 
-                      {message.role === "assistant" && toolCalls.length > 0 && (
-                        <div className="grid gap-2">
-                          {toolCalls.map((toolCall) => {
-                            const result = toolResults.find(
-                              (item) => item.toolCallId === toolCall.id,
-                            );
+                      {message.role === "assistant" &&
+                        !hasProcessSteps &&
+                        toolCalls.length > 0 && (
+                          <div className="grid gap-2">
+                            {toolCalls.map((toolCall) => {
+                              const result = toolResults.find(
+                                (item) => item.toolCallId === toolCall.id,
+                              );
 
-                            return (
-                              <div key={toolCall.id} className="grid gap-2">
-                                <article className="flex min-w-0 max-w-full justify-start mt-2">
-                                  <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/30 px-4 py-3 text-sm shadow-xs [overflow-wrap:anywhere]">
-                                    <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                              return (
+                                <article
+                                  key={toolCall.id}
+                                  className="flex min-w-0 max-w-full justify-start"
+                                >
+                                  <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/25 px-4 py-3 text-xs leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+                                    <div className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                                       <Wrench className="size-3.5" />
-                                      Tool call: {toolCall.function.name}
+                                      <span>{toolCall.function.name}</span>
+                                      <span className="text-muted-foreground/60">
+                                        •
+                                      </span>
+                                      {result ? (
+                                        <span
+                                          className={cn(
+                                            "inline-flex items-center gap-1",
+                                            result.isError
+                                              ? "text-red-600 dark:text-red-400"
+                                              : "text-green-600 dark:text-green-400",
+                                          )}
+                                        >
+                                          {result.isError ? (
+                                            <X className="size-3.5" />
+                                          ) : (
+                                            <Check className="size-3.5" />
+                                          )}
+                                          {result.isError
+                                            ? "Failed"
+                                            : "Complete"}
+                                        </span>
+                                      ) : (
+                                        <span className="text-muted-foreground/80">
+                                          Running
+                                        </span>
+                                      )}
                                     </div>
-                                    {renderJsonCodeBlock(
-                                      toolCall.function.arguments || "{}",
-                                    )}
+                                    <div className="grid gap-3">
+                                      {hasMeaningfulToolInput(
+                                        toolCall.function.arguments || "",
+                                      ) && (
+                                        <div className="grid gap-1.5">
+                                          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                                            Input
+                                          </div>
+                                          {renderJsonCodeBlock(
+                                            toolCall.function.arguments || "{}",
+                                          )}
+                                        </div>
+                                      )}
+                                      {result && (
+                                        <div className="grid gap-1.5">
+                                          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                                            Output
+                                          </div>
+                                          {renderJsonCodeBlock(result.content)}
+                                        </div>
+                                      )}
+                                    </div>
                                   </div>
                                 </article>
-
-                                {result && (
-                                  <article className="flex min-w-0 max-w-full justify-start">
-                                    <div
-                                      className={cn(
-                                        "w-full min-w-0 max-w-full overflow-hidden rounded-lg border px-4 py-3 text-sm shadow-xs [overflow-wrap:anywhere]",
-                                        result.isError
-                                          ? "border-destructive/50 bg-destructive/5"
-                                          : "bg-muted/20",
-                                      )}
-                                    >
-                                      <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                        <Wrench className="size-3.5" />
-                                        Tool result: {result.toolName}
-                                      </div>
-                                      {renderJsonCodeBlock(result.content)}
-                                    </div>
-                                  </article>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                              );
+                            })}
+                          </div>
+                        )}
 
                       {message.role === "user" &&
                       editingMessageId === message.id ? (
@@ -3912,7 +4172,6 @@ export default function Home() {
                   </div>
                 </div>
 
-
                 <Separator />
 
                 <div className="grid gap-3">
@@ -4103,7 +4362,8 @@ export default function Home() {
           <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
             <DialogTitle>Tools</DialogTitle>
             <DialogDescription>
-              Define local command tools, choose which ones are available to the model, and test them before use.
+              Define local command tools, choose which ones are available to the
+              model, and test them before use.
             </DialogDescription>
           </DialogHeader>
 
@@ -4120,9 +4380,12 @@ export default function Home() {
 
               <label className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-sm">
                 <span className="min-w-0">
-                  <span className="block font-medium">Enable tools globally</span>
+                  <span className="block font-medium">
+                    Enable tools globally
+                  </span>
                   <span className="block text-xs leading-5 text-muted-foreground">
-                    Disabled globally means no tool schemas are sent to the model.
+                    Disabled globally means no tool schemas are sent to the
+                    model.
                   </span>
                 </span>
                 <input
@@ -4164,7 +4427,9 @@ export default function Home() {
                   disabled={isLoadingTools}
                   title="Reload tools from app storage"
                 >
-                  <RefreshCcw className={cn("size-4", isLoadingTools && "animate-spin")} />
+                  <RefreshCcw
+                    className={cn("size-4", isLoadingTools && "animate-spin")}
+                  />
                 </Button>
               </div>
 
@@ -4191,9 +4456,12 @@ export default function Home() {
                     >
                       <Wrench className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm leading-5">{tool.name}</div>
+                        <div className="truncate text-sm leading-5">
+                          {tool.name}
+                        </div>
                         <div className="truncate text-[11px] leading-4 text-muted-foreground">
-                          {tool.enabled ? "Enabled" : "Disabled"} · {tool.command}
+                          {tool.enabled ? "Enabled" : "Disabled"} ·{" "}
+                          {tool.command}
                         </div>
                       </div>
                       <input
@@ -4201,15 +4469,24 @@ export default function Home() {
                         checked={tool.enabled}
                         onClick={(event) => event.stopPropagation()}
                         onChange={async (event) => {
-                          const updated = { ...tool, enabled: event.target.checked };
+                          const updated = {
+                            ...tool,
+                            enabled: event.target.checked,
+                          };
                           try {
                             const saved = await saveTool(updated);
                             setLoadedTools((current) =>
-                              current.map((item) => (item.id === saved.id ? saved : item)),
+                              current.map((item) =>
+                                item.id === saved.id ? saved : item,
+                              ),
                             );
-                            if (toolDraft?.id === saved.id) setToolDraft(toolToDraft(saved));
+                            if (toolDraft?.id === saved.id)
+                              setToolDraft(toolToDraft(saved));
                           } catch (error) {
-                            showError("Failed to update tool", labelForError(error));
+                            showError(
+                              "Failed to update tool",
+                              labelForError(error),
+                            );
                           }
                         }}
                         className="mt-0.5 size-4 shrink-0 accent-primary"
@@ -4234,10 +4511,15 @@ export default function Home() {
                       key={`${error.source}:${error.message}`}
                       className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs leading-5"
                     >
-                      <div className="truncate font-medium text-destructive" title={error.source}>
+                      <div
+                        className="truncate font-medium text-destructive"
+                        title={error.source}
+                      >
                         {error.source}
                       </div>
-                      <div className="text-muted-foreground">{error.message}</div>
+                      <div className="text-muted-foreground">
+                        {error.message}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -4247,57 +4529,26 @@ export default function Home() {
             <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
               {toolDraft ? (
                 <div className="grid gap-5 pb-1">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Tool manifest
-                      </Label>
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        The model sees only name, description, and schema. Chat Forge privately executes the configured command.
-                      </p>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={toolDraft.enabled}
-                        onChange={(event) =>
-                          setToolDraft((current) =>
-                            current ? { ...current, enabled: event.target.checked } : current,
-                          )
-                        }
-                        className="size-4 accent-primary"
-                      />
-                      Enabled
-                    </label>
+                  <div>
+                    <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {selectedTool ? "Edit tool" : "Create tool"}
+                    </Label>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="tool-name">Name</Label>
-                      <Input
-                        id="tool-name"
-                        value={toolDraft.name}
-                        onChange={(event) =>
-                          setToolDraft((current) =>
-                            current ? { ...current, name: event.target.value } : current,
-                          )
-                        }
-                        placeholder="calculate_square_root"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="tool-command">Command</Label>
-                      <Input
-                        id="tool-command"
-                        value={toolDraft.command}
-                        onChange={(event) =>
-                          setToolDraft((current) =>
-                            current ? { ...current, command: event.target.value } : current,
-                          )
-                        }
-                        placeholder="node / python / rg / git"
-                      />
-                    </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="tool-name">Name</Label>
+                    <Input
+                      id="tool-name"
+                      value={toolDraft.name}
+                      onChange={(event) =>
+                        setToolDraft((current) =>
+                          current
+                            ? { ...current, name: event.target.value }
+                            : current,
+                        )
+                      }
+                      placeholder="calculate_square_root"
+                    />
                   </div>
 
                   <div className="grid gap-2">
@@ -4307,11 +4558,29 @@ export default function Home() {
                       value={toolDraft.description}
                       onChange={(event) =>
                         setToolDraft((current) =>
-                          current ? { ...current, description: event.target.value } : current,
+                          current
+                            ? { ...current, description: event.target.value }
+                            : current,
                         )
                       }
                       placeholder="Describe when the model should use this tool."
                       className="min-h-20 resize-y"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="tool-command">Command</Label>
+                    <Input
+                      id="tool-command"
+                      value={toolDraft.command}
+                      onChange={(event) =>
+                        setToolDraft((current) =>
+                          current
+                            ? { ...current, command: event.target.value }
+                            : current,
+                        )
+                      }
+                      placeholder="node / python / rg / git"
                     />
                   </div>
 
@@ -4322,71 +4591,88 @@ export default function Home() {
                       value={toolDraft.parametersText}
                       onChange={(event) =>
                         setToolDraft((current) =>
-                          current ? { ...current, parametersText: event.target.value } : current,
+                          current
+                            ? { ...current, parametersText: event.target.value }
+                            : current,
                         )
                       }
-                      className="min-h-44 resize-y font-mono text-xs"
+                      className="min-h-64 resize-y font-mono text-xs"
                       spellCheck={false}
                     />
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+                  <div className="grid gap-2">
+                    <Label htmlFor="tool-args">Arguments, one per line</Label>
+                    <Textarea
+                      id="tool-args"
+                      value={toolDraft.argsText}
+                      onChange={(event) =>
+                        setToolDraft((current) =>
+                          current
+                            ? { ...current, argsText: event.target.value }
+                            : current,
+                        )
+                      }
+                      placeholder={
+                        "C:/Prime/Tools/math-tool/dist/index.js\n--query\n{{query}}"
+                      }
+                      className="min-h-32 resize-y font-mono text-xs"
+                      spellCheck={false}
+                    />
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Use <code>{"{{fieldName}}"}</code> placeholders for
+                      existing CLIs. Every placeholder must exist in
+                      schema.properties and schema.required.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
                     <div className="grid gap-2">
-                      <Label htmlFor="tool-args">Arguments, one per line</Label>
-                      <Textarea
-                        id="tool-args"
-                        value={toolDraft.argsText}
-                        onChange={(event) =>
+                      <Label htmlFor="tool-input-mode">Input mode</Label>
+                      <Select
+                        value={toolDraft.input}
+                        onValueChange={(value) =>
                           setToolDraft((current) =>
-                            current ? { ...current, argsText: event.target.value } : current,
+                            current
+                              ? {
+                                  ...current,
+                                  input:
+                                    value === "none" ? "none" : "json-stdin",
+                                }
+                              : current,
                           )
                         }
-                        placeholder={'C:/Prime/Tools/math-tool/dist/index.js\n--query\n{{query}}'}
-                        className="min-h-32 resize-y font-mono text-xs"
-                        spellCheck={false}
-                      />
+                      >
+                        <SelectTrigger
+                          id="tool-input-mode"
+                          className="rounded-lg"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="json-stdin">JSON stdin</SelectItem>
+                          <SelectItem value="none">None</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <p className="text-xs leading-5 text-muted-foreground">
-                        Use <code>{'{{fieldName}}'}</code> placeholders for existing CLIs. Every placeholder must exist in schema.properties and schema.required.
+                        JSON stdin is best for scripts you write. None is best
+                        for existing CLI flags/placeholders.
                       </p>
                     </div>
-                    <div className="grid content-start gap-4">
-                      <div className="grid gap-2">
-                        <Label htmlFor="tool-input-mode">Input mode</Label>
-                        <Select
-                          value={toolDraft.input}
-                          onValueChange={(value) =>
-                            setToolDraft((current) =>
-                              current
-                                ? { ...current, input: value === "none" ? "none" : "json-stdin" }
-                                : current,
-                            )
-                          }
-                        >
-                          <SelectTrigger id="tool-input-mode" className="rounded-lg">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="json-stdin">JSON stdin</SelectItem>
-                            <SelectItem value="none">None</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs leading-5 text-muted-foreground">
-                          JSON stdin is best for scripts you write. None is best for existing CLI flags/placeholders.
-                        </p>
-                      </div>
-                      <div className="grid gap-2">
-                        <Label htmlFor="tool-timeout">Timeout ms</Label>
-                        <Input
-                          id="tool-timeout"
-                          value={toolDraft.timeoutMs}
-                          onChange={(event) =>
-                            setToolDraft((current) =>
-                              current ? { ...current, timeoutMs: event.target.value } : current,
-                            )
-                          }
-                          inputMode="numeric"
-                        />
-                      </div>
+                    <div className="grid gap-2 content-start">
+                      <Label htmlFor="tool-timeout">Timeout ms</Label>
+                      <Input
+                        id="tool-timeout"
+                        value={toolDraft.timeoutMs}
+                        onChange={(event) =>
+                          setToolDraft((current) =>
+                            current
+                              ? { ...current, timeoutMs: event.target.value }
+                              : current,
+                          )
+                        }
+                        inputMode="numeric"
+                      />
                     </div>
                   </div>
 
@@ -4397,7 +4683,9 @@ export default function Home() {
                       value={toolDraft.cwd}
                       onChange={(event) =>
                         setToolDraft((current) =>
-                          current ? { ...current, cwd: event.target.value } : current,
+                          current
+                            ? { ...current, cwd: event.target.value }
+                            : current,
                         )
                       }
                       placeholder="Optional. Example: C:/Prime/Tools/math-tool"
@@ -4426,7 +4714,9 @@ export default function Home() {
                     </div>
                     <Textarea
                       value={toolTestArgsText}
-                      onChange={(event) => setToolTestArgsText(event.target.value)}
+                      onChange={(event) =>
+                        setToolTestArgsText(event.target.value)
+                      }
                       className="min-h-24 resize-y font-mono text-xs"
                       spellCheck={false}
                       placeholder='{ "value": 144 }'
@@ -4435,12 +4725,22 @@ export default function Home() {
                       <div className="grid gap-2 rounded-lg border bg-card p-3">
                         <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
                           <span>
-                            Exit: {toolTestResult.exitCode ?? "null"} · {toolTestResult.timedOut ? "Timed out" : "Completed"}
+                            Exit: {toolTestResult.exitCode ?? "null"} ·{" "}
+                            {toolTestResult.timedOut
+                              ? "Timed out"
+                              : "Completed"}
                           </span>
-                          {toolTestResult.exitCode !== 0 || toolTestResult.timedOut ? (
-                            <span className="text-destructive">Error result</span>
+                          {toolTestResult.exitCode !== 0 ||
+                          toolTestResult.timedOut ? (
+                            <span className="inline-flex items-center gap-1 text-destructive">
+                              <X className="size-3.5" />
+                              Failed
+                            </span>
                           ) : (
-                            <span>Success</span>
+                            <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                              <Check className="size-3.5" />
+                              Complete
+                            </span>
                           )}
                         </div>
                         {renderJsonCodeBlock(toolTestResult.content)}
@@ -4485,7 +4785,7 @@ export default function Home() {
                 onClick={saveCurrentToolDraft}
                 disabled={!toolDraft || isSavingTool}
               >
-                {isSavingTool ? "Saving..." : "Save tool"}
+                {isSavingTool ? "Saving..." : "Save"}
               </Button>
             </div>
           </DialogFooter>

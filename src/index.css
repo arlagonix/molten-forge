@@ -250,7 +250,7 @@
   }
 
   .chat-markdown p {
-    @apply my-4;
+    @apply my-3;
   }
 
   .chat-markdown-compact p {
@@ -258,7 +258,7 @@
   }
 
   .chat-markdown ul {
-    @apply my-2 pl-5;
+    @apply my-0 pl-5;
   }
 
   .chat-markdown ol {
@@ -279,7 +279,7 @@
   }
 
   .chat-markdown li {
-    @apply my-2;
+    @apply mb-1;
   }
 
   .chat-markdown-compact li {
@@ -343,7 +343,7 @@
   }
 
   .chat-markdown .chat-code-block {
-    @apply relative my-4 w-full min-w-0 max-w-full border rounded-lg;
+    @apply relative my-2 w-full min-w-0 max-w-full border rounded-lg;
     background: var(--code-bg);
     border-color: var(--border);
     color: var(--code-fg);

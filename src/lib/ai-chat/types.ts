@@ -66,6 +66,19 @@ export type ChatToolResult = {
   isError?: boolean;
 };
 
+export type ChatAssistantProcessStep =
+  | {
+      id: string;
+      type: "thinking";
+      content: string;
+    }
+  | {
+      id: string;
+      type: "tool_execution";
+      toolCall: ChatToolCall;
+      toolResult?: ChatToolResult;
+    };
+
 export type ChatAssistantVariant = {
   id: string;
   content: string;
@@ -75,6 +88,7 @@ export type ChatAssistantVariant = {
   metrics?: ChatMessageMetrics;
   toolCalls?: ChatToolCall[];
   toolResults?: ChatToolResult[];
+  processSteps?: ChatAssistantProcessStep[];
 };
 
 export type ChatUserMessage = {
