@@ -543,14 +543,12 @@ export async function streamProviderChat({
     const finalContent = finalParsedContent || finalRawContent;
     const finalReasoning = `${finalRawReasoning}${finalParsedReasoning}`;
 
-    if (finalContent && finalContent.startsWith(streamedContent)) {
-      const missingContent = finalContent.slice(streamedContent.length);
-      if (missingContent) emitContentDelta(missingContent);
+    if (finalContent && !streamedContent) {
+      emitContentDelta(finalContent);
     }
 
-    if (finalReasoning && finalReasoning.startsWith(streamedReasoning)) {
-      const missingReasoning = finalReasoning.slice(streamedReasoning.length);
-      if (missingReasoning) emitReasoningDelta(missingReasoning);
+    if (finalReasoning && !streamedReasoning) {
+      emitReasoningDelta(finalReasoning);
     }
 
     return {

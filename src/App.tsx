@@ -86,6 +86,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import {
   buildTokenMetrics,
@@ -164,6 +165,7 @@ const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
 const STICKY_SCROLL_SETTLE_FRAMES = 5;
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
+const COMPOSER_DRAFTS_STORAGE_KEY = "chat-forge-composer-drafts";
 const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
 };
@@ -181,6 +183,47 @@ type ToolDraft = {
   input: "none" | "json-stdin";
   timeoutMs: string;
 };
+
+function loadComposerDrafts(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+
+  try {
+    const stored = window.localStorage.getItem(COMPOSER_DRAFTS_STORAGE_KEY);
+    if (!stored) return {};
+
+    const parsed = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[0] === "string" && typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function saveComposerDrafts(drafts: Record<string, string>) {
+  if (typeof window === "undefined") return;
+
+  const nonEmptyDrafts = Object.fromEntries(
+    Object.entries(drafts).filter(([, value]) => value.length > 0),
+  );
+
+  if (Object.keys(nonEmptyDrafts).length === 0) {
+    window.localStorage.removeItem(COMPOSER_DRAFTS_STORAGE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(
+    COMPOSER_DRAFTS_STORAGE_KEY,
+    JSON.stringify(nonEmptyDrafts),
+  );
+}
 
 function createBlankToolDraft(): ToolDraft {
   return {
@@ -306,15 +349,16 @@ const ChatComposer = memo(
     {
       disabled: boolean;
       isSending: boolean;
+      draft: string;
+      onDraftChange: (draft: string) => void;
       onSend: (content: string) => Promise<boolean> | boolean;
       onStop: () => void;
       footerStart?: ReactNode;
     }
   >(function ChatComposer(
-    { disabled, isSending, onSend, onStop, footerStart },
+    { disabled, isSending, draft, onDraftChange, onSend, onStop, footerStart },
     ref,
   ) {
-    const [draft, setDraft] = useState("");
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const trimmedDraft = draft.trim();
     const canSend = !disabled && !isSending && trimmedDraft.length > 0;
@@ -336,10 +380,10 @@ const ChatComposer = memo(
     useImperativeHandle(
       ref,
       () => ({
-        clear: () => setDraft(""),
+        clear: () => onDraftChange(""),
         focus: focusTextarea,
       }),
-      [focusTextarea],
+      [focusTextarea, onDraftChange],
     );
 
     useEffect(() => {
@@ -364,7 +408,7 @@ const ChatComposer = memo(
       if (!canSend) return;
 
       const wasSent = await onSend(draft);
-      if (wasSent) setDraft("");
+      if (wasSent) onDraftChange("");
     }
 
     return (
@@ -379,7 +423,7 @@ const ChatComposer = memo(
               ref={textareaRef}
               value={draft}
               rows={3}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) => onDraftChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key !== "Enter") return;
 
@@ -471,6 +515,9 @@ export default function Home() {
     useState<ToolCommandResult | null>(null);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
+  const [composerDraftsByChatId, setComposerDraftsByChatId] = useState<
+    Record<string, string>
+  >(() => loadComposerDrafts());
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
   const [streamingAssistantByChatId, setStreamingAssistantByChatId] = useState<
@@ -601,6 +648,9 @@ export default function Home() {
       sortedChats.find((chat) => chat.id === activeChatId) ?? sortedChats[0]
     );
   }, [activeChatId, sortedChats]);
+  const activeComposerDraft = activeChatId
+    ? (composerDraftsByChatId[activeChatId] ?? "")
+    : "";
 
   const providers = providersState.providers.length
     ? providersState.providers
@@ -878,6 +928,10 @@ export default function Home() {
       console.error("Failed to save active chat id:", error),
     );
   }, [activeChatId]);
+
+  useEffect(() => {
+    saveComposerDrafts(composerDraftsByChatId);
+  }, [composerDraftsByChatId]);
 
   useEffect(() => {
     if (!didHydrateRef.current || chats.length === 0) return;
@@ -1618,6 +1672,19 @@ export default function Home() {
     updateChatMessages(activeChatId, updater, options);
   }
 
+  function updateActiveComposerDraft(draft: string) {
+    if (!activeChatId) return;
+
+    setComposerDraftsByChatId((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts };
+
+      if (draft.length === 0) delete nextDrafts[activeChatId];
+      else nextDrafts[activeChatId] = draft;
+
+      return nextDrafts;
+    });
+  }
+
   function toggleMetrics(messageId: string) {
     setExpandedMetricsIds((current) => ({
       ...current,
@@ -2225,12 +2292,8 @@ export default function Home() {
       );
     };
 
-    const applyToolRoundToVariant = (
-      toolCalls: ChatToolCall[],
-      toolResults: ChatToolResult[],
-    ) => {
+    const appendToolCallsToVariant = (toolCalls: ChatToolCall[]) => {
       toolCallsForContext = [...toolCallsForContext, ...toolCalls];
-      toolResultsForContext = [...toolResultsForContext, ...toolResults];
 
       updateAssistantVariant(
         chatId,
@@ -2239,19 +2302,45 @@ export default function Home() {
         (variant) => ({
           ...variant,
           toolCalls: [...(variant.toolCalls ?? []), ...toolCalls],
-          toolResults: [...(variant.toolResults ?? []), ...toolResults],
           processSteps: [
             ...(variant.processSteps ?? []),
             ...toolCalls.map((toolCall) => ({
               id: createId(),
               type: "tool_execution" as const,
               toolCall,
-              toolResult: toolResults.find(
-                (toolResult) => toolResult.toolCallId === toolCall.id,
-              ),
             })),
           ],
         }),
+        { touch: false },
+      );
+    };
+
+    const applyToolResultsToVariant = (toolResults: ChatToolResult[]) => {
+      toolResultsForContext = [...toolResultsForContext, ...toolResults];
+
+      updateAssistantVariant(
+        chatId,
+        assistantMessageId,
+        variantId,
+        (variant) => {
+          const existingResults = variant.toolResults ?? [];
+
+          return {
+            ...variant,
+            toolResults: [...existingResults, ...toolResults],
+            processSteps: (variant.processSteps ?? []).map((step) => {
+              if (step.type !== "tool_execution" || step.toolResult) {
+                return step;
+              }
+
+              const toolResult = toolResults.find(
+                (item) => item.toolCallId === step.toolCall.id,
+              );
+
+              return toolResult ? { ...step, toolResult } : step;
+            }),
+          };
+        },
         { touch: false },
       );
     };
@@ -2351,8 +2440,14 @@ export default function Home() {
           );
         }
 
+        appendToolCallsToVariant(toolCalls);
+
+        if (chatId === activeChatId) {
+          scheduleStickyScrollToBottom({ force: true });
+        }
+
         const toolResults = await Promise.all(toolCalls.map(executeToolCall));
-        applyToolRoundToVariant(toolCalls, toolResults);
+        applyToolResultsToVariant(toolResults);
 
         if (chatId === activeChatId) {
           scheduleStickyScrollToBottom({ force: true });
@@ -2824,7 +2919,6 @@ export default function Home() {
     };
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
-    chatComposerRef.current?.clear();
     setEditingMessageId(null);
     setExpandedMetricsIds({});
     clearStickyScrollSuppression();
@@ -2843,7 +2937,6 @@ export default function Home() {
 
   async function switchChat(chatId: string) {
     setActiveChatId(chatId);
-    chatComposerRef.current?.clear();
     setEditingMessageId(null);
     setExpandedMetricsIds({});
     clearStickyScrollSuppression();
@@ -3359,7 +3452,8 @@ export default function Home() {
                                         {result.isError ? "Failed" : "Complete"}
                                       </span>
                                     ) : (
-                                      <span className="text-muted-foreground/80">
+                                      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                                        <Spinner className="size-3.5" />
                                         Running
                                       </span>
                                     )}
@@ -3378,7 +3472,7 @@ export default function Home() {
                                         )}
                                       </div>
                                     )}
-                                    {result && (
+                                    {result?.content.trim() && (
                                       <div className="grid gap-1.5">
                                         <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
                                           Output
@@ -3875,6 +3969,8 @@ export default function Home() {
           ref={chatComposerRef}
           disabled={!activeChat}
           isSending={isSending}
+          draft={activeComposerDraft}
+          onDraftChange={updateActiveComposerDraft}
           onSend={sendMessage}
           onStop={stopGeneration}
           footerStart={renderComposerModelSelector()}
