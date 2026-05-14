@@ -122,25 +122,39 @@ export type ApiChatMessage =
       content: string;
     };
 
+export type ToolInputMode = "none" | "json-stdin";
+
+export type ToolCommandResult = {
+  toolName?: string;
+  content: string;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+};
+
 export type ToolDefinition = {
+  id: string;
   name: string;
+  enabled: boolean;
   description: string;
   parameters: Record<string, unknown>;
+  command: string;
+  args: string[];
+  cwd?: string;
+  input: ToolInputMode;
+  timeoutMs: number;
 };
 
-export type LoadedToolInfo = ToolDefinition & {
-  filePath: string;
-};
+export type LoadedToolInfo = ToolDefinition;
 
 export type ToolLoadError = {
-  filePath: string;
+  source: string;
   message: string;
 };
 
 export type ToolsSettings = {
   enabled: boolean;
-  directory: string;
-  disabledToolNames: string[];
 };
 
 export type ToolsState = {

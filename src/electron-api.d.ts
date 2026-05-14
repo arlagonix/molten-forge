@@ -1,4 +1,4 @@
-import type { ChatTokenUsage, LoadedToolInfo, ToolLoadError, ToolsSettings } from "@/lib/ai-chat/types";
+import type { ChatTokenUsage, LoadedToolInfo, ToolCommandResult, ToolsSettings } from "@/lib/ai-chat/types";
 
 type AiProviderRequest = {
   baseUrl: string;
@@ -75,6 +75,9 @@ declare global {
       deleteAllChats: () => Promise<void>;
       loadToolsSettings: () => Promise<ToolsSettings | undefined>;
       saveToolsSettings: (value: ToolsSettings) => Promise<void>;
+      loadTools: () => Promise<LoadedToolInfo[]>;
+      saveTool: (tool: LoadedToolInfo) => Promise<LoadedToolInfo>;
+      deleteTool: (toolId: string) => Promise<void>;
     };
   }
 }
@@ -83,9 +86,8 @@ declare global {
 declare global {
   interface Window {
     chatForgeTools?: {
-      selectDirectory: () => Promise<string | undefined>;
-      load: (directory: string) => Promise<{ tools: LoadedToolInfo[]; errors: ToolLoadError[] }>;
-      execute: (request: { name: string; args: unknown }) => Promise<{ toolName: string; content: string }>;
+      execute: (request: { name: string; args: unknown }) => Promise<ToolCommandResult>;
+      test: (request: { tool: LoadedToolInfo; args: unknown }) => Promise<ToolCommandResult>;
     };
   }
 }

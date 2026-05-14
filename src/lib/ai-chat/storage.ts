@@ -1,6 +1,6 @@
 import { defaultGenerationSettings, defaultProvider } from "./provider-presets";
 import { sortChatsByUpdatedAt } from "./chat-utils";
-import type { ChatSession, ProviderConfig, ProvidersState, ToolsSettings } from "./types";
+import type { ChatSession, LoadedToolInfo, ProviderConfig, ProvidersState, ToolsSettings } from "./types";
 
 const DB_NAME = "chat-forge";
 const DB_VERSION = 1;
@@ -40,6 +40,9 @@ type ChatForgeStorageApi = {
   saveActiveChatId: (chatId: string) => Promise<void>;
   loadToolsSettings: () => Promise<ToolsSettings | undefined>;
   saveToolsSettings: (value: ToolsSettings) => Promise<void>;
+  loadTools: () => Promise<LoadedToolInfo[]>;
+  saveTool: (tool: LoadedToolInfo) => Promise<LoadedToolInfo>;
+  deleteTool: (toolId: string) => Promise<void>;
   loadCachedProviderModels: (cacheKey: string) => Promise<string[]>;
   saveCachedProviderModels: (cacheKey: string, models: string[]) => Promise<void>;
   loadChats: () => Promise<ChatSession[]>;
@@ -135,10 +138,6 @@ function normalizeProvidersState(value?: ProvidersState): ProvidersState {
 function normalizeToolsSettings(value: Partial<ToolsSettings> | undefined): ToolsSettings {
   return {
     enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
-    directory: typeof value?.directory === "string" ? value.directory : "",
-    disabledToolNames: Array.isArray(value?.disabledToolNames)
-      ? [...new Set(value.disabledToolNames.filter((name): name is string => typeof name === "string" && name.trim().length > 0).map((name) => name.trim()))]
-      : [],
   };
 }
 
@@ -446,6 +445,38 @@ export async function saveToolsSettings(value: ToolsSettings): Promise<void> {
   }
 
   await legacySetSetting(TOOLS_SETTINGS_KEY, normalized);
+}
+
+
+export async function loadTools(): Promise<LoadedToolInfo[]> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.loadTools();
+  }
+
+  return [];
+}
+
+export async function saveTool(tool: LoadedToolInfo): Promise<LoadedToolInfo> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.saveTool(tool);
+  }
+
+  throw new Error("Tool storage requires the Electron app.");
+}
+
+export async function deleteTool(toolId: string): Promise<void> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.deleteTool(toolId);
+    return;
+  }
+
+  throw new Error("Tool storage requires the Electron app.");
 }
 
 export async function loadCachedProviderModels(

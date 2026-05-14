@@ -106,19 +106,27 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
   saveToolsSettings(value: unknown) {
     return ipcRenderer.invoke("storage:tools-settings:save", value);
   },
+
+  loadTools() {
+    return ipcRenderer.invoke("storage:tools:load");
+  },
+
+  saveTool(tool: unknown) {
+    return ipcRenderer.invoke("storage:tool:save", tool);
+  },
+
+  deleteTool(toolId: unknown) {
+    return ipcRenderer.invoke("storage:tool:delete", toolId);
+  },
 });
 
 
 contextBridge.exposeInMainWorld("chatForgeTools", {
-  selectDirectory() {
-    return ipcRenderer.invoke("tools:select-directory");
-  },
-
-  load(directory: unknown) {
-    return ipcRenderer.invoke("tools:load", directory);
-  },
-
   execute(request: unknown) {
     return ipcRenderer.invoke("tools:execute", request);
+  },
+
+  test(request: unknown) {
+    return ipcRenderer.invoke("tools:test", request);
   },
 });

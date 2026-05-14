@@ -126,13 +126,16 @@ import {
   loadChats,
   loadProvidersState,
   loadSystemPrompt,
+  loadTools,
   loadToolsSettings,
   saveActiveChatId,
   saveCachedProviderModels,
   saveChat,
   saveProvidersState,
   saveSystemPrompt,
+  saveTool,
   saveToolsSettings,
+  deleteTool as deleteStoredTool,
 } from "@/lib/ai-chat/storage";
 import type {
   ChatAssistantVariant,
@@ -140,6 +143,7 @@ import type {
   ChatToolCall,
   ChatToolResult,
   LoadedToolInfo,
+  ToolCommandResult,
   ChatSession,
   ProviderConfig,
   ProviderGenerationSettings,
@@ -161,10 +165,51 @@ const STICKY_SCROLL_SETTLE_FRAMES = 5;
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
 const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
-  directory: "",
-  disabledToolNames: [],
 };
 const MAX_TOOL_ROUNDS = 3;
+
+type ToolDraft = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  description: string;
+  parametersText: string;
+  command: string;
+  argsText: string;
+  cwd: string;
+  input: "none" | "json-stdin";
+  timeoutMs: string;
+};
+
+function createBlankToolDraft(): ToolDraft {
+  return {
+    id: createId(),
+    name: "",
+    enabled: true,
+    description: "",
+    parametersText: JSON.stringify({ type: "object", properties: {}, required: [] }, null, 2),
+    command: "",
+    argsText: "",
+    cwd: "",
+    input: "json-stdin",
+    timeoutMs: "30000",
+  };
+}
+
+function toolToDraft(tool: LoadedToolInfo): ToolDraft {
+  return {
+    id: tool.id,
+    name: tool.name,
+    enabled: tool.enabled,
+    description: tool.description,
+    parametersText: JSON.stringify(tool.parameters, null, 2),
+    command: tool.command,
+    argsText: tool.args.join("\n"),
+    cwd: tool.cwd ?? "",
+    input: tool.input,
+    timeoutMs: String(tool.timeoutMs),
+  };
+}
 
 const UserMessageEditor = memo(function UserMessageEditor({
   initialContent,
@@ -409,9 +454,14 @@ export default function Home() {
   );
   const [loadedTools, setLoadedTools] = useState<LoadedToolInfo[]>([]);
   const [toolLoadErrors, setToolLoadErrors] = useState<
-    Array<{ filePath: string; message: string }>
+    Array<{ source: string; message: string }>
   >([]);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
+  const [toolDraft, setToolDraft] = useState<ToolDraft | null>(null);
+  const [isSavingTool, setIsSavingTool] = useState(false);
+  const [isTestingTool, setIsTestingTool] = useState(false);
+  const [toolTestArgsText, setToolTestArgsText] = useState("{}");
+  const [toolTestResult, setToolTestResult] = useState<ToolCommandResult | null>(null);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -568,7 +618,6 @@ export default function Home() {
   });
   const selectedTool =
     loadedTools.find((tool) => tool.name === selectedToolName) ??
-    loadedTools[0] ??
     null;
   const modelSuggestions = useMemo(() => {
     return normalizeProviderModels([
@@ -618,12 +667,14 @@ export default function Home() {
           loadedChats,
           loadedActiveChatId,
           loadedToolsSettings,
+          loadedToolManifests,
         ] = await Promise.all([
           loadProvidersState(),
           loadSystemPrompt(),
           loadChats(),
           loadActiveChatId(),
           loadToolsSettings(),
+          loadTools(),
         ]);
 
         if (cancelled) return;
@@ -675,11 +726,11 @@ export default function Home() {
         });
         setSystemPrompt(loadedSystemPrompt);
         setToolsSettings(loadedToolsSettings);
+        setLoadedTools(loadedToolManifests);
         setChats(nextChats);
         setActiveChatId(nextActiveChatId);
         didHydrateRef.current = true;
         setMounted(true);
-        void reloadTools(loadedToolsSettings);
       } catch (error) {
         console.error("Failed to load app data from IndexedDB:", error);
         const fallbackProvider = normalizeProviderForState(defaultProvider);
@@ -788,12 +839,27 @@ export default function Home() {
 
   useEffect(() => {
     if (loadedTools.length === 0) {
-      setSelectedToolName(null);
+      if (selectedToolName !== null) setSelectedToolName(null);
       return;
     }
 
+    const isEditingUnsavedTool =
+      toolDraft &&
+      !selectedToolName &&
+      !loadedTools.some((tool) => tool.id === toolDraft.id);
+
+    if (isEditingUnsavedTool) return;
+
     if (!selectedToolName || !loadedTools.some((tool) => tool.name === selectedToolName)) {
       setSelectedToolName(loadedTools[0].name);
+    }
+  }, [loadedTools, selectedToolName, toolDraft]);
+
+  useEffect(() => {
+    const selected = loadedTools.find((tool) => tool.name === selectedToolName);
+    if (selected) {
+      setToolDraft(toolToDraft(selected));
+      setToolTestResult(null);
     }
   }, [loadedTools, selectedToolName]);
 
@@ -1267,83 +1333,28 @@ export default function Home() {
     return window.chatForgeTools;
   }
 
-  async function reloadTools(settings = toolsSettings) {
+  async function refreshTools(showToast = false) {
     setIsLoadingTools(true);
 
     try {
-      if (!settings.directory.trim()) {
-        setLoadedTools([]);
-        setToolLoadErrors([]);
-        return;
-      }
-
-      const result = await getToolsBridge().load(settings.directory);
-      setLoadedTools(result.tools);
-      setToolLoadErrors(result.errors);
-
-      if (result.tools.length) {
-        showSuccess(
-          `Loaded ${result.tools.length} tool${result.tools.length === 1 ? "" : "s"}.`,
-        );
-      } else if (result.errors.length) {
-        showError("No tools loaded", "Check the tool load errors in Tools.");
-      } else {
-        showInfo(
-          "No tools found",
-          "Add .js or .cjs tool files to the selected folder.",
-        );
+      const tools = await loadTools();
+      setLoadedTools(tools);
+      setToolLoadErrors([]);
+      if (showToast) {
+        showSuccess(`Loaded ${tools.length} tool${tools.length === 1 ? "" : "s"}.`);
       }
     } catch (error) {
       console.error("Failed to load tools:", error);
-      setLoadedTools([]);
-      setToolLoadErrors([
-        { filePath: settings.directory, message: labelForError(error) },
-      ]);
+      setToolLoadErrors([{ source: "Tools storage", message: labelForError(error) }]);
       showError("Failed to load tools", labelForError(error));
     } finally {
       setIsLoadingTools(false);
     }
   }
 
-  async function selectToolsDirectory() {
-    try {
-      const directory = await getToolsBridge().selectDirectory();
-      if (!directory) return;
-
-      const nextSettings = { ...toolsSettings, directory };
-      setToolsSettings(nextSettings);
-      await saveToolsSettings(nextSettings);
-      await reloadTools(nextSettings);
-    } catch (error) {
-      console.error("Failed to select tools folder:", error);
-      showError("Failed to select tools folder", labelForError(error));
-    }
-  }
-
   function getEnabledTools() {
     if (!toolsSettings.enabled) return [];
-
-    const disabledToolNames = new Set(toolsSettings.disabledToolNames ?? []);
-    return loadedTools.filter((tool) => !disabledToolNames.has(tool.name));
-  }
-
-  function isToolEnabled(toolName: string) {
-    return !(toolsSettings.disabledToolNames ?? []).includes(toolName);
-  }
-
-  function toggleToolEnabled(toolName: string, enabled: boolean) {
-    setToolsSettings((current) => {
-      const disabledToolNames = new Set(current.disabledToolNames ?? []);
-      if (enabled) disabledToolNames.delete(toolName);
-      else disabledToolNames.add(toolName);
-
-      return {
-        ...current,
-        disabledToolNames: [...disabledToolNames].sort((left, right) =>
-          left.localeCompare(right),
-        ),
-      };
-    });
+    return loadedTools.filter((tool) => tool.enabled);
   }
 
   function formatJsonLikeCodeBlock(value: string) {
@@ -1362,6 +1373,143 @@ export default function Home() {
     return <MarkdownMessage content={`~~~json\n${normalized}\n~~~`} />;
   }
 
+  function extractTemplatePlaceholders(args: string[]) {
+    const placeholders = new Set<string>();
+    const pattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+    for (const arg of args) {
+      for (const match of arg.matchAll(pattern)) placeholders.add(match[1]);
+    }
+    return [...placeholders];
+  }
+
+  function draftToTool(draft: ToolDraft): LoadedToolInfo {
+    let parameters: Record<string, unknown>;
+
+    try {
+      const parsed = JSON.parse(draft.parametersText || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Parameters schema must be a JSON object.");
+      }
+      parameters = parsed as Record<string, unknown>;
+    } catch (error) {
+      throw new Error(`Invalid parameters JSON: ${labelForError(error)}`);
+    }
+
+    const args = draft.argsText
+      .split(/\r?\n/)
+      .map((arg) => arg.trim())
+      .filter((arg) => arg.length > 0);
+    const timeoutMs = Number(draft.timeoutMs);
+
+    return {
+      id: draft.id,
+      name: draft.name.trim(),
+      enabled: draft.enabled,
+      description: draft.description.trim(),
+      parameters,
+      command: draft.command.trim(),
+      args,
+      cwd: draft.cwd.trim() || undefined,
+      input: draft.input,
+      timeoutMs: Number.isFinite(timeoutMs) && timeoutMs > 0 ? Math.round(timeoutMs) : 30000,
+    };
+  }
+
+  function validateToolDraft(tool: LoadedToolInfo) {
+    if (!tool.name) throw new Error("Tool name is required.");
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name)) {
+      throw new Error("Tool name must use only letters, numbers, underscores, or hyphens.");
+    }
+    if (!tool.description) throw new Error("Tool description is required.");
+    if (tool.parameters.type !== "object") {
+      throw new Error('Parameters schema must include "type": "object".');
+    }
+    if (!tool.command) throw new Error("Command is required.");
+
+    const properties =
+      tool.parameters.properties &&
+      typeof tool.parameters.properties === "object" &&
+      !Array.isArray(tool.parameters.properties)
+        ? Object.keys(tool.parameters.properties as Record<string, unknown>)
+        : [];
+    const required = Array.isArray(tool.parameters.required)
+      ? tool.parameters.required.filter((item): item is string => typeof item === "string")
+      : [];
+    const propertySet = new Set(properties);
+    const requiredSet = new Set(required);
+
+    for (const placeholder of extractTemplatePlaceholders(tool.args)) {
+      if (!propertySet.has(placeholder)) {
+        throw new Error(`Unknown placeholder: ${placeholder}. Add it to schema properties or update args.`);
+      }
+      if (!requiredSet.has(placeholder)) {
+        throw new Error(`Placeholder ${placeholder} is used in args, so it must be listed in schema.required for now.`);
+      }
+    }
+  }
+
+  async function saveCurrentToolDraft() {
+    if (!toolDraft) return;
+    setIsSavingTool(true);
+
+    try {
+      const tool = draftToTool(toolDraft);
+      validateToolDraft(tool);
+      const savedTool = await saveTool(tool);
+      setLoadedTools((current) => {
+        const next = current.filter((item) => item.id !== savedTool.id);
+        next.push(savedTool);
+        return next.sort((left, right) => left.name.localeCompare(right.name));
+      });
+      setSelectedToolName(savedTool.name);
+      setToolDraft(toolToDraft(savedTool));
+      showSuccess("Tool saved");
+    } catch (error) {
+      showError("Failed to save tool", labelForError(error));
+    } finally {
+      setIsSavingTool(false);
+    }
+  }
+
+  async function deleteCurrentTool() {
+    if (!toolDraft) return;
+
+    try {
+      await deleteStoredTool(toolDraft.id);
+      setLoadedTools((current) => current.filter((tool) => tool.id !== toolDraft.id));
+      setToolDraft(null);
+      setSelectedToolName(null);
+      setToolTestResult(null);
+      showSuccess("Tool deleted");
+    } catch (error) {
+      showError("Failed to delete tool", labelForError(error));
+    }
+  }
+
+  async function runCurrentToolTest() {
+    if (!toolDraft) return;
+    setIsTestingTool(true);
+    setToolTestResult(null);
+
+    try {
+      const tool = draftToTool(toolDraft);
+      validateToolDraft(tool);
+      const args = toolTestArgsText.trim() ? JSON.parse(toolTestArgsText) : {};
+      const result = await getToolsBridge().test({ tool, args });
+      setToolTestResult(result);
+    } catch (error) {
+      setToolTestResult({
+        content: `Error: ${labelForError(error)}`,
+        exitCode: null,
+        stdout: "",
+        stderr: labelForError(error),
+        timedOut: false,
+      });
+    } finally {
+      setIsTestingTool(false);
+    }
+  }
+
   async function executeToolCall(
     toolCall: ChatToolCall,
   ): Promise<ChatToolResult> {
@@ -1376,6 +1524,7 @@ export default function Home() {
         toolCallId: toolCall.id,
         toolName: result.toolName || toolName,
         content: result.content,
+        isError: result.timedOut || result.exitCode !== 0,
       };
     } catch (error) {
       return {
@@ -3950,15 +4099,15 @@ export default function Home() {
       </Dialog>
 
       <Dialog open={toolsOpen} onOpenChange={setToolsOpen}>
-        <DialogContent className="flex h-[min(760px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+        <DialogContent className="flex h-[min(820px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
           <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
             <DialogTitle>Tools</DialogTitle>
             <DialogDescription>
-              Load trusted local .js or .cjs tools and choose which ones are available to the model.
+              Define local command tools, choose which ones are available to the model, and test them before use.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[300px_minmax(0,1fr)]">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
             <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -3973,7 +4122,7 @@ export default function Home() {
                 <span className="min-w-0">
                   <span className="block font-medium">Enable tools globally</span>
                   <span className="block text-xs leading-5 text-muted-foreground">
-                    Disabled tools are still manageable, but not sent to the model.
+                    Disabled globally means no tool schemas are sent to the model.
                   </span>
                 </span>
                 <input
@@ -3989,90 +4138,88 @@ export default function Home() {
                 />
               </label>
 
-              <div className="mb-3 grid gap-2">
-                <Label htmlFor="tools-directory-dialog">Tools folder</Label>
-                <Input
-                  id="tools-directory-dialog"
-                  value={toolsSettings.directory}
-                  onChange={(event) =>
-                    setToolsSettings((current) => ({
-                      ...current,
-                      directory: event.target.value,
-                    }))
-                  }
-                  placeholder="C:/Prime/ChatForgeTools"
-                />
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="flex-1 rounded-lg"
-                    onClick={selectToolsDirectory}
-                  >
-                    Browse
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="flex-1 rounded-lg"
-                    onClick={() => reloadTools()}
-                    disabled={isLoadingTools}
-                  >
-                    <RefreshCcw
-                      className={cn("size-4", isLoadingTools && "animate-spin")}
-                    />
-                    Reload
-                  </Button>
-                </div>
+              <div className="mb-3 flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1 rounded-lg"
+                  onClick={() => {
+                    const draft = createBlankToolDraft();
+                    setSelectedToolName(null);
+                    setToolDraft(draft);
+                    setToolTestResult(null);
+                    setToolTestArgsText("{}");
+                  }}
+                >
+                  <Plus className="size-4" />
+                  Add tool
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="rounded-lg"
+                  onClick={() => refreshTools(true)}
+                  disabled={isLoadingTools}
+                  title="Reload tools from app storage"
+                >
+                  <RefreshCcw className={cn("size-4", isLoadingTools && "animate-spin")} />
+                </Button>
               </div>
 
               <div className="grid gap-1.5">
                 {loadedTools.length > 0 ? (
-                  loadedTools.map((tool) => {
-                    const enabled = isToolEnabled(tool.name);
-
-                    return (
-                      <div
-                        key={tool.name}
-                        role="button"
-                        tabIndex={0}
-                        className={cn(
-                          "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                          selectedTool?.name === tool.name
-                            ? "border-primary/30 bg-accent text-accent-foreground"
-                            : "border-transparent hover:border-border hover:bg-muted/60",
-                        )}
-                        onClick={() => setSelectedToolName(tool.name)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            setSelectedToolName(tool.name);
+                  loadedTools.map((tool) => (
+                    <div
+                      key={tool.id}
+                      role="button"
+                      tabIndex={0}
+                      className={cn(
+                        "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        selectedTool?.id === tool.id
+                          ? "border-primary/30 bg-accent text-accent-foreground"
+                          : "border-transparent hover:border-border hover:bg-muted/60",
+                      )}
+                      onClick={() => setSelectedToolName(tool.name)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          setSelectedToolName(tool.name);
+                        }
+                      }}
+                    >
+                      <Wrench className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm leading-5">{tool.name}</div>
+                        <div className="truncate text-[11px] leading-4 text-muted-foreground">
+                          {tool.enabled ? "Enabled" : "Disabled"} · {tool.command}
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={tool.enabled}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={async (event) => {
+                          const updated = { ...tool, enabled: event.target.checked };
+                          try {
+                            const saved = await saveTool(updated);
+                            setLoadedTools((current) =>
+                              current.map((item) => (item.id === saved.id ? saved : item)),
+                            );
+                            if (toolDraft?.id === saved.id) setToolDraft(toolToDraft(saved));
+                          } catch (error) {
+                            showError("Failed to update tool", labelForError(error));
                           }
                         }}
-                      >
-                        <Wrench className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm leading-5">{tool.name}</div>
-                          <div className="truncate text-[11px] leading-4 text-muted-foreground">
-                            {enabled ? "Enabled" : "Disabled"} · {tool.description}
-                          </div>
-                        </div>
-                        <input
-                          type="checkbox"
-                          checked={enabled}
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => toggleToolEnabled(tool.name, event.target.checked)}
-                          className="mt-0.5 size-4 shrink-0 accent-primary"
-                          title={enabled ? "Disable tool" : "Enable tool"}
-                        />
-                      </div>
-                    );
-                  })
+                        className="mt-0.5 size-4 shrink-0 accent-primary"
+                        title={tool.enabled ? "Disable tool" : "Enable tool"}
+                      />
+                    </div>
+                  ))
                 ) : (
                   <div className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-                    No tools loaded.
+                    No tools configured.
                   </div>
                 )}
               </div>
@@ -4084,11 +4231,11 @@ export default function Home() {
                   </Label>
                   {toolLoadErrors.map((error) => (
                     <div
-                      key={`${error.filePath}:${error.message}`}
+                      key={`${error.source}:${error.message}`}
                       className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs leading-5"
                     >
-                      <div className="truncate font-medium text-destructive" title={error.filePath}>
-                        {error.filePath}
+                      <div className="truncate font-medium text-destructive" title={error.source}>
+                        {error.source}
                       </div>
                       <div className="text-muted-foreground">{error.message}</div>
                     </div>
@@ -4098,26 +4245,25 @@ export default function Home() {
             </aside>
 
             <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
-              {selectedTool ? (
+              {toolDraft ? (
                 <div className="grid gap-5 pb-1">
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div>
                       <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Selected tool
+                        Tool manifest
                       </Label>
-                      <h3 className="mt-1 truncate text-lg font-semibold leading-7">
-                        {selectedTool.name}
-                      </h3>
                       <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                        {selectedTool.description}
+                        The model sees only name, description, and schema. Chat Forge privately executes the configured command.
                       </p>
                     </div>
                     <label className="flex items-center gap-2 text-sm">
                       <input
                         type="checkbox"
-                        checked={isToolEnabled(selectedTool.name)}
+                        checked={toolDraft.enabled}
                         onChange={(event) =>
-                          toggleToolEnabled(selectedTool.name, event.target.checked)
+                          setToolDraft((current) =>
+                            current ? { ...current, enabled: event.target.checked } : current,
+                          )
                         }
                         className="size-4 accent-primary"
                       />
@@ -4125,42 +4271,223 @@ export default function Home() {
                     </label>
                   </div>
 
-                  <div className="grid gap-2">
-                    <Label>Source file</Label>
-                    <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm leading-6 text-muted-foreground [overflow-wrap:anywhere]">
-                      {selectedTool.filePath}
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-name">Name</Label>
+                      <Input
+                        id="tool-name"
+                        value={toolDraft.name}
+                        onChange={(event) =>
+                          setToolDraft((current) =>
+                            current ? { ...current, name: event.target.value } : current,
+                          )
+                        }
+                        placeholder="calculate_square_root"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-command">Command</Label>
+                      <Input
+                        id="tool-command"
+                        value={toolDraft.command}
+                        onChange={(event) =>
+                          setToolDraft((current) =>
+                            current ? { ...current, command: event.target.value } : current,
+                          )
+                        }
+                        placeholder="node / python / rg / git"
+                      />
                     </div>
                   </div>
 
                   <div className="grid gap-2">
-                    <Label>Description</Label>
-                    <div className="rounded-lg border bg-card px-3 py-2 text-sm leading-6">
-                      {selectedTool.description}
+                    <Label htmlFor="tool-description">Description</Label>
+                    <Textarea
+                      id="tool-description"
+                      value={toolDraft.description}
+                      onChange={(event) =>
+                        setToolDraft((current) =>
+                          current ? { ...current, description: event.target.value } : current,
+                        )
+                      }
+                      placeholder="Describe when the model should use this tool."
+                      className="min-h-20 resize-y"
+                    />
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="tool-schema">Parameters JSON schema</Label>
+                    <Textarea
+                      id="tool-schema"
+                      value={toolDraft.parametersText}
+                      onChange={(event) =>
+                        setToolDraft((current) =>
+                          current ? { ...current, parametersText: event.target.value } : current,
+                        )
+                      }
+                      className="min-h-44 resize-y font-mono text-xs"
+                      spellCheck={false}
+                    />
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-args">Arguments, one per line</Label>
+                      <Textarea
+                        id="tool-args"
+                        value={toolDraft.argsText}
+                        onChange={(event) =>
+                          setToolDraft((current) =>
+                            current ? { ...current, argsText: event.target.value } : current,
+                          )
+                        }
+                        placeholder={'C:/Prime/Tools/math-tool/dist/index.js\n--query\n{{query}}'}
+                        className="min-h-32 resize-y font-mono text-xs"
+                        spellCheck={false}
+                      />
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        Use <code>{'{{fieldName}}'}</code> placeholders for existing CLIs. Every placeholder must exist in schema.properties and schema.required.
+                      </p>
+                    </div>
+                    <div className="grid content-start gap-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="tool-input-mode">Input mode</Label>
+                        <Select
+                          value={toolDraft.input}
+                          onValueChange={(value) =>
+                            setToolDraft((current) =>
+                              current
+                                ? { ...current, input: value === "none" ? "none" : "json-stdin" }
+                                : current,
+                            )
+                          }
+                        >
+                          <SelectTrigger id="tool-input-mode" className="rounded-lg">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="json-stdin">JSON stdin</SelectItem>
+                            <SelectItem value="none">None</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          JSON stdin is best for scripts you write. None is best for existing CLI flags/placeholders.
+                        </p>
+                      </div>
+                      <div className="grid gap-2">
+                        <Label htmlFor="tool-timeout">Timeout ms</Label>
+                        <Input
+                          id="tool-timeout"
+                          value={toolDraft.timeoutMs}
+                          onChange={(event) =>
+                            setToolDraft((current) =>
+                              current ? { ...current, timeoutMs: event.target.value } : current,
+                            )
+                          }
+                          inputMode="numeric"
+                        />
+                      </div>
                     </div>
                   </div>
 
                   <div className="grid gap-2">
-                    <Label>Schema</Label>
-                    {renderJsonCodeBlock(JSON.stringify(selectedTool.parameters, null, 2))}
+                    <Label htmlFor="tool-cwd">Working directory</Label>
+                    <Input
+                      id="tool-cwd"
+                      value={toolDraft.cwd}
+                      onChange={(event) =>
+                        setToolDraft((current) =>
+                          current ? { ...current, cwd: event.target.value } : current,
+                        )
+                      }
+                      placeholder="Optional. Example: C:/Prime/Tools/math-tool"
+                    />
+                  </div>
+
+                  <Separator />
+
+                  <div className="grid gap-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <Label>Test tool</Label>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          Run this manifest locally with sample model arguments.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="rounded-lg"
+                        onClick={runCurrentToolTest}
+                        disabled={isTestingTool}
+                      >
+                        {isTestingTool ? "Running..." : "Run test"}
+                      </Button>
+                    </div>
+                    <Textarea
+                      value={toolTestArgsText}
+                      onChange={(event) => setToolTestArgsText(event.target.value)}
+                      className="min-h-24 resize-y font-mono text-xs"
+                      spellCheck={false}
+                      placeholder='{ "value": 144 }'
+                    />
+                    {toolTestResult && (
+                      <div className="grid gap-2 rounded-lg border bg-card p-3">
+                        <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                          <span>
+                            Exit: {toolTestResult.exitCode ?? "null"} · {toolTestResult.timedOut ? "Timed out" : "Completed"}
+                          </span>
+                          {toolTestResult.exitCode !== 0 || toolTestResult.timedOut ? (
+                            <span className="text-destructive">Error result</span>
+                          ) : (
+                            <span>Success</span>
+                          )}
+                        </div>
+                        {renderJsonCodeBlock(toolTestResult.content)}
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-                  Select a tools folder and reload to inspect available tools.
+                  Select a tool or add a new one.
                 </div>
               )}
             </div>
           </div>
 
-          <DialogFooter className="shrink-0 items-center border-t px-5 py-3">
-            <Button
-              type="button"
-              variant="secondary"
-              className="rounded-lg"
-              onClick={() => setToolsOpen(false)}
-            >
-              Close
-            </Button>
+          <DialogFooter className="shrink-0 items-center justify-between border-t px-5 py-3">
+            <div className="flex gap-2">
+              {toolDraft && (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="rounded-lg"
+                  onClick={deleteCurrentTool}
+                >
+                  <Trash2 className="size-4" />
+                  Delete
+                </Button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="rounded-lg"
+                onClick={() => setToolsOpen(false)}
+              >
+                Close
+              </Button>
+              <Button
+                type="button"
+                className="rounded-lg"
+                onClick={saveCurrentToolDraft}
+                disabled={!toolDraft || isSavingTool}
+              >
+                {isSavingTool ? "Saving..." : "Save tool"}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
