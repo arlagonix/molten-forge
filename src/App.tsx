@@ -10,6 +10,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Info,
   MessageSquareText,
   Moon,
   MoreVertical,
@@ -18,6 +19,7 @@ import {
   Pencil,
   Plus,
   RefreshCcw,
+  Save as SaveIcon,
   Send,
   Settings,
   Square,
@@ -27,6 +29,7 @@ import {
   X,
 } from "lucide-react";
 import type {
+  ComponentProps,
   FormEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
@@ -90,13 +93,17 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   buildTokenMetrics,
   createId,
   createNewProvider,
   createProviderId,
   formatChatActivityDate,
   formatOptionalNumber,
-  formatTokenMetrics,
   getActiveVariant,
   getChatActivityDate,
   getProviderFallbackModel,
@@ -211,16 +218,46 @@ function saveComposerDrafts(drafts: Record<string, string>) {
   );
 }
 
+function TooltipIconButton({
+  label,
+  children,
+  className,
+  tooltipSide = "top",
+  ...props
+}: ComponentProps<typeof Button> & {
+  label: string;
+  children: ReactNode;
+  tooltipSide?: "top" | "right" | "bottom" | "left";
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          aria-label={label}
+          title={label}
+          className={cn("h-6 w-6 rounded-lg text-muted-foreground", className)}
+          {...props}
+        >
+          {children}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side={tooltipSide}>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 const UserMessageEditor = memo(function UserMessageEditor({
   initialContent,
   disabled,
   onCancel,
   onSave,
+  onSubmit,
 }: {
   initialContent: string;
   disabled: boolean;
   onCancel: () => void;
   onSave: (content: string) => void | Promise<void>;
+  onSubmit: (content: string) => void | Promise<void>;
 }) {
   const [content, setContent] = useState(initialContent);
   const trimmedContent = content.trim();
@@ -233,6 +270,12 @@ const UserMessageEditor = memo(function UserMessageEditor({
     if (disabled || !trimmedContent) return;
 
     void onSave(content);
+  }
+
+  function handleSubmit() {
+    if (disabled || !trimmedContent) return;
+
+    void onSubmit(content);
   }
 
   return (
@@ -248,9 +291,14 @@ const UserMessageEditor = memo(function UserMessageEditor({
                 onCancel();
               }
 
-              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+              if ((event.ctrlKey || event.metaKey) && event.key === "s") {
                 event.preventDefault();
                 handleSave();
+              }
+
+              if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+                event.preventDefault();
+                handleSubmit();
               }
             }}
             autoFocus
@@ -261,30 +309,36 @@ const UserMessageEditor = memo(function UserMessageEditor({
       </article>
 
       <div className="flex justify-end gap-1.5 text-[11px] leading-4 text-muted-foreground">
-        <Button
+        <TooltipIconButton
           type="button"
           variant="ghost"
-          size="sm"
-          className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
+          size="icon-sm"
+          label="Save edit"
           onClick={handleSave}
           disabled={disabled || !trimmedContent}
-          title="Save edit and regenerate"
         >
-          <Check className="size-3" />
-          Save
-        </Button>
-        <Button
+          <SaveIcon className="size-3" />
+        </TooltipIconButton>
+        <TooltipIconButton
           type="button"
           variant="ghost"
-          size="sm"
-          className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
+          size="icon-sm"
+          label="Submit edit and regenerate"
+          onClick={handleSubmit}
+          disabled={disabled || !trimmedContent}
+        >
+          <Send className="size-3" />
+        </TooltipIconButton>
+        <TooltipIconButton
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          label="Cancel edit"
           onClick={onCancel}
           disabled={disabled}
-          title="Cancel edit"
         >
           <X className="size-3" />
-          Cancel
-        </Button>
+        </TooltipIconButton>
       </div>
     </div>
   );
@@ -483,9 +537,6 @@ export default function Home() {
     useState(false);
   const [sidebarModelSearchValue, setSidebarModelSearchValue] = useState("");
   const [isApiKeyVisible, setIsApiKeyVisible] = useState(false);
-  const [expandedMetricsIds, setExpandedMetricsIds] = useState<
-    Record<string, boolean>
-  >({});
   const [isNearChatBottom, setIsNearChatBottom] = useState(true);
   const [showScrollToBottomButton, setShowScrollToBottomButton] =
     useState(false);
@@ -1335,6 +1386,37 @@ export default function Home() {
     );
   }
 
+  function formatGenerationInfoJson(metrics: ChatAssistantVariant["metrics"]) {
+    if (!metrics) return "{}";
+
+    const usage = metrics.tokenUsage
+      ? Object.fromEntries(
+          Object.entries({
+            prompt_tokens: metrics.tokenUsage.promptTokens,
+            completion_tokens: metrics.tokenUsage.completionTokens,
+            total_tokens: metrics.tokenUsage.totalTokens,
+          }).filter(([, value]) => value !== undefined),
+        )
+      : undefined;
+
+    const info = Object.fromEntries(
+      Object.entries({
+        model: metrics.model,
+        provider: metrics.providerName,
+        finish_reason: metrics.finishReason,
+        usage: usage && Object.keys(usage).length > 0 ? usage : undefined,
+        duration_ms: metrics.durationMs,
+        output_tokens: metrics.outputTokens,
+        tokens_per_second: metrics.tokensPerSecond,
+        is_approximate: metrics.isApproximate,
+        started_at: metrics.startedAt,
+        completed_at: metrics.completedAt,
+      }).filter(([, value]) => value !== undefined && value !== ""),
+    );
+
+    return JSON.stringify(info, null, 2);
+  }
+
   function renderCodeBlock(
     value: string,
     language = "text",
@@ -1404,7 +1486,12 @@ ${value}
   }
 
   function getToolArgValue(args: unknown, key: string) {
-    if (!args || typeof args !== "object" || Array.isArray(args) || !(key in args)) {
+    if (
+      !args ||
+      typeof args !== "object" ||
+      Array.isArray(args) ||
+      !(key in args)
+    ) {
       throw new Error(`Missing required tool argument: ${key}`);
     }
 
@@ -1554,13 +1641,6 @@ ${value}
 
       return nextDrafts;
     });
-  }
-
-  function toggleMetrics(messageId: string) {
-    setExpandedMetricsIds((current) => ({
-      ...current,
-      [messageId]: !current[messageId],
-    }));
   }
 
   function appendToAssistantVariant(
@@ -2563,7 +2643,6 @@ ${value}
     );
 
     armStickyScrollToBottom();
-    setExpandedMetricsIds({});
 
     await runAssistantVariant({
       chatId: activeChat.id,
@@ -2680,11 +2759,6 @@ ${value}
     setCopiedMessageId((currentMessageId) =>
       currentMessageId === messageId ? null : currentMessageId,
     );
-    setExpandedMetricsIds((current) => {
-      const next = { ...current };
-      delete next[messageId];
-      return next;
-    });
     messageElementRefs.current.delete(messageId);
     showSuccess("Message deleted.");
   }
@@ -2709,6 +2783,43 @@ ${value}
   }
 
   async function saveEditedUserMessage(
+    messageId: string,
+    editedContent: string,
+  ) {
+    if (!activeChat) return;
+    if (isChatGenerating(activeChat.id)) return;
+
+    const userMessage = editedContent.trim();
+    if (!userMessage) {
+      showError("Message is required.");
+      return;
+    }
+
+    const userIndex = activeChat.messages.findIndex(
+      (message) => message.id === messageId && message.role === "user",
+    );
+    const currentMessage = activeChat.messages[userIndex];
+
+    if (userIndex < 0 || !currentMessage || currentMessage.role !== "user") {
+      showError("Could not find the message to edit.");
+      return;
+    }
+
+    updateChat(activeChat.id, (chat) => ({
+      ...chat,
+      title: userIndex === 0 ? titleFromMessage(userMessage) : chat.title,
+      messages: chat.messages.map((message) =>
+        message.id === messageId && message.role === "user"
+          ? { ...message, content: userMessage }
+          : message,
+      ),
+    }));
+
+    setEditingMessageId(null);
+    showSuccess("Message saved.");
+  }
+
+  async function submitEditedUserMessage(
     messageId: string,
     editedContent: string,
   ) {
@@ -2769,7 +2880,6 @@ ${value}
     ];
 
     armStickyScrollToBottom();
-    setExpandedMetricsIds({});
     setEditingMessageId(null);
 
     updateChat(activeChat.id, (chat) => ({
@@ -2806,7 +2916,6 @@ ${value}
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
     setEditingMessageId(null);
-    setExpandedMetricsIds({});
     clearStickyScrollSuppression();
     setChatAutoScrollEnabled(true);
     setIsNearChatBottom(true);
@@ -2824,7 +2933,6 @@ ${value}
   async function switchChat(chatId: string) {
     setActiveChatId(chatId);
     setEditingMessageId(null);
-    setExpandedMetricsIds({});
     clearStickyScrollSuppression();
     setChatAutoScrollEnabled(true);
     setIsNearChatBottom(true);
@@ -2843,7 +2951,6 @@ ${value}
       messages: [],
       updatedAt: now,
     }));
-    setExpandedMetricsIds({});
     showSuccess("Chat cleared.");
   }
 
@@ -2870,7 +2977,6 @@ ${value}
 
     setChats(nextChats);
     setActiveChatId(nextActiveId);
-    setExpandedMetricsIds({});
 
     try {
       await deleteChat(chatId);
@@ -3355,7 +3461,9 @@ ${value}
                                     )}
                                   </div>
                                   <div className="grid gap-3">
-                                    {renderToolExecutionPreview(executionPreview)}
+                                    {renderToolExecutionPreview(
+                                      executionPreview,
+                                    )}
                                     {showToolInput && (
                                       <div className="grid gap-1.5">
                                         <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
@@ -3480,7 +3588,9 @@ ${value}
                                       )}
                                     </div>
                                     <div className="grid gap-3">
-                                      {renderToolExecutionPreview(executionPreview)}
+                                      {renderToolExecutionPreview(
+                                        executionPreview,
+                                      )}
                                       {showToolInput && (
                                         <div className="grid gap-1.5">
                                           <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
@@ -3515,6 +3625,9 @@ ${value}
                           onCancel={cancelEditingUserMessage}
                           onSave={(nextContent) =>
                             saveEditedUserMessage(message.id, nextContent)
+                          }
+                          onSubmit={(nextContent) =>
+                            submitEditedUserMessage(message.id, nextContent)
                           }
                         />
                       ) : (
@@ -3678,79 +3791,73 @@ ${value}
                       {message.role === "user" &&
                         editingMessageId !== message.id && (
                           <div className="flex justify-end gap-1.5 text-[11px] leading-4 text-muted-foreground">
-                            <Button
+                            <TooltipIconButton
                               type="button"
                               variant="ghost"
-                              size="sm"
-                              className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
+                              size="icon-sm"
+                              className="text-destructive hover:text-destructive"
+                              label="Delete message"
+                              onClick={() => deleteMessage(message.id)}
+                              disabled={isSending}
+                            >
+                              <Trash2 className="size-3" />
+                            </TooltipIconButton>
+
+                            <TooltipIconButton
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              label={
+                                copiedMessageId === message.id
+                                  ? "Copied"
+                                  : "Copy message"
+                              }
                               onClick={() =>
                                 copyMessageContent(message.id, message.content)
                               }
                               disabled={!message.content.trim()}
-                              title="Copy message"
                             >
                               {copiedMessageId === message.id ? (
-                                <>
-                                  <Check className="size-3" />
-                                  Copied
-                                </>
+                                <Check className="size-3" />
                               ) : (
-                                <>
-                                  <Copy className="size-3" />
-                                  Copy
-                                </>
+                                <Copy className="size-3" />
                               )}
-                            </Button>
+                            </TooltipIconButton>
 
-                            <Button
+                            <TooltipIconButton
                               type="button"
                               variant="ghost"
-                              size="sm"
-                              className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
+                              size="icon-sm"
+                              label="Edit message"
                               onClick={() =>
                                 startEditingUserMessage(message.id)
                               }
                               disabled={isSending}
-                              title="Edit message"
                             >
                               <Pencil className="size-3" />
-                              Edit
-                            </Button>
+                            </TooltipIconButton>
                           </div>
                         )}
 
                       {message.role === "assistant" && (
                         <div className="grid gap-2 text-[11px] leading-4 text-muted-foreground">
                           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                            <button
-                              type="button"
-                              className={cn(
-                                "min-h-6 text-left hover:text-foreground disabled:pointer-events-none",
-                                isMessageStreaming &&
-                                  "generating-gradient-text font-medium",
-                              )}
-                              disabled={
-                                metrics?.durationMs === undefined ||
-                                isMessageStreaming
-                              }
-                              onClick={() => toggleMetrics(message.id)}
-                              title="Show generation details"
-                            >
-                              {isMessageStreaming
-                                ? "Generating"
-                                : metrics?.durationMs !== undefined
-                                  ? formatTokenMetrics(metrics)
-                                  : ""}
-                            </button>
+                            {isMessageStreaming ? (
+                              <span className="min-h-6 generating-gradient-text font-medium">
+                                Generating
+                              </span>
+                            ) : (
+                              <span className="min-h-6" aria-hidden="true" />
+                            )}
 
                             <div className="flex flex-wrap items-center justify-end gap-1.5">
                               {variantCount > 1 && (
                                 <div className="flex items-center gap-1">
-                                  <Button
+                                  <TooltipIconButton
                                     type="button"
                                     variant="ghost"
                                     size="icon-sm"
-                                    className="h-6 w-6 rounded-lg text-muted-foreground"
+                                    label="Previous answer"
                                     onClick={() =>
                                       selectAssistantVariant(
                                         message.id,
@@ -3761,18 +3868,17 @@ ${value}
                                       message.activeVariantIndex <= 0 ||
                                       isSending
                                     }
-                                    title="Previous answer"
                                   >
                                     <ChevronLeft className="size-3.5" />
-                                  </Button>
+                                  </TooltipIconButton>
                                   <span className="min-w-9 text-center tabular-nums">
                                     {activeVariantNumber}/{variantCount}
                                   </span>
-                                  <Button
+                                  <TooltipIconButton
                                     type="button"
                                     variant="ghost"
                                     size="icon-sm"
-                                    className="h-6 w-6 rounded-lg text-muted-foreground"
+                                    label="Next answer"
                                     onClick={() =>
                                       selectAssistantVariant(
                                         message.id,
@@ -3783,55 +3889,89 @@ ${value}
                                       message.activeVariantIndex >=
                                         variantCount - 1 || isSending
                                     }
-                                    title="Next answer"
                                   >
                                     <ChevronRight className="size-3.5" />
-                                  </Button>
+                                  </TooltipIconButton>
                                 </div>
                               )}
 
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
-                                onClick={() =>
-                                  copyMessageContent(message.id, content)
-                                }
-                                disabled={!content.trim()}
-                                title="Copy answer"
-                              >
-                                {copiedMessageId === message.id ? (
-                                  <>
-                                    <Check className="size-3" />
-                                    Copied
-                                  </>
-                                ) : (
-                                  <>
-                                    <Copy className="size-3" />
-                                    Copy
-                                  </>
-                                )}
-                              </Button>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    className="h-6 w-6 rounded-lg text-muted-foreground"
+                                    disabled={metrics?.durationMs === undefined}
+                                    title="Generation info"
+                                    aria-label="Generation info"
+                                  >
+                                    <Info className="size-3" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  align="end"
+                                  className="w-[min(26rem,calc(100vw-2rem))] rounded-lg p-3"
+                                >
+                                  <div className="mb-2 text-xs font-medium text-popover-foreground">
+                                    Generation info
+                                  </div>
+                                  {renderJsonCodeBlock(
+                                    formatGenerationInfoJson(metrics),
+                                    "chat-markdown-compact max-h-120 overflow-auto text-xs",
+                                  )}
+                                </PopoverContent>
+                              </Popover>
 
-                              <Button
+                              <TooltipIconButton
                                 type="button"
                                 variant="ghost"
-                                size="sm"
-                                className="h-6 rounded-lg px-2 text-xs text-muted-foreground"
-                                onClick={() =>
-                                  regenerateAssistantMessage(message.id)
-                                }
+                                size="icon-sm"
+                                className="text-destructive hover:text-destructive"
+                                label="Delete message"
+                                onClick={() => deleteMessage(message.id)}
                                 disabled={isSending}
-                                title={
+                              >
+                                <Trash2 className="size-3" />
+                              </TooltipIconButton>
+
+                              <TooltipIconButton
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                label={
                                   status === "error"
                                     ? "Retry answer"
                                     : "Regenerate answer"
                                 }
+                                onClick={() =>
+                                  regenerateAssistantMessage(message.id)
+                                }
+                                disabled={isSending}
                               >
                                 <RefreshCcw className="size-3" />
-                                {status === "error" ? "Retry" : "Regenerate"}
-                              </Button>
+                              </TooltipIconButton>
+
+                              <TooltipIconButton
+                                type="button"
+                                variant="ghost"
+                                size="icon-sm"
+                                label={
+                                  copiedMessageId === message.id
+                                    ? "Copied"
+                                    : "Copy answer"
+                                }
+                                onClick={() =>
+                                  copyMessageContent(message.id, content)
+                                }
+                                disabled={!content.trim()}
+                              >
+                                {copiedMessageId === message.id ? (
+                                  <Check className="size-3" />
+                                ) : (
+                                  <Copy className="size-3" />
+                                )}
+                              </TooltipIconButton>
                             </div>
                           </div>
                         </div>
