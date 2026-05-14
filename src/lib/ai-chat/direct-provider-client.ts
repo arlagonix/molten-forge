@@ -2,6 +2,9 @@ import type {
   ApiChatMessage,
   ChatMessage,
   ChatTokenUsage,
+  ChatToolCall,
+  ChatToolResult,
+  LoadedToolInfo,
   ProviderConfig,
   ProviderGenerationSettings,
 } from "./types";
@@ -95,6 +98,11 @@ function readFinishReason(data: unknown): string | undefined {
   return typeof finishReason === "string" ? finishReason : undefined;
 }
 
+function getActiveAssistantVariant(message: ChatMessage) {
+  if (message.role !== "assistant") return undefined;
+  return message.variants[message.activeVariantIndex];
+}
+
 function buildApiMessages({
   systemPrompt,
   messages,
@@ -102,21 +110,46 @@ function buildApiMessages({
 }: {
   systemPrompt: string;
   messages: ChatMessage[];
-  userMessage: string;
+  userMessage?: string;
 }): ApiChatMessage[] {
-  return [
+  const apiMessages: ApiChatMessage[] = [
     ...(systemPrompt.trim()
       ? [{ role: "system" as const, content: systemPrompt.trim() }]
       : []),
-    ...messages.map((message) => ({
-      role: message.role,
-      content: getActiveAssistantContent(message),
-    })),
-    {
-      role: "user" as const,
-      content: userMessage,
-    },
   ];
+
+  for (const message of messages) {
+    if (message.role === "user") {
+      apiMessages.push({ role: "user", content: message.content });
+      continue;
+    }
+
+    const variant = getActiveAssistantVariant(message);
+    if (!variant) continue;
+
+    apiMessages.push({
+      role: "assistant",
+      content: variant.content,
+      ...(variant.toolCalls?.length ? { tool_calls: variant.toolCalls } : {}),
+    });
+
+    for (const result of variant.toolResults ?? []) {
+      apiMessages.push({
+        role: "tool",
+        tool_call_id: result.toolCallId,
+        content: result.content,
+      });
+    }
+  }
+
+  if (userMessage?.trim()) {
+    apiMessages.push({
+      role: "user",
+      content: userMessage.trim(),
+    });
+  }
+
+  return apiMessages;
 }
 
 export function getActiveModelSettings(provider: ProviderConfig): ProviderGenerationSettings {
@@ -184,12 +217,14 @@ function buildPayload({
   messages,
   userMessage,
   stream,
+  tools,
 }: {
   provider: ProviderConfig;
   systemPrompt: string;
   messages: ChatMessage[];
-  userMessage: string;
+  userMessage?: string;
   stream: boolean;
+  tools?: LoadedToolInfo[];
 }) {
   const settings = getActiveModelSettings(provider);
   const temperature = normalizeOptionalNumber(settings.temperature, 0, 2);
@@ -200,6 +235,19 @@ function buildPayload({
     model: provider.model,
     messages: buildApiMessages({ systemPrompt, messages, userMessage }),
     stream,
+    ...(tools?.length
+      ? {
+          tools: tools.map((tool) => ({
+            type: "function" as const,
+            function: {
+              name: tool.name,
+              description: tool.description,
+              parameters: tool.parameters,
+            },
+          })),
+          tool_choice: "auto",
+        }
+      : {}),
     ...(stream
       ? {
           stream_options: {
@@ -361,7 +409,7 @@ export async function sendProviderChat({
     throw new Error("Model name is required.");
   }
 
-  if (!userMessage.trim()) {
+  if (!userMessage?.trim() && messages.length === 0) {
     throw new Error("Message is required.");
   }
 
@@ -386,6 +434,7 @@ export type StreamProviderChatResult = {
   finishReason?: string;
   content?: string;
   reasoning?: string;
+  toolCalls?: ChatToolCall[];
 };
 
 export async function streamProviderChat({
@@ -394,14 +443,16 @@ export async function streamProviderChat({
   messages,
   userMessage,
   signal,
+  tools,
   onContentDelta,
   onReasoningDelta,
 }: {
   provider: ProviderConfig;
   systemPrompt: string;
   messages: ChatMessage[];
-  userMessage: string;
+  userMessage?: string;
   signal?: AbortSignal;
+  tools?: LoadedToolInfo[];
   onContentDelta: (delta: string) => void;
   onReasoningDelta?: (delta: string) => void;
 }): Promise<StreamProviderChatResult> {
@@ -413,7 +464,7 @@ export async function streamProviderChat({
     throw new Error("Model name is required.");
   }
 
-  if (!userMessage.trim()) {
+  if (!userMessage?.trim() && messages.length === 0) {
     throw new Error("Message is required.");
   }
 
@@ -439,7 +490,7 @@ export async function streamProviderChat({
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     headers: provider.headers,
-    payload: buildPayload({ provider, systemPrompt, messages, userMessage, stream: true }),
+    payload: buildPayload({ provider, systemPrompt, messages, userMessage, stream: true, tools }),
   });
 
   const abortHandler = () => {
@@ -507,6 +558,7 @@ export async function streamProviderChat({
       finishReason: result.finishReason ?? undefined,
       content: finalContent || undefined,
       reasoning: finalReasoning || undefined,
+      toolCalls: result.toolCalls ?? undefined,
     };
   } catch (error) {
     if (signal?.aborted) {

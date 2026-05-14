@@ -1,6 +1,6 @@
 import { defaultGenerationSettings, defaultProvider } from "./provider-presets";
 import { sortChatsByUpdatedAt } from "./chat-utils";
-import type { ChatSession, ProviderConfig, ProvidersState } from "./types";
+import type { ChatSession, ProviderConfig, ProvidersState, ToolsSettings } from "./types";
 
 const DB_NAME = "chat-forge";
 const DB_VERSION = 1;
@@ -12,6 +12,7 @@ const PROVIDERS_STATE_KEY = "providers-state";
 const SYSTEM_PROMPT_KEY = "system-prompt";
 const ACTIVE_CHAT_ID_KEY = "active-chat-id";
 const MODEL_CACHE_KEY_PREFIX = "provider-models:";
+const TOOLS_SETTINGS_KEY = "tools-settings";
 
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
 
@@ -37,6 +38,8 @@ type ChatForgeStorageApi = {
   saveSystemPrompt: (value: string) => Promise<void>;
   loadActiveChatId: () => Promise<string | undefined>;
   saveActiveChatId: (chatId: string) => Promise<void>;
+  loadToolsSettings: () => Promise<ToolsSettings | undefined>;
+  saveToolsSettings: (value: ToolsSettings) => Promise<void>;
   loadCachedProviderModels: (cacheKey: string) => Promise<string[]>;
   saveCachedProviderModels: (cacheKey: string, models: string[]) => Promise<void>;
   loadChats: () => Promise<ChatSession[]>;
@@ -126,6 +129,13 @@ function normalizeProvidersState(value?: ProvidersState): ProvidersState {
   return {
     providers: [provider],
     activeProviderId: provider.id,
+  };
+}
+
+function normalizeToolsSettings(value: Partial<ToolsSettings> | undefined): ToolsSettings {
+  return {
+    enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
+    directory: typeof value?.directory === "string" ? value.directory : "",
   };
 }
 
@@ -411,6 +421,28 @@ export async function saveActiveChatId(chatId: string): Promise<void> {
   }
 
   await legacySetSetting(ACTIVE_CHAT_ID_KEY, chatId);
+}
+
+export async function loadToolsSettings(): Promise<ToolsSettings> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return normalizeToolsSettings(await api.loadToolsSettings());
+  }
+
+  return normalizeToolsSettings(await legacyGetSetting<ToolsSettings | undefined>(TOOLS_SETTINGS_KEY, undefined));
+}
+
+export async function saveToolsSettings(value: ToolsSettings): Promise<void> {
+  const normalized = normalizeToolsSettings(value);
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.saveToolsSettings(normalized);
+    return;
+  }
+
+  await legacySetSetting(TOOLS_SETTINGS_KEY, normalized);
 }
 
 export async function loadCachedProviderModels(

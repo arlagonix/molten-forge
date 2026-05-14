@@ -27,3 +27,4 @@ release
 *.zip
 dist/*
 dist-electron/*
+tmp/*

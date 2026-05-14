@@ -27,7 +27,7 @@ export type ProvidersState = {
   activeProviderId: string;
 };
 
-export type ChatRole = "system" | "user" | "assistant";
+export type ChatRole = "system" | "user" | "assistant" | "tool";
 
 export type ChatMessageStatus = "streaming" | "done" | "error";
 
@@ -50,6 +50,22 @@ export type ChatMessageMetrics = {
   finishReason?: string;
 };
 
+export type ChatToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
+export type ChatToolResult = {
+  toolCallId: string;
+  toolName: string;
+  content: string;
+  isError?: boolean;
+};
+
 export type ChatAssistantVariant = {
   id: string;
   content: string;
@@ -57,6 +73,8 @@ export type ChatAssistantVariant = {
   status?: ChatMessageStatus;
   createdAt: string;
   metrics?: ChatMessageMetrics;
+  toolCalls?: ChatToolCall[];
+  toolResults?: ChatToolResult[];
 };
 
 export type ChatUserMessage = {
@@ -86,7 +104,46 @@ export type ChatSession = {
   model?: string;
 };
 
-export type ApiChatMessage = {
-  role: ChatRole;
-  content: string;
+export type ApiToolCall = ChatToolCall;
+
+export type ApiChatMessage =
+  | {
+      role: "system" | "user";
+      content: string;
+    }
+  | {
+      role: "assistant";
+      content: string;
+      tool_calls?: ApiToolCall[];
+    }
+  | {
+      role: "tool";
+      tool_call_id: string;
+      content: string;
+    };
+
+export type ToolDefinition = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+};
+
+export type LoadedToolInfo = ToolDefinition & {
+  filePath: string;
+};
+
+export type ToolLoadError = {
+  filePath: string;
+  message: string;
+};
+
+export type ToolsSettings = {
+  enabled: boolean;
+  directory: string;
+};
+
+export type ToolsState = {
+  settings: ToolsSettings;
+  tools: LoadedToolInfo[];
+  errors: ToolLoadError[];
 };

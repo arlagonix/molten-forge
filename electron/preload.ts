@@ -98,4 +98,27 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
   deleteAllChats() {
     return ipcRenderer.invoke("storage:chats:delete-all");
   },
+
+  loadToolsSettings() {
+    return ipcRenderer.invoke("storage:tools-settings:load");
+  },
+
+  saveToolsSettings(value: unknown) {
+    return ipcRenderer.invoke("storage:tools-settings:save", value);
+  },
+});
+
+
+contextBridge.exposeInMainWorld("chatForgeTools", {
+  selectDirectory() {
+    return ipcRenderer.invoke("tools:select-directory");
+  },
+
+  load(directory: unknown) {
+    return ipcRenderer.invoke("tools:load", directory);
+  },
+
+  execute(request: unknown) {
+    return ipcRenderer.invoke("tools:execute", request);
+  },
 });

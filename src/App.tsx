@@ -20,6 +20,7 @@ import {
   Send,
   Settings,
   Square,
+  Wrench,
   Sun,
   Trash2,
   X,
@@ -123,19 +124,25 @@ import {
   loadChats,
   loadProvidersState,
   loadSystemPrompt,
+  loadToolsSettings,
   saveActiveChatId,
   saveCachedProviderModels,
   saveChat,
   saveProvidersState,
   saveSystemPrompt,
+  saveToolsSettings,
 } from "@/lib/ai-chat/storage";
 import type {
   ChatAssistantVariant,
   ChatMessage,
+  ChatToolCall,
+  ChatToolResult,
+  LoadedToolInfo,
   ChatSession,
   ProviderConfig,
   ProviderGenerationSettings,
   ProvidersState,
+  ToolsSettings,
 } from "@/lib/ai-chat/types";
 import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -150,6 +157,8 @@ const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
 const STICKY_SCROLL_SETTLE_FRAMES = 5;
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
+const DEFAULT_TOOLS_SETTINGS: ToolsSettings = { enabled: true, directory: "" };
+const MAX_TOOL_ROUNDS = 3;
 
 const UserMessageEditor = memo(function UserMessageEditor({
   initialContent,
@@ -389,6 +398,14 @@ export default function Home() {
   const [systemPrompt, setSystemPrompt] = useState(
     "You are a helpful assistant.",
   );
+  const [toolsSettings, setToolsSettings] = useState<ToolsSettings>(
+    DEFAULT_TOOLS_SETTINGS,
+  );
+  const [loadedTools, setLoadedTools] = useState<LoadedToolInfo[]>([]);
+  const [toolLoadErrors, setToolLoadErrors] = useState<
+    Array<{ filePath: string; message: string }>
+  >([]);
+  const [isLoadingTools, setIsLoadingTools] = useState(false);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
@@ -588,11 +605,13 @@ export default function Home() {
           loadedSystemPrompt,
           loadedChats,
           loadedActiveChatId,
+          loadedToolsSettings,
         ] = await Promise.all([
           loadProvidersState(),
           loadSystemPrompt(),
           loadChats(),
           loadActiveChatId(),
+          loadToolsSettings(),
         ]);
 
         if (cancelled) return;
@@ -643,10 +662,12 @@ export default function Home() {
           activeProviderId: fallbackProviderId,
         });
         setSystemPrompt(loadedSystemPrompt);
+        setToolsSettings(loadedToolsSettings);
         setChats(nextChats);
         setActiveChatId(nextActiveChatId);
         didHydrateRef.current = true;
         setMounted(true);
+        void reloadTools(loadedToolsSettings);
       } catch (error) {
         console.error("Failed to load app data from IndexedDB:", error);
         const fallbackProvider = normalizeProviderForState(defaultProvider);
@@ -745,6 +766,13 @@ export default function Home() {
       console.error("Failed to save system prompt:", error),
     );
   }, [systemPrompt]);
+
+  useEffect(() => {
+    if (!didHydrateRef.current) return;
+    saveToolsSettings(toolsSettings).catch((error) =>
+      console.error("Failed to save tools settings:", error),
+    );
+  }, [toolsSettings]);
 
   useEffect(() => {
     if (!didHydrateRef.current || !activeChatId) return;
@@ -1208,6 +1236,96 @@ export default function Home() {
     toast(message, description ? { description } : undefined);
   }
 
+  function getToolsBridge() {
+    if (!window.chatForgeTools) {
+      throw new Error("Electron tools bridge is not available.");
+    }
+
+    return window.chatForgeTools;
+  }
+
+  async function reloadTools(settings = toolsSettings) {
+    setIsLoadingTools(true);
+
+    try {
+      if (!settings.enabled || !settings.directory.trim()) {
+        setLoadedTools([]);
+        setToolLoadErrors([]);
+        return;
+      }
+
+      const result = await getToolsBridge().load(settings.directory);
+      setLoadedTools(result.tools);
+      setToolLoadErrors(result.errors);
+
+      if (result.tools.length) {
+        showSuccess(
+          `Loaded ${result.tools.length} tool${result.tools.length === 1 ? "" : "s"}.`,
+        );
+      } else if (result.errors.length) {
+        showError("No tools loaded", "Check the tool load errors in settings.");
+      } else {
+        showInfo(
+          "No tools found",
+          "Add .js or .cjs tool files to the selected folder.",
+        );
+      }
+    } catch (error) {
+      console.error("Failed to load tools:", error);
+      setLoadedTools([]);
+      setToolLoadErrors([
+        { filePath: settings.directory, message: labelForError(error) },
+      ]);
+      showError("Failed to load tools", labelForError(error));
+    } finally {
+      setIsLoadingTools(false);
+    }
+  }
+
+  async function selectToolsDirectory() {
+    try {
+      const directory = await getToolsBridge().selectDirectory();
+      if (!directory) return;
+
+      const nextSettings = { ...toolsSettings, directory };
+      setToolsSettings(nextSettings);
+      await saveToolsSettings(nextSettings);
+      await reloadTools(nextSettings);
+    } catch (error) {
+      console.error("Failed to select tools folder:", error);
+      showError("Failed to select tools folder", labelForError(error));
+    }
+  }
+
+  function getEnabledTools() {
+    return toolsSettings.enabled ? loadedTools : [];
+  }
+
+  async function executeToolCall(
+    toolCall: ChatToolCall,
+  ): Promise<ChatToolResult> {
+    const toolName = toolCall.function.name;
+
+    try {
+      const argsText = toolCall.function.arguments.trim() || "{}";
+      const args = JSON.parse(argsText);
+      const result = await getToolsBridge().execute({ name: toolName, args });
+
+      return {
+        toolCallId: toolCall.id,
+        toolName: result.toolName || toolName,
+        content: result.content,
+      };
+    } catch (error) {
+      return {
+        toolCallId: toolCall.id,
+        toolName,
+        content: `Error: ${labelForError(error)}`,
+        isError: true,
+      };
+    }
+  }
+
   function updateChat(
     chatId: string,
     updater: (chat: ChatSession) => ChatSession,
@@ -1613,7 +1731,9 @@ export default function Home() {
       await Promise.all([
         saveProvidersState(providersState),
         saveSystemPrompt(systemPrompt),
+        saveToolsSettings(toolsSettings),
       ]);
+      await reloadTools(toolsSettings);
       showSuccess("Settings saved.");
       setSettingsOpen(false);
     } catch (error) {
@@ -1775,47 +1895,14 @@ export default function Home() {
 
     toast.dismiss();
 
-    try {
-      const streamResult = await streamProviderChat({
-        provider: providerForRun,
-        systemPrompt,
-        messages: contextMessages,
-        userMessage,
-        signal: controller.signal,
-        onContentDelta: (delta) => {
-          appendBufferedAssistantVariant(
-            chatId,
-            assistantMessageId,
-            variantId,
-            {
-              content: delta,
-            },
-          );
+    let toolCallsForContext: ChatToolCall[] = [];
+    let toolResultsForContext: ChatToolResult[] = [];
+    let accumulatedContent = "";
+    let accumulatedReasoning = "";
 
-          if (chatId === activeChatId) {
-            scheduleStickyScrollToBottom();
-          }
-        },
-        onReasoningDelta: (delta) => {
-          appendBufferedAssistantVariant(
-            chatId,
-            assistantMessageId,
-            variantId,
-            {
-              reasoning: delta,
-            },
-          );
-
-          if (chatId === activeChatId) {
-            scheduleStickyScrollToBottom();
-          }
-        },
-      });
-
-      flushBufferedAssistantVariant(
-        getStreamBufferKey(chatId, assistantMessageId, variantId),
-      );
-
+    const markVariantDone = (
+      streamResult: Awaited<ReturnType<typeof streamProviderChat>>,
+    ) => {
       const durationMs = Math.max(1, performance.now() - responseStartedAtMs);
 
       updateAssistantVariant(
@@ -1841,6 +1928,133 @@ export default function Home() {
           },
         }),
       );
+    };
+
+    const applyToolRoundToVariant = (
+      toolCalls: ChatToolCall[],
+      toolResults: ChatToolResult[],
+    ) => {
+      toolCallsForContext = [...toolCallsForContext, ...toolCalls];
+      toolResultsForContext = [...toolResultsForContext, ...toolResults];
+
+      updateAssistantVariant(
+        chatId,
+        assistantMessageId,
+        variantId,
+        (variant) => ({
+          ...variant,
+          toolCalls: [...(variant.toolCalls ?? []), ...toolCalls],
+          toolResults: [...(variant.toolResults ?? []), ...toolResults],
+        }),
+        { touch: false },
+      );
+    };
+
+    const buildContinuationMessages = (): ChatMessage[] => [
+      ...contextMessages,
+      {
+        id: createId(),
+        role: "user",
+        content: userMessage,
+        createdAt: new Date().toISOString(),
+      },
+      {
+        id: assistantMessageId,
+        role: "assistant",
+        activeVariantIndex: 0,
+        createdAt: new Date().toISOString(),
+        variants: [
+          {
+            id: variantId,
+            content: accumulatedContent,
+            reasoning: accumulatedReasoning,
+            status: "streaming",
+            createdAt: new Date().toISOString(),
+            toolCalls: toolCallsForContext,
+            toolResults: toolResultsForContext,
+          },
+        ],
+      },
+    ];
+
+    try {
+      let currentMessages = contextMessages;
+      let currentUserMessage: string | undefined = userMessage;
+      let lastStreamResult:
+        | Awaited<ReturnType<typeof streamProviderChat>>
+        | undefined;
+
+      for (let toolRound = 0; toolRound <= MAX_TOOL_ROUNDS; toolRound += 1) {
+        const streamResult = await streamProviderChat({
+          provider: providerForRun,
+          systemPrompt,
+          messages: currentMessages,
+          userMessage: currentUserMessage,
+          signal: controller.signal,
+          tools: getEnabledTools(),
+          onContentDelta: (delta) => {
+            accumulatedContent += delta;
+            appendBufferedAssistantVariant(
+              chatId,
+              assistantMessageId,
+              variantId,
+              {
+                content: delta,
+              },
+            );
+
+            if (chatId === activeChatId) {
+              scheduleStickyScrollToBottom();
+            }
+          },
+          onReasoningDelta: (delta) => {
+            accumulatedReasoning += delta;
+            appendBufferedAssistantVariant(
+              chatId,
+              assistantMessageId,
+              variantId,
+              {
+                reasoning: delta,
+              },
+            );
+
+            if (chatId === activeChatId) {
+              scheduleStickyScrollToBottom();
+            }
+          },
+        });
+
+        lastStreamResult = streamResult;
+
+        flushBufferedAssistantVariant(
+          getStreamBufferKey(chatId, assistantMessageId, variantId),
+        );
+
+        const toolCalls = streamResult.toolCalls ?? [];
+        if (!toolCalls.length) break;
+
+        if (toolRound >= MAX_TOOL_ROUNDS) {
+          throw new Error(
+            `Stopped after ${MAX_TOOL_ROUNDS} tool rounds to avoid an infinite loop.`,
+          );
+        }
+
+        const toolResults = await Promise.all(toolCalls.map(executeToolCall));
+        applyToolRoundToVariant(toolCalls, toolResults);
+
+        if (chatId === activeChatId) {
+          scheduleStickyScrollToBottom({ force: true });
+        }
+
+        currentMessages = buildContinuationMessages();
+        currentUserMessage = undefined;
+      }
+
+      flushBufferedAssistantVariant(
+        getStreamBufferKey(chatId, assistantMessageId, variantId),
+      );
+
+      markVariantDone(lastStreamResult ?? {});
     } catch (error) {
       const wasAborted =
         error instanceof DOMException && error.name === "AbortError";
@@ -2713,6 +2927,8 @@ export default function Home() {
                       ? (activeVariant?.content ?? "")
                       : message.content;
                   const reasoning = activeVariant?.reasoning ?? "";
+                  const toolCalls = activeVariant?.toolCalls ?? [];
+                  const toolResults = activeVariant?.toolResults ?? [];
                   const status = activeVariant?.status;
                   const metrics = activeVariant?.metrics;
                   const isVisuallyStreaming = visualStreamingMessageIds.some(
@@ -2773,6 +2989,53 @@ export default function Home() {
                             </article>
                           );
                         })()}
+
+                      {message.role === "assistant" && toolCalls.length > 0 && (
+                        <div className="grid gap-2">
+                          {toolCalls.map((toolCall) => {
+                            const result = toolResults.find(
+                              (item) => item.toolCallId === toolCall.id,
+                            );
+
+                            return (
+                              <div key={toolCall.id} className="grid gap-2">
+                                <article className="flex min-w-0 max-w-full justify-start mt-2">
+                                  <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/30 px-4 py-3 text-sm shadow-xs [overflow-wrap:anywhere]">
+                                    <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                      <Wrench className="size-3.5" />
+                                      Tool call: {toolCall.function.name}
+                                    </div>
+                                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-background/70 p-3 text-xs leading-5 text-foreground">
+                                      {toolCall.function.arguments || "{}"}
+                                    </pre>
+                                  </div>
+                                </article>
+
+                                {result && (
+                                  <article className="flex min-w-0 max-w-full justify-start">
+                                    <div
+                                      className={cn(
+                                        "w-full min-w-0 max-w-full overflow-hidden rounded-lg border px-4 py-3 text-sm shadow-xs [overflow-wrap:anywhere]",
+                                        result.isError
+                                          ? "border-destructive/50 bg-destructive/5"
+                                          : "bg-muted/20",
+                                      )}
+                                    >
+                                      <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                        <Wrench className="size-3.5" />
+                                        Tool result: {result.toolName}
+                                      </div>
+                                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-background/70 p-3 text-xs leading-5 text-foreground">
+                                        {result.content}
+                                      </pre>
+                                    </div>
+                                  </article>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
 
                       {message.role === "user" &&
                       editingMessageId === message.id ? (
@@ -3434,6 +3697,120 @@ export default function Home() {
                       <p className="px-2 py-4 text-sm text-muted-foreground">
                         Load models to choose which ones should be visible.
                       </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid gap-3 rounded-lg border bg-card p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <Label>Tools</Label>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        Load local .js or .cjs tool files from one trusted
+                        folder.
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={toolsSettings.enabled}
+                        onChange={(event) =>
+                          setToolsSettings((current) => ({
+                            ...current,
+                            enabled: event.target.checked,
+                          }))
+                        }
+                        className="size-4 accent-primary"
+                      />
+                      Enabled
+                    </label>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label htmlFor="tools-directory">Tools folder</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="tools-directory"
+                        value={toolsSettings.directory}
+                        onChange={(event) =>
+                          setToolsSettings((current) => ({
+                            ...current,
+                            directory: event.target.value,
+                          }))
+                        }
+                        placeholder="C:/Prime/ChatForgeTools"
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="shrink-0 rounded-lg"
+                        onClick={selectToolsDirectory}
+                      >
+                        Browse
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="shrink-0 rounded-lg"
+                        onClick={() => reloadTools()}
+                        disabled={isLoadingTools}
+                      >
+                        <RefreshCcw
+                          className={cn(
+                            "size-4",
+                            isLoadingTools && "animate-spin",
+                          )}
+                        />
+                        Reload
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2 rounded-lg border bg-background p-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+                      <Wrench className="size-4" />
+                      {loadedTools.length} loaded tool
+                      {loadedTools.length === 1 ? "" : "s"}
+                      {toolLoadErrors.length > 0 && (
+                        <span>
+                          · {toolLoadErrors.length} load error
+                          {toolLoadErrors.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </div>
+
+                    {loadedTools.length > 0 && (
+                      <div className="grid gap-1">
+                        {loadedTools.map((tool) => (
+                          <div
+                            key={tool.name}
+                            className="rounded-lg bg-muted/40 px-2 py-1.5"
+                          >
+                            <div className="font-medium">{tool.name}</div>
+                            <div className="text-xs leading-5 text-muted-foreground">
+                              {tool.description}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {toolLoadErrors.length > 0 && (
+                      <div className="grid gap-1">
+                        {toolLoadErrors.map((error) => (
+                          <div
+                            key={`${error.filePath}:${error.message}`}
+                            className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs leading-5"
+                          >
+                            <div className="font-medium text-destructive">
+                              {error.filePath}
+                            </div>
+                            <div className="text-muted-foreground">
+                              {error.message}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>

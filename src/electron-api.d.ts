@@ -1,4 +1,4 @@
-import type { ChatTokenUsage } from "@/lib/ai-chat/types";
+import type { ChatTokenUsage, LoadedToolInfo, ToolLoadError, ToolsSettings } from "@/lib/ai-chat/types";
 
 type AiProviderRequest = {
   baseUrl: string;
@@ -6,6 +6,15 @@ type AiProviderRequest = {
   headers?: Record<string, string>;
   customHeaders?: string;
   payload?: unknown;
+};
+
+type AiToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
 };
 
 type AiStreamDeltaEvent =
@@ -18,6 +27,7 @@ type AiStreamResult = {
   finishReason?: string;
   content?: string;
   reasoning?: string;
+  toolCalls?: AiToolCall[];
 };
 
 type AiStreamHandle = {
@@ -63,6 +73,19 @@ declare global {
       saveChat: (chat: unknown) => Promise<void>;
       deleteChat: (chatId: string) => Promise<void>;
       deleteAllChats: () => Promise<void>;
+      loadToolsSettings: () => Promise<ToolsSettings | undefined>;
+      saveToolsSettings: (value: ToolsSettings) => Promise<void>;
+    };
+  }
+}
+
+
+declare global {
+  interface Window {
+    chatForgeTools?: {
+      selectDirectory: () => Promise<string | undefined>;
+      load: (directory: string) => Promise<{ tools: LoadedToolInfo[]; errors: ToolLoadError[] }>;
+      execute: (request: { name: string; args: unknown }) => Promise<{ toolName: string; content: string }>;
     };
   }
 }

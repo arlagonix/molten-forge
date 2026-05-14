@@ -1,7 +1,7 @@
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const APP_ROOT = path.join(__dirname, "..");
@@ -45,11 +45,41 @@ type ChatTokenUsage = {
   totalTokens?: number;
 };
 
+type ToolCall = {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string;
+  };
+};
+
 type StreamResult = {
   usage?: ChatTokenUsage;
   finishReason?: string;
   content?: string;
   reasoning?: string;
+  toolCalls?: ToolCall[];
+};
+
+type ToolDefinition = {
+  name: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  execute: (args: unknown) => unknown | Promise<unknown>;
+  filePath: string;
+};
+
+type PublicToolDefinition = Omit<ToolDefinition, "execute">;
+
+type ToolsSettings = {
+  enabled: boolean;
+  directory: string;
+};
+
+type ToolLoadError = {
+  filePath: string;
+  message: string;
 };
 
 const blockedUpstreamHeaders = new Set([
@@ -63,6 +93,10 @@ const blockedUpstreamHeaders = new Set([
 ]);
 
 const activeStreamControllers = new Map<string, AbortController>();
+const loadedTools = new Map<string, ToolDefinition>();
+const DEFAULT_TOOLS_SETTINGS: ToolsSettings = { enabled: true, directory: "" };
+const TOOL_EXECUTION_TIMEOUT_MS = 30_000;
+const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const APP_TITLE = `Chat Forge v${app.getVersion()}`;
 let win: BrowserWindow | null = null;
 
@@ -262,6 +296,217 @@ function readFinishReason(data: unknown): string | undefined {
   if (!Array.isArray(choices)) return undefined;
   const finishReason = choices[0]?.finish_reason;
   return typeof finishReason === "string" ? finishReason : undefined;
+}
+
+
+function normalizeToolsSettings(value: unknown): ToolsSettings {
+  if (!isPlainObject(value)) return DEFAULT_TOOLS_SETTINGS;
+
+  return {
+    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
+    directory: typeof value.directory === "string" ? value.directory : "",
+  };
+}
+
+function isJsonSchemaObject(value: unknown): value is Record<string, unknown> {
+  return isPlainObject(value) && value.type === "object";
+}
+
+function validateToolDefinition(candidate: unknown, filePath: string): ToolDefinition {
+  const source = isPlainObject(candidate) ? candidate : undefined;
+
+  if (!source) throw new Error("Tool file must export an object.");
+
+  const name = typeof source.name === "string" ? source.name.trim() : "";
+  const description = typeof source.description === "string" ? source.description.trim() : "";
+  const parameters = source.parameters;
+  const execute = source.execute;
+
+  if (!name) throw new Error("Tool name is required.");
+  if (!TOOL_NAME_PATTERN.test(name)) {
+    throw new Error("Tool name must use only letters, numbers, underscores, or hyphens.");
+  }
+  if (!description) throw new Error("Tool description is required.");
+  if (!isJsonSchemaObject(parameters)) {
+    throw new Error('Tool parameters must be a JSON schema object with type: "object".');
+  }
+  if (typeof execute !== "function") throw new Error("Tool execute function is required.");
+
+  return {
+    name,
+    description,
+    parameters,
+    execute: execute as ToolDefinition["execute"],
+    filePath,
+  };
+}
+
+function toPublicTool(tool: ToolDefinition): PublicToolDefinition {
+  return {
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.parameters,
+    filePath: tool.filePath,
+  };
+}
+
+async function importToolFile(filePath: string) {
+  const stats = await fs.stat(filePath);
+  const moduleUrl = `${pathToFileURL(filePath).href}?mtime=${stats.mtimeMs}`;
+  const imported = await import(moduleUrl);
+  return imported.default ?? imported;
+}
+
+async function loadToolsFromDirectory(directory: string): Promise<{ tools: PublicToolDefinition[]; errors: ToolLoadError[] }> {
+  loadedTools.clear();
+
+  const trimmedDirectory = directory.trim();
+  if (!trimmedDirectory) return { tools: [], errors: [] };
+
+  const errors: ToolLoadError[] = [];
+  const tools: PublicToolDefinition[] = [];
+
+  let entries;
+  try {
+    entries = await fs.readdir(trimmedDirectory, { withFileTypes: true });
+  } catch (error) {
+    return {
+      tools: [],
+      errors: [{ filePath: trimmedDirectory, message: `Unable to read tools folder: ${error instanceof Error ? error.message : String(error)}` }],
+    };
+  }
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !/\.(?:cjs|js)$/i.test(entry.name)) continue;
+
+    const filePath = path.join(trimmedDirectory, entry.name);
+
+    try {
+      const candidate = await importToolFile(filePath);
+      const tool = validateToolDefinition(candidate, filePath);
+
+      if (loadedTools.has(tool.name)) {
+        throw new Error(`Duplicate tool name: ${tool.name}`);
+      }
+
+      loadedTools.set(tool.name, tool);
+      tools.push(toPublicTool(tool));
+    } catch (error) {
+      errors.push({
+        filePath,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  tools.sort((left, right) => left.name.localeCompare(right.name));
+  errors.sort((left, right) => left.filePath.localeCompare(right.filePath));
+  return { tools, errors };
+}
+
+function stringifyToolResult(result: unknown) {
+  if (typeof result === "string") return result;
+
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+async function executeLoadedTool(name: unknown, args: unknown) {
+  const toolName = typeof name === "string" ? name.trim() : "";
+  if (!toolName) throw new Error("Tool name is required.");
+
+  const tool = loadedTools.get(toolName);
+  if (!tool) throw new Error(`Tool is not loaded: ${toolName}`);
+
+  const result = await withTimeout(
+    Promise.resolve(tool.execute(args)),
+    TOOL_EXECUTION_TIMEOUT_MS,
+    `Tool timed out after ${TOOL_EXECUTION_TIMEOUT_MS / 1000} seconds.`,
+  );
+
+  return {
+    toolName,
+    content: stringifyToolResult(result),
+  };
+}
+
+function normalizeToolCallFromChoice(value: unknown): ToolCall[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item): ToolCall | undefined => {
+      if (!isPlainObject(item)) return undefined;
+      const fn = isPlainObject(item.function) ? item.function : undefined;
+      const id = typeof item.id === "string" ? item.id : "";
+      const name = typeof fn?.name === "string" ? fn.name : "";
+      const args = typeof fn?.arguments === "string" ? fn.arguments : "";
+      if (!id || !name) return undefined;
+      return {
+        id,
+        type: "function",
+        function: {
+          name,
+          arguments: args,
+        },
+      };
+    })
+    .filter((item): item is ToolCall => Boolean(item));
+}
+
+function readFinalToolCalls(data: unknown): ToolCall[] {
+  if (!data || typeof data !== "object") return [];
+  const choices = "choices" in data ? data.choices : undefined;
+  if (!Array.isArray(choices)) return [];
+  const message = choices[0]?.message;
+  if (!message || typeof message !== "object") return [];
+  return normalizeToolCallFromChoice("tool_calls" in message ? message.tool_calls : undefined);
+}
+
+function mergeToolCallDelta(current: Map<number, ToolCall>, data: unknown) {
+  if (!data || typeof data !== "object") return;
+  const choices = "choices" in data ? data.choices : undefined;
+  if (!Array.isArray(choices)) return;
+  const delta = choices[0]?.delta;
+  if (!delta || typeof delta !== "object") return;
+  const toolCalls = "tool_calls" in delta ? delta.tool_calls : undefined;
+  if (!Array.isArray(toolCalls)) return;
+
+  for (const rawCall of toolCalls) {
+    if (!isPlainObject(rawCall)) continue;
+    const index = typeof rawCall.index === "number" ? rawCall.index : current.size;
+    const existing = current.get(index) ?? {
+      id: "",
+      type: "function" as const,
+      function: { name: "", arguments: "" },
+    };
+    const fn = isPlainObject(rawCall.function) ? rawCall.function : undefined;
+
+    current.set(index, {
+      id: typeof rawCall.id === "string" && rawCall.id ? rawCall.id : existing.id,
+      type: "function",
+      function: {
+        name: typeof fn?.name === "string" && fn.name ? fn.name : existing.function.name,
+        arguments: `${existing.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}`,
+      },
+    });
+  }
 }
 
 function isSafeExternalUrl(url: string) {
@@ -543,6 +788,7 @@ async function initializeJsonStorageIfNeeded() {
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
     activeChatId: undefined,
     providerModelsCache: {},
+    toolsSettings: DEFAULT_TOOLS_SETTINGS,
   });
   await writeJsonAtomic(getStoragePaths().providers, null);
   await writeJsonAtomic(getStoragePaths().chatsIndex, { chats: [] });
@@ -735,6 +981,7 @@ async function migrateFromIndexedDbSnapshot(snapshot: StorageSnapshot) {
       providerModelsCache: isPlainObject(snapshot.providerModelsCache)
         ? snapshot.providerModelsCache
         : {},
+      toolsSettings: DEFAULT_TOOLS_SETTINGS,
     };
 
     await writeJsonAtomic(getStoragePaths().settings, settings);
@@ -822,6 +1069,38 @@ ipcMain.handle(
     await writeSettingsPatch({ activeChatId: safeString(chatId) || undefined });
   },
 );
+
+ipcMain.handle("storage:tools-settings:load", async () => {
+  await initializeJsonStorageIfNeeded();
+  const settings = await readSettingsFile();
+  return normalizeToolsSettings(settings.toolsSettings);
+});
+
+ipcMain.handle("storage:tools-settings:save", async (_event, value: unknown) => {
+  await writeSettingsPatch({ toolsSettings: normalizeToolsSettings(value) });
+});
+
+ipcMain.handle("tools:select-directory", async () => {
+  const options = {
+    title: "Select tools folder",
+    properties: ["openDirectory" as const],
+  };
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options);
+
+  if (result.canceled) return undefined;
+  return result.filePaths[0];
+});
+
+ipcMain.handle("tools:load", async (_event, directory: unknown) => {
+  return loadToolsFromDirectory(safeString(directory));
+});
+
+ipcMain.handle("tools:execute", async (_event, request: unknown) => {
+  const value = isPlainObject(request) ? request : {};
+  return executeLoadedTool(value.name, value.args);
+});
 
 ipcMain.handle(
   "storage:provider-models-cache:load",
@@ -936,6 +1215,7 @@ ipcMain.handle(
 
     let usage: ChatTokenUsage | undefined;
     let finishReason: string | undefined;
+    const streamedToolCalls = new Map<number, ToolCall>();
 
     try {
       const response = await fetch(
@@ -976,6 +1256,8 @@ ipcMain.handle(
 
         const eventFinishReason = readFinishReason(data);
         if (eventFinishReason) finishReason = eventFinishReason;
+
+        mergeToolCallDelta(streamedToolCalls, data);
 
         const reasoningDelta = readReasoningDelta(data);
         if (reasoningDelta) {
@@ -1043,7 +1325,13 @@ ipcMain.handle(
         processLine(buffer);
       }
 
-      return { usage, finishReason, content: finalContent, reasoning: finalReasoning };
+      return {
+        usage,
+        finishReason,
+        content: finalContent,
+        reasoning: finalReasoning,
+        toolCalls: [...streamedToolCalls.values()].filter((toolCall) => toolCall.id && toolCall.function.name),
+      };
     } finally {
       activeStreamControllers.delete(streamId);
     }
