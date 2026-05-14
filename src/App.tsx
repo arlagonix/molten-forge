@@ -146,6 +146,7 @@ import type {
   ChatToolResult,
   LoadedToolInfo,
   ToolCommandResult,
+  ToolExecutionPreview,
   ChatSession,
   ProviderConfig,
   ProviderGenerationSettings,
@@ -234,6 +235,26 @@ function saveComposerDrafts(drafts: Record<string, string>) {
 }
 
 
+function isToolExecutionPreview(value: unknown): value is ToolExecutionPreview {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Partial<ToolExecutionPreview>;
+
+  return (
+    typeof candidate.command === "string" &&
+    Array.isArray(candidate.args) &&
+    candidate.args.every((arg) => typeof arg === "string") &&
+    (candidate.cwd === undefined || typeof candidate.cwd === "string") &&
+    (candidate.inputMode === "none" || candidate.inputMode === "json-stdin") &&
+    (candidate.stdin === undefined || typeof candidate.stdin === "string") &&
+    typeof candidate.displayCommand === "string" &&
+    typeof candidate.usesStdin === "boolean" &&
+    typeof candidate.usesPlaceholders === "boolean"
+  );
+}
+
 function isToolCommandResult(value: unknown): value is ToolCommandResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return false;
@@ -248,7 +269,9 @@ function isToolCommandResult(value: unknown): value is ToolCommandResult {
     (typeof candidate.exitCode === "number" || candidate.exitCode === null) &&
     typeof candidate.stdout === "string" &&
     typeof candidate.stderr === "string" &&
-    typeof candidate.timedOut === "boolean"
+    typeof candidate.timedOut === "boolean" &&
+    (candidate.execution === undefined ||
+      isToolExecutionPreview(candidate.execution))
   );
 }
 
@@ -779,6 +802,11 @@ export default function Home() {
   const currentToolTestArgsText = currentToolTestState?.argsText ?? "{}";
   const currentToolTestResult = currentToolTestState?.result ?? null;
   const isTestingCurrentTool = currentToolTestState?.status === "running";
+  const currentToolTestExecutionPreview =
+    currentToolTestResult?.execution ??
+    (isTestingCurrentTool && toolDraft
+      ? buildToolExecutionPreviewForDraft(toolDraft, currentToolTestArgsText)
+      : undefined);
   const modelSuggestions = useMemo(() => {
     return normalizeProviderModels([
       ...(activeProvider.models ?? []),
@@ -1555,6 +1583,48 @@ export default function Home() {
     );
   }
 
+  function renderCodeBlock(
+    value: string,
+    language = "text",
+    className = "chat-markdown-compact",
+  ) {
+    return (
+      <MarkdownMessage
+        className={className}
+        content={`~~~${language}
+${value}
+~~~`}
+      />
+    );
+  }
+
+  function renderCommandCodeBlock(value: string) {
+    return renderCodeBlock(value, "bash");
+  }
+
+  function renderToolExecutionPreview(execution?: ToolExecutionPreview) {
+    if (!execution) return null;
+
+    return (
+      <>
+        <div className="grid gap-1.5">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+            Command
+          </div>
+          {renderCommandCodeBlock(execution.displayCommand)}
+        </div>
+        {execution.cwd?.trim() && (
+          <div className="grid gap-1.5">
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+              Working directory
+            </div>
+            {renderCodeBlock(execution.cwd, "text")}
+          </div>
+        )}
+      </>
+    );
+  }
+
   function hasMeaningfulToolInput(value: string) {
     const trimmed = value.trim();
     if (!trimmed) return false;
@@ -1579,6 +1649,114 @@ export default function Home() {
       for (const match of arg.matchAll(pattern)) placeholders.add(match[1]);
     }
     return [...placeholders];
+  }
+
+  function getToolArgValue(args: unknown, key: string) {
+    if (!args || typeof args !== "object" || Array.isArray(args) || !(key in args)) {
+      throw new Error(`Missing required tool argument: ${key}`);
+    }
+
+    return (args as Record<string, unknown>)[key];
+  }
+
+  function stringifyCommandArgValue(value: unknown) {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    if (value === null || value === undefined) return "";
+    return JSON.stringify(value);
+  }
+
+  function materializeCommandArgs(templateArgs: string[], modelArgs: unknown) {
+    const templatePattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+
+    return templateArgs.map((templateArg) =>
+      templateArg.replace(templatePattern, (_full, key: string) =>
+        stringifyCommandArgValue(getToolArgValue(modelArgs, key)),
+      ),
+    );
+  }
+
+  function quoteCommandPreviewPart(value: string) {
+    if (!value) return '""';
+    if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(value)) return value;
+    return `"${value.replace(/"/g, '\\"')}"`;
+  }
+
+  function formatCommandPreview(command: string, args: string[]) {
+    return [command, ...args].map(quoteCommandPreviewPart).join(" ");
+  }
+
+  function buildToolExecutionPreview(
+    tool: Pick<LoadedToolInfo, "command" | "args" | "cwd" | "input">,
+    modelArgs: unknown,
+  ): ToolExecutionPreview {
+    const commandArgs = materializeCommandArgs(tool.args, modelArgs);
+    const stdin =
+      tool.input === "json-stdin" ? JSON.stringify(modelArgs ?? {}) : undefined;
+
+    return {
+      command: tool.command,
+      args: commandArgs,
+      cwd: tool.cwd,
+      inputMode: tool.input,
+      stdin,
+      displayCommand: formatCommandPreview(tool.command, commandArgs),
+      usesStdin: tool.input === "json-stdin",
+      usesPlaceholders: extractTemplatePlaceholders(tool.args).length > 0,
+    };
+  }
+
+  function parseToolArgumentsText(value: string) {
+    return value.trim() ? JSON.parse(value) : {};
+  }
+
+  function parseArgsLines(value: string) {
+    return value
+      .split(/\r?\n/)
+      .map((arg) => arg.trim())
+      .filter((arg) => arg.length > 0);
+  }
+
+  function buildToolExecutionPreviewForDraft(
+    draft: ToolDraft,
+    argsText: string,
+  ) {
+    try {
+      return buildToolExecutionPreview(
+        {
+          command: draft.command,
+          args: parseArgsLines(draft.argsText),
+          cwd: draft.cwd.trim() || undefined,
+          input: draft.input,
+        },
+        parseToolArgumentsText(argsText),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  function buildToolExecutionPreviewForCall(
+    toolCall: ChatToolCall,
+    result?: ChatToolResult,
+  ) {
+    if (result?.execution) return result.execution;
+
+    const tool = loadedTools.find(
+      (candidate) => candidate.name === toolCall.function.name,
+    );
+    if (!tool) return undefined;
+
+    try {
+      return buildToolExecutionPreview(
+        tool,
+        parseToolArgumentsText(toolCall.function.arguments || "{}"),
+      );
+    } catch {
+      return undefined;
+    }
   }
 
   function draftToTool(draft: ToolDraft): LoadedToolInfo {
@@ -1789,6 +1967,7 @@ export default function Home() {
         toolName: result.toolName || toolName,
         content: result.content,
         isError: result.timedOut || result.exitCode !== 0,
+        execution: result.execution,
       };
     } catch (error) {
       return {
@@ -3596,6 +3775,16 @@ export default function Home() {
                             }
 
                             const result = step.toolResult;
+                            const executionPreview =
+                              buildToolExecutionPreviewForCall(
+                                step.toolCall,
+                                result,
+                              );
+                            const showToolInput =
+                              hasMeaningfulToolInput(
+                                step.toolCall.function.arguments || "",
+                              ) &&
+                              (!executionPreview || executionPreview.usesStdin);
 
                             return (
                               <article
@@ -3633,9 +3822,8 @@ export default function Home() {
                                     )}
                                   </div>
                                   <div className="grid gap-3">
-                                    {hasMeaningfulToolInput(
-                                      step.toolCall.function.arguments || "",
-                                    ) && (
+                                    {renderToolExecutionPreview(executionPreview)}
+                                    {showToolInput && (
                                       <div className="grid gap-1.5">
                                         <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
                                           Input
@@ -3710,6 +3898,17 @@ export default function Home() {
                               const result = toolResults.find(
                                 (item) => item.toolCallId === toolCall.id,
                               );
+                              const executionPreview =
+                                buildToolExecutionPreviewForCall(
+                                  toolCall,
+                                  result,
+                                );
+                              const showToolInput =
+                                hasMeaningfulToolInput(
+                                  toolCall.function.arguments || "",
+                                ) &&
+                                (!executionPreview ||
+                                  executionPreview.usesStdin);
 
                               return (
                                 <article
@@ -3748,9 +3947,8 @@ export default function Home() {
                                       )}
                                     </div>
                                     <div className="grid gap-3">
-                                      {hasMeaningfulToolInput(
-                                        toolCall.function.arguments || "",
-                                      ) && (
+                                      {renderToolExecutionPreview(executionPreview)}
+                                      {showToolInput && (
                                         <div className="grid gap-1.5">
                                           <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
                                             Input
@@ -5001,29 +5199,48 @@ export default function Home() {
                       spellCheck={false}
                       placeholder='{ "value": 144 }'
                     />
-                    {currentToolTestResult && (
-                      <div className="grid gap-2 rounded-lg border bg-card p-3">
+                    {(currentToolTestResult || currentToolTestExecutionPreview) && (
+                      <div className="grid gap-3 rounded-lg border bg-card p-3">
                         <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-                          <span>
-                            Exit: {currentToolTestResult.exitCode ?? "null"} ·{" "}
-                            {currentToolTestResult.timedOut
-                              ? "Timed out"
-                              : "Completed"}
-                          </span>
-                          {currentToolTestResult.exitCode !== 0 ||
-                          currentToolTestResult.timedOut ? (
-                            <span className="inline-flex items-center gap-1 text-destructive">
-                              <X className="size-3.5" />
-                              Failed
+                          {currentToolTestResult ? (
+                            <span>
+                              Exit: {currentToolTestResult.exitCode ?? "null"} ·{" "}
+                              {currentToolTestResult.timedOut
+                                ? "Timed out"
+                                : "Completed"}
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
-                              <Check className="size-3.5" />
-                              Complete
+                            <span>Running command</span>
+                          )}
+                          {currentToolTestResult ? (
+                            currentToolTestResult.exitCode !== 0 ||
+                            currentToolTestResult.timedOut ? (
+                              <span className="inline-flex items-center gap-1 text-destructive">
+                                <X className="size-3.5" />
+                                Failed
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                                <Check className="size-3.5" />
+                                Complete
+                              </span>
+                            )
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                              <Spinner className="size-3.5" />
+                              Running
                             </span>
                           )}
                         </div>
-                        {renderJsonCodeBlock(currentToolTestResult.content)}
+                        {renderToolExecutionPreview(currentToolTestExecutionPreview)}
+                        {currentToolTestResult && (
+                          <div className="grid gap-1.5">
+                            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground/80">
+                              Output
+                            </div>
+                            {renderJsonCodeBlock(currentToolTestResult.content)}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

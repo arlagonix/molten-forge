@@ -59,11 +59,23 @@ export type ChatToolCall = {
   };
 };
 
+export type ToolExecutionPreview = {
+  command: string;
+  args: string[];
+  cwd?: string;
+  inputMode: ToolInputMode;
+  stdin?: string;
+  displayCommand: string;
+  usesStdin: boolean;
+  usesPlaceholders: boolean;
+};
+
 export type ChatToolResult = {
   toolCallId: string;
   toolName: string;
   content: string;
   isError?: boolean;
+  execution?: ToolExecutionPreview;
 };
 
 export type ChatAssistantProcessStep =
@@ -145,6 +157,7 @@ export type ToolCommandResult = {
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  execution?: ToolExecutionPreview;
 };
 
 export type ToolDefinition = {

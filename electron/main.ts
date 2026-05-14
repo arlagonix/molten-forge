@@ -78,11 +78,23 @@ type ToolDefinition = {
   timeoutMs: number;
 };
 
+type ToolExecutionPreview = {
+  command: string;
+  args: string[];
+  cwd?: string;
+  inputMode: ToolInputMode;
+  stdin?: string;
+  displayCommand: string;
+  usesStdin: boolean;
+  usesPlaceholders: boolean;
+};
+
 type ToolCommandResult = {
   exitCode: number | null;
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  execution?: ToolExecutionPreview;
 };
 
 type PublicToolDefinition = ToolDefinition;
@@ -494,16 +506,41 @@ function materializeCommandArgs(templateArgs: string[], modelArgs: unknown) {
   );
 }
 
-type CommandExecutionResult = {
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-  timedOut: boolean;
-};
+function quoteCommandPreviewPart(value: string) {
+  if (!value) return '""';
+  if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(value)) return value;
+  return `"${value.replace(/"/g, '\\"')}"`;
+}
+
+function formatCommandPreview(command: string, args: string[]) {
+  return [command, ...args].map(quoteCommandPreviewPart).join(" ");
+}
+
+function buildToolExecutionPreview(
+  tool: ToolDefinition,
+  modelArgs: unknown,
+  commandArgs: string[],
+): ToolExecutionPreview {
+  const stdin = tool.input === "json-stdin" ? JSON.stringify(modelArgs ?? {}) : undefined;
+
+  return {
+    command: tool.command,
+    args: commandArgs,
+    cwd: tool.cwd,
+    inputMode: tool.input,
+    stdin,
+    displayCommand: formatCommandPreview(tool.command, commandArgs),
+    usesStdin: tool.input === "json-stdin",
+    usesPlaceholders: extractTemplatePlaceholders(tool.args).length > 0,
+  };
+}
+
+type CommandExecutionResult = ToolCommandResult;
 
 async function runCommandTool(tool: ToolDefinition, modelArgs: unknown): Promise<CommandExecutionResult> {
   validateToolDefinition(tool);
   const commandArgs = materializeCommandArgs(tool.args, modelArgs);
+  const execution = buildToolExecutionPreview(tool, modelArgs, commandArgs);
 
   return new Promise<CommandExecutionResult>((resolve) => {
     let stdout = "";
@@ -520,7 +557,7 @@ async function runCommandTool(tool: ToolDefinition, modelArgs: unknown): Promise
     const finish = (result: CommandExecutionResult) => {
       if (settled) return;
       settled = true;
-      resolve(result);
+      resolve({ ...result, execution });
     };
 
     const timeout = setTimeout(() => {
