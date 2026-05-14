@@ -140,6 +140,7 @@ export type ToolLoadError = {
 export type ToolsSettings = {
   enabled: boolean;
   directory: string;
+  disabledToolNames: string[];
 };
 
 export type ToolsState = {

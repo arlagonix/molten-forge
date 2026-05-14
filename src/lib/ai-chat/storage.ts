@@ -136,6 +136,9 @@ function normalizeToolsSettings(value: Partial<ToolsSettings> | undefined): Tool
   return {
     enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
     directory: typeof value?.directory === "string" ? value.directory : "",
+    disabledToolNames: Array.isArray(value?.disabledToolNames)
+      ? [...new Set(value.disabledToolNames.filter((name): name is string => typeof name === "string" && name.trim().length > 0).map((name) => name.trim()))]
+      : [],
   };
 }
 

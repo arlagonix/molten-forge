@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Brain,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -44,6 +45,7 @@ import {
   useState,
 } from "react";
 
+import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { SmoothAssistantMessageContent } from "@/components/ai-chat/smooth-assistant-message";
 import { Button } from "@/components/ui/button";
 import {
@@ -157,7 +159,11 @@ const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
 const STICKY_SCROLL_SETTLE_FRAMES = 5;
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
-const DEFAULT_TOOLS_SETTINGS: ToolsSettings = { enabled: true, directory: "" };
+const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
+  enabled: true,
+  directory: "",
+  disabledToolNames: [],
+};
 const MAX_TOOL_ROUNDS = 3;
 
 const UserMessageEditor = memo(function UserMessageEditor({
@@ -439,6 +445,8 @@ export default function Home() {
     useState(false);
   const [isChatScrollable, setIsChatScrollable] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -558,6 +566,10 @@ export default function Home() {
     ...activeProvider,
     model: "",
   });
+  const selectedTool =
+    loadedTools.find((tool) => tool.name === selectedToolName) ??
+    loadedTools[0] ??
+    null;
   const modelSuggestions = useMemo(() => {
     return normalizeProviderModels([
       ...(activeProvider.models ?? []),
@@ -773,6 +785,17 @@ export default function Home() {
       console.error("Failed to save tools settings:", error),
     );
   }, [toolsSettings]);
+
+  useEffect(() => {
+    if (loadedTools.length === 0) {
+      setSelectedToolName(null);
+      return;
+    }
+
+    if (!selectedToolName || !loadedTools.some((tool) => tool.name === selectedToolName)) {
+      setSelectedToolName(loadedTools[0].name);
+    }
+  }, [loadedTools, selectedToolName]);
 
   useEffect(() => {
     if (!didHydrateRef.current || !activeChatId) return;
@@ -1248,7 +1271,7 @@ export default function Home() {
     setIsLoadingTools(true);
 
     try {
-      if (!settings.enabled || !settings.directory.trim()) {
+      if (!settings.directory.trim()) {
         setLoadedTools([]);
         setToolLoadErrors([]);
         return;
@@ -1263,7 +1286,7 @@ export default function Home() {
           `Loaded ${result.tools.length} tool${result.tools.length === 1 ? "" : "s"}.`,
         );
       } else if (result.errors.length) {
-        showError("No tools loaded", "Check the tool load errors in settings.");
+        showError("No tools loaded", "Check the tool load errors in Tools.");
       } else {
         showInfo(
           "No tools found",
@@ -1298,7 +1321,45 @@ export default function Home() {
   }
 
   function getEnabledTools() {
-    return toolsSettings.enabled ? loadedTools : [];
+    if (!toolsSettings.enabled) return [];
+
+    const disabledToolNames = new Set(toolsSettings.disabledToolNames ?? []);
+    return loadedTools.filter((tool) => !disabledToolNames.has(tool.name));
+  }
+
+  function isToolEnabled(toolName: string) {
+    return !(toolsSettings.disabledToolNames ?? []).includes(toolName);
+  }
+
+  function toggleToolEnabled(toolName: string, enabled: boolean) {
+    setToolsSettings((current) => {
+      const disabledToolNames = new Set(current.disabledToolNames ?? []);
+      if (enabled) disabledToolNames.delete(toolName);
+      else disabledToolNames.add(toolName);
+
+      return {
+        ...current,
+        disabledToolNames: [...disabledToolNames].sort((left, right) =>
+          left.localeCompare(right),
+        ),
+      };
+    });
+  }
+
+  function formatJsonLikeCodeBlock(value: string) {
+    const trimmed = value.trim();
+    if (!trimmed) return "{}";
+
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2);
+    } catch {
+      return trimmed;
+    }
+  }
+
+  function renderJsonCodeBlock(value: string) {
+    const normalized = formatJsonLikeCodeBlock(value);
+    return <MarkdownMessage content={`~~~json\n${normalized}\n~~~`} />;
   }
 
   async function executeToolCall(
@@ -1731,14 +1792,12 @@ export default function Home() {
       await Promise.all([
         saveProvidersState(providersState),
         saveSystemPrompt(systemPrompt),
-        saveToolsSettings(toolsSettings),
       ]);
-      await reloadTools(toolsSettings);
-      showSuccess("Settings saved.");
+      showSuccess("Providers saved.");
       setSettingsOpen(false);
     } catch (error) {
-      console.error("Failed to save settings:", error);
-      showError("Failed to save settings", labelForError(error));
+      console.error("Failed to save providers:", error);
+      showError("Failed to save providers", labelForError(error));
     }
   }
 
@@ -2615,7 +2674,11 @@ export default function Home() {
         >
           <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
             <Settings className="size-4" />
-            Settings
+            Providers
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setToolsOpen(true)}>
+            <Wrench className="size-4" />
+            Tools
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setSystemPromptOpen(true)}>
             <MessageSquareText className="size-4" />
@@ -2719,7 +2782,7 @@ export default function Home() {
                 ))
               ) : (
                 <CommandEmpty>
-                  No visible models. Enable models in Settings.
+                  No visible models. Enable models in Providers.
                 </CommandEmpty>
               )}
             </CommandList>
@@ -2911,7 +2974,7 @@ export default function Home() {
                         onClick={() => setSettingsOpen(true)}
                       >
                         <Settings className="size-4" />
-                        Open settings
+                        Open providers
                       </Button>
                     </div>
                   </div>
@@ -2958,7 +3021,8 @@ export default function Home() {
                           return (
                             <article className="flex min-w-0 max-w-full justify-start">
                               <div className="w-full min-w-0 max-w-full overflow-hidden border border-dashed rounded-lg bg-muted/40 px-4 py-3 text-sm leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere] ">
-                                <div className="mb-2 text-xs font-medium uppercase tracking-wide">
+                                <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide">
+                                  <Brain className="size-3.5" />
                                   Thinking{isMessageStreaming ? "..." : ""}
                                 </div>
                                 <div className="min-w-0 overflow-visible text-xs leading-5">
@@ -3005,9 +3069,9 @@ export default function Home() {
                                       <Wrench className="size-3.5" />
                                       Tool call: {toolCall.function.name}
                                     </div>
-                                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-background/70 p-3 text-xs leading-5 text-foreground">
-                                      {toolCall.function.arguments || "{}"}
-                                    </pre>
+                                    {renderJsonCodeBlock(
+                                      toolCall.function.arguments || "{}",
+                                    )}
                                   </div>
                                 </article>
 
@@ -3025,9 +3089,7 @@ export default function Home() {
                                         <Wrench className="size-3.5" />
                                         Tool result: {result.toolName}
                                       </div>
-                                      <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-lg bg-background/70 p-3 text-xs leading-5 text-foreground">
-                                        {result.content}
-                                      </pre>
+                                      {renderJsonCodeBlock(result.content)}
                                     </div>
                                   </article>
                                 )}
@@ -3412,8 +3474,8 @@ export default function Home() {
 
       <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
         <DialogContent className="flex h-[min(820px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
-          <DialogHeader className="h-[96px] shrink-0 overflow-hidden border-b px-5 py-4 pr-12">
-            <DialogTitle>Settings</DialogTitle>
+          <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
+            <DialogTitle>Providers</DialogTitle>
             <DialogDescription>
               Manage providers, choose visible models, and configure generation
               defaults.
@@ -3701,119 +3763,6 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="grid gap-3 rounded-lg border bg-card p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <Label>Tools</Label>
-                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                        Load local .js or .cjs tool files from one trusted
-                        folder.
-                      </p>
-                    </div>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={toolsSettings.enabled}
-                        onChange={(event) =>
-                          setToolsSettings((current) => ({
-                            ...current,
-                            enabled: event.target.checked,
-                          }))
-                        }
-                        className="size-4 accent-primary"
-                      />
-                      Enabled
-                    </label>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="tools-directory">Tools folder</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        id="tools-directory"
-                        value={toolsSettings.directory}
-                        onChange={(event) =>
-                          setToolsSettings((current) => ({
-                            ...current,
-                            directory: event.target.value,
-                          }))
-                        }
-                        placeholder="C:/Prime/ChatForgeTools"
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="shrink-0 rounded-lg"
-                        onClick={selectToolsDirectory}
-                      >
-                        Browse
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="shrink-0 rounded-lg"
-                        onClick={() => reloadTools()}
-                        disabled={isLoadingTools}
-                      >
-                        <RefreshCcw
-                          className={cn(
-                            "size-4",
-                            isLoadingTools && "animate-spin",
-                          )}
-                        />
-                        Reload
-                      </Button>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2 rounded-lg border bg-background p-3 text-sm">
-                    <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
-                      <Wrench className="size-4" />
-                      {loadedTools.length} loaded tool
-                      {loadedTools.length === 1 ? "" : "s"}
-                      {toolLoadErrors.length > 0 && (
-                        <span>
-                          · {toolLoadErrors.length} load error
-                          {toolLoadErrors.length === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </div>
-
-                    {loadedTools.length > 0 && (
-                      <div className="grid gap-1">
-                        {loadedTools.map((tool) => (
-                          <div
-                            key={tool.name}
-                            className="rounded-lg bg-muted/40 px-2 py-1.5"
-                          >
-                            <div className="font-medium">{tool.name}</div>
-                            <div className="text-xs leading-5 text-muted-foreground">
-                              {tool.description}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {toolLoadErrors.length > 0 && (
-                      <div className="grid gap-1">
-                        {toolLoadErrors.map((error) => (
-                          <div
-                            key={`${error.filePath}:${error.message}`}
-                            className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs leading-5"
-                          >
-                            <div className="font-medium text-destructive">
-                              {error.filePath}
-                            </div>
-                            <div className="text-muted-foreground">
-                              {error.message}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
 
                 <Separator />
 
@@ -3995,6 +3944,222 @@ export default function Home() {
               onClick={saveSettingsChanges}
             >
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={toolsOpen} onOpenChange={setToolsOpen}>
+        <DialogContent className="flex h-[min(760px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
+            <DialogTitle>Tools</DialogTitle>
+            <DialogDescription>
+              Load trusted local .js or .cjs tools and choose which ones are available to the model.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[300px_minmax(0,1fr)]">
+            <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Tools
+                </Label>
+                <span className="text-xs text-muted-foreground">
+                  {getEnabledTools().length}/{loadedTools.length} enabled
+                </span>
+              </div>
+
+              <label className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-sm">
+                <span className="min-w-0">
+                  <span className="block font-medium">Enable tools globally</span>
+                  <span className="block text-xs leading-5 text-muted-foreground">
+                    Disabled tools are still manageable, but not sent to the model.
+                  </span>
+                </span>
+                <input
+                  type="checkbox"
+                  checked={toolsSettings.enabled}
+                  onChange={(event) =>
+                    setToolsSettings((current) => ({
+                      ...current,
+                      enabled: event.target.checked,
+                    }))
+                  }
+                  className="size-4 shrink-0 accent-primary"
+                />
+              </label>
+
+              <div className="mb-3 grid gap-2">
+                <Label htmlFor="tools-directory-dialog">Tools folder</Label>
+                <Input
+                  id="tools-directory-dialog"
+                  value={toolsSettings.directory}
+                  onChange={(event) =>
+                    setToolsSettings((current) => ({
+                      ...current,
+                      directory: event.target.value,
+                    }))
+                  }
+                  placeholder="C:/Prime/ChatForgeTools"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="flex-1 rounded-lg"
+                    onClick={selectToolsDirectory}
+                  >
+                    Browse
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="flex-1 rounded-lg"
+                    onClick={() => reloadTools()}
+                    disabled={isLoadingTools}
+                  >
+                    <RefreshCcw
+                      className={cn("size-4", isLoadingTools && "animate-spin")}
+                    />
+                    Reload
+                  </Button>
+                </div>
+              </div>
+
+              <div className="grid gap-1.5">
+                {loadedTools.length > 0 ? (
+                  loadedTools.map((tool) => {
+                    const enabled = isToolEnabled(tool.name);
+
+                    return (
+                      <div
+                        key={tool.name}
+                        role="button"
+                        tabIndex={0}
+                        className={cn(
+                          "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                          selectedTool?.name === tool.name
+                            ? "border-primary/30 bg-accent text-accent-foreground"
+                            : "border-transparent hover:border-border hover:bg-muted/60",
+                        )}
+                        onClick={() => setSelectedToolName(tool.name)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedToolName(tool.name);
+                          }
+                        }}
+                      >
+                        <Wrench className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-sm leading-5">{tool.name}</div>
+                          <div className="truncate text-[11px] leading-4 text-muted-foreground">
+                            {enabled ? "Enabled" : "Disabled"} · {tool.description}
+                          </div>
+                        </div>
+                        <input
+                          type="checkbox"
+                          checked={enabled}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => toggleToolEnabled(tool.name, event.target.checked)}
+                          className="mt-0.5 size-4 shrink-0 accent-primary"
+                          title={enabled ? "Disable tool" : "Enable tool"}
+                        />
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="rounded-lg border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+                    No tools loaded.
+                  </div>
+                )}
+              </div>
+
+              {toolLoadErrors.length > 0 && (
+                <div className="mt-4 grid gap-2">
+                  <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Load errors
+                  </Label>
+                  {toolLoadErrors.map((error) => (
+                    <div
+                      key={`${error.filePath}:${error.message}`}
+                      className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-xs leading-5"
+                    >
+                      <div className="truncate font-medium text-destructive" title={error.filePath}>
+                        {error.filePath}
+                      </div>
+                      <div className="text-muted-foreground">{error.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </aside>
+
+            <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
+              {selectedTool ? (
+                <div className="grid gap-5 pb-1">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Selected tool
+                      </Label>
+                      <h3 className="mt-1 truncate text-lg font-semibold leading-7">
+                        {selectedTool.name}
+                      </h3>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                        {selectedTool.description}
+                      </p>
+                    </div>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={isToolEnabled(selectedTool.name)}
+                        onChange={(event) =>
+                          toggleToolEnabled(selectedTool.name, event.target.checked)
+                        }
+                        className="size-4 accent-primary"
+                      />
+                      Enabled
+                    </label>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>Source file</Label>
+                    <div className="rounded-lg border bg-muted/30 px-3 py-2 text-sm leading-6 text-muted-foreground [overflow-wrap:anywhere]">
+                      {selectedTool.filePath}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>Description</Label>
+                    <div className="rounded-lg border bg-card px-3 py-2 text-sm leading-6">
+                      {selectedTool.description}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2">
+                    <Label>Schema</Label>
+                    {renderJsonCodeBlock(JSON.stringify(selectedTool.parameters, null, 2))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
+                  Select a tools folder and reload to inspect available tools.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="shrink-0 items-center border-t px-5 py-3">
+            <Button
+              type="button"
+              variant="secondary"
+              className="rounded-lg"
+              onClick={() => setToolsOpen(false)}
+            >
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
