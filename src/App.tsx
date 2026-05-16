@@ -738,6 +738,46 @@ const AskUserBlock = memo(function AskUserBlock({
     );
   }
 
+  function focusAdjacentChoiceOption(
+    event: ReactKeyboardEvent<HTMLElement>,
+    direction: -1 | 1,
+  ) {
+    const container = event.currentTarget.parentElement;
+    if (!container) return;
+
+    const optionElements = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-ask-user-option]"),
+    ).filter((element) => element.tabIndex >= 0);
+    const currentIndex = optionElements.indexOf(event.currentTarget);
+    if (currentIndex < 0 || optionElements.length === 0) return;
+
+    event.preventDefault();
+
+    const nextIndex =
+      (currentIndex + direction + optionElements.length) % optionElements.length;
+    optionElements[nextIndex]?.focus();
+  }
+
+  function handleChoiceOptionKeyDown(
+    event: ReactKeyboardEvent<HTMLElement>,
+    onSelect?: () => void,
+  ) {
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      focusAdjacentChoiceOption(event, 1);
+      return;
+    }
+
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      focusAdjacentChoiceOption(event, -1);
+      return;
+    }
+
+    if (event.key !== "Enter" && event.key !== " ") return;
+
+    event.preventDefault();
+    onSelect?.();
+  }
+
   function renderChoiceOption({
     question,
     option,
@@ -757,18 +797,28 @@ const AskUserBlock = memo(function AskUserBlock({
     readOnly?: boolean;
     onChange?: () => void;
   }) {
+    const isInteractive = !readOnly && canSubmit;
+
     return (
-      <label
+      <div
         key={option.id}
-        htmlFor={inputId}
+        role={inputType}
+        aria-checked={checked}
+        tabIndex={isInteractive ? 0 : -1}
+        data-ask-user-option
         className={cn(
-          "flex items-start gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
+          "flex items-start gap-2 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
           checked
             ? "border-primary/50 bg-primary/10 text-foreground"
             : "border-border/70 bg-background/60",
-          !readOnly && canSubmit && "cursor-pointer hover:bg-muted/60",
-          (!canSubmit || readOnly) && "cursor-default opacity-90",
+          isInteractive && "cursor-pointer hover:bg-muted/60",
+          !isInteractive && "cursor-default opacity-90",
         )}
+        onClick={() => {
+          if (!isInteractive) return;
+          onChange?.();
+        }}
+        onKeyDown={(event) => handleChoiceOptionKeyDown(event, onChange)}
       >
         <input
           id={inputId}
@@ -778,6 +828,8 @@ const AskUserBlock = memo(function AskUserBlock({
           checked={checked}
           readOnly={readOnly}
           disabled={readOnly || !canSubmit}
+          tabIndex={-1}
+          onClick={(event) => event.stopPropagation()}
           onChange={onChange}
           className="mt-1 size-3.5 shrink-0 accent-primary"
         />
@@ -791,7 +843,7 @@ const AskUserBlock = memo(function AskUserBlock({
             </span>
           )}
         </span>
-      </label>
+      </div>
     );
   }
 
@@ -814,18 +866,31 @@ const AskUserBlock = memo(function AskUserBlock({
     const customAnswer = readOnly
       ? (response?.customAnswers?.[question.id] ?? "")
       : (customAnswers[question.id] ?? "");
+    const isInteractive = !readOnly && canSubmit;
+    const customDescription =
+      readOnly && checked && customAnswer.trim()
+        ? customAnswer.trim()
+        : "Enter a custom answer instead of choosing one of the suggested options.";
 
     return (
-      <label
-        htmlFor={customInputId}
+      <div
+        role={inputType}
+        aria-checked={checked}
+        tabIndex={isInteractive ? 0 : -1}
+        data-ask-user-option
         className={cn(
-          "grid gap-2 rounded-lg border px-3 py-2 text-left transition-colors",
+          "grid gap-2 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
           checked
             ? "border-primary/50 bg-primary/10 text-foreground"
             : "border-border/70 bg-background/60",
-          !readOnly && canSubmit && "cursor-pointer hover:bg-muted/60",
-          (!canSubmit || readOnly) && "cursor-default opacity-90",
+          isInteractive && "cursor-pointer hover:bg-muted/60",
+          !isInteractive && "cursor-default opacity-90",
         )}
+        onClick={() => {
+          if (!isInteractive) return;
+          onSelect?.();
+        }}
+        onKeyDown={(event) => handleChoiceOptionKeyDown(event, onSelect)}
       >
         <span className="flex items-start gap-2">
           <input
@@ -835,6 +900,7 @@ const AskUserBlock = memo(function AskUserBlock({
             checked={checked}
             readOnly={readOnly}
             disabled={readOnly || !canSubmit}
+            onClick={(event) => event.stopPropagation()}
             onChange={onSelect}
             className="mt-1 size-3.5 shrink-0 accent-primary"
           />
@@ -843,15 +909,38 @@ const AskUserBlock = memo(function AskUserBlock({
               Type your answer
             </span>
             <span className="text-xs leading-5 text-muted-foreground">
-              Enter a custom answer instead of choosing one of the suggested
-              options.
+              {customDescription}
             </span>
           </span>
         </span>
-        {!readOnly ? (
+        {!readOnly && (
           <Input
             id={customInputId}
             value={customAnswer}
+            onClick={(event) => event.stopPropagation()}
+            onFocus={() => {
+              if (!isInteractive) return;
+              if (inputType === "radio") {
+                setAnswers((current) => ({
+                  ...current,
+                  [question.id]: ASK_USER_CUSTOM_ANSWER_ID,
+                }));
+                return;
+              }
+
+              setMultiAnswers((current) => {
+                const selectedIds = current[question.id] ?? [];
+                return selectedIds.includes(ASK_USER_CUSTOM_ANSWER_ID)
+                  ? current
+                  : {
+                      ...current,
+                      [question.id]: [
+                        ...selectedIds,
+                        ASK_USER_CUSTOM_ANSWER_ID,
+                      ],
+                    };
+              });
+            }}
             onChange={(event) => {
               const nextValue = event.target.value.slice(
                 0,
@@ -894,15 +983,14 @@ const AskUserBlock = memo(function AskUserBlock({
             }}
             disabled={!canSubmit}
             maxLength={MAX_ASK_USER_CUSTOM_ANSWER_LENGTH}
-            onKeyDown={handleSingleLineAnswerKeyDown}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              handleSingleLineAnswerKeyDown(event);
+            }}
             className="h-8 rounded-lg text-xs"
           />
-        ) : checked ? (
-          <span className="text-xs leading-5 text-muted-foreground">
-            {customAnswer || "No custom answer provided."}
-          </span>
-        ) : null}
-      </label>
+        )}
+      </div>
     );
   }
 
