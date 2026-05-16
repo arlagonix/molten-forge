@@ -8,6 +8,8 @@
 @import "@fontsource/open-sans/600.css";
 @import "@fontsource/open-sans/700.css";
 
+@import "katex/dist/katex.min.css";
+
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -340,6 +342,28 @@
 
   .chat-markdown code {
     @apply bg-muted px-1 py-0.5 font-mono break-words;
+  }
+
+  .chat-markdown .katex {
+    font-size: 1em;
+  }
+
+  .chat-markdown .katex-display {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem 0;
+    margin: 0.75rem 0;
+  }
+
+  .chat-markdown-compact .katex-display {
+    margin: 0.5rem 0;
+  }
+
+  .chat-markdown .katex-display > .katex {
+    display: inline-block;
+    max-width: none;
+    text-align: initial;
   }
 
   .chat-markdown .chat-code-block {
