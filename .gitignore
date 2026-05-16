@@ -28,3 +28,4 @@ release
 dist/*
 dist-electron/*
 tmp/*
+*.diff
