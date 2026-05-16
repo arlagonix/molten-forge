@@ -12,6 +12,7 @@ import {
   EyeOff,
   Info,
   Search,
+  ListTodo,
   MessageSquareText,
   Moon,
   MoreVertical,
@@ -161,6 +162,8 @@ import type {
   LoadedToolInfo,
   ToolExecutionStatus,
   ToolExecutionPreview,
+  ChecklistItem,
+  ChecklistWriteRequest,
   UserInputStatus,
   ChatSession,
   ProviderConfig,
@@ -186,8 +189,10 @@ const COMPOSER_DRAFTS_STORAGE_KEY = "chat-forge-composer-drafts";
 const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
   askUserEnabled: true,
+  checklistWriteEnabled: true,
 };
 const ASK_USER_TOOL_NAME = "ask_user";
+const CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
 const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
 const MAX_ASK_USER_QUESTIONS = 5;
 const MAX_ASK_USER_OPTIONS = 8;
@@ -197,6 +202,8 @@ const MAX_ASK_USER_QUESTION_LENGTH = 500;
 const MAX_ASK_USER_OPTION_LABEL_LENGTH = 160;
 const MAX_ASK_USER_OPTION_DESCRIPTION_LENGTH = 300;
 const MAX_ASK_USER_CUSTOM_ANSWER_LENGTH = 2000;
+const MAX_CHECKLIST_ITEMS = 10;
+const MAX_CHECKLIST_CONTENT_LENGTH = 180;
 const ASK_USER_TOOL: LoadedToolInfo = {
   id: "builtin-ask-user",
   name: ASK_USER_TOOL_NAME,
@@ -282,7 +289,48 @@ const ASK_USER_TOOL: LoadedToolInfo = {
   input: "none",
   timeoutMs: 0,
 };
-const MAX_TOOL_ROUNDS = 3;
+const CHECKLIST_WRITE_TOOL: LoadedToolInfo = {
+  id: "builtin-checklist-write",
+  name: CHECKLIST_WRITE_TOOL_NAME,
+  enabled: true,
+  description:
+    "Create or update a visible checklist snapshot to track progress during complex multi-step work. Use this for substantial coding, debugging, research, or planning tasks. Keep items short. Each item must explicitly set done to true or false.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      items: {
+        type: "array",
+        description:
+          "Checklist items. Include the full current checklist snapshot. Each item must explicitly set done to true or false.",
+        minItems: 1,
+        maxItems: MAX_CHECKLIST_ITEMS,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            content: {
+              type: "string",
+              description: "Short user-visible checklist item.",
+            },
+            done: {
+              type: "boolean",
+              description:
+                "Whether this item is completed. Always provide true or false.",
+            },
+          },
+          required: ["content", "done"],
+        },
+      },
+    },
+    required: ["items"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+const MAX_TOOL_ROUNDS = 20;
 const TOOL_DESCRIPTION_PREVIEW_MAX_LENGTH = 240;
 
 function loadComposerDrafts(): Record<string, string> {
@@ -550,7 +598,13 @@ const AskUserBlock = memo(function AskUserBlock({
 
   useLayoutEffect(() => {
     onLayoutChange?.();
-  }, [activeQuestionIndex, isCollapsed, effectiveStatus, response, onLayoutChange]);
+  }, [
+    activeQuestionIndex,
+    isCollapsed,
+    effectiveStatus,
+    response,
+    onLayoutChange,
+  ]);
 
   function getSelectedOptionLabel(questionId: string, optionId?: string) {
     const question = request.questions.find((item) => item.id === questionId);
@@ -754,7 +808,8 @@ const AskUserBlock = memo(function AskUserBlock({
     event.preventDefault();
 
     const nextIndex =
-      (currentIndex + direction + optionElements.length) % optionElements.length;
+      (currentIndex + direction + optionElements.length) %
+      optionElements.length;
     optionElements[nextIndex]?.focus();
   }
 
@@ -1404,6 +1459,89 @@ const AskUserBlock = memo(function AskUserBlock({
   );
 });
 
+function getChecklistItemIcon(done: boolean) {
+  if (done) {
+    return <Check className="size-3.5 text-green-600 dark:text-green-400" />;
+  }
+
+  return <Square className="size-3.5 text-muted-foreground/70" />;
+}
+
+const ChecklistBlock = memo(function ChecklistBlock({
+  id,
+  request,
+  isCollapsed,
+  onToggleCollapsed,
+  onLayoutChange,
+}: {
+  id: string;
+  request: ChecklistWriteRequest;
+  status?: ToolExecutionStatus;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  onLayoutChange?: () => void;
+}) {
+  const totalCount = request.items.length;
+  const doneCount = request.items.filter((item) => item.done).length;
+
+  useLayoutEffect(() => {
+    onLayoutChange?.();
+  }, [doneCount, isCollapsed, onLayoutChange, request.items, totalCount]);
+
+  return (
+    <article key={id} className="flex min-w-0 max-w-full justify-start">
+      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/25 px-4 py-3 text-xs leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+        <button
+          type="button"
+          className="w-full rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onToggleCollapsed}
+          aria-expanded={!isCollapsed}
+        >
+          <div className="flex min-w-0 items-center justify-between gap-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2">
+              <ListTodo className="size-3.5 shrink-0" />
+              <span className="truncate">Checklist</span>
+              <span className="text-muted-foreground/60">•</span>
+              <span className="text-muted-foreground/80">
+                {doneCount}/{totalCount} done
+              </span>
+            </div>
+            {isCollapsed ? (
+              <ChevronRight className="size-3.5 shrink-0" />
+            ) : (
+              <ChevronDown className="size-3.5 shrink-0" />
+            )}
+          </div>
+        </button>
+
+        {!isCollapsed && (
+          <ul className="mt-3 grid gap-2 text-xs normal-case leading-5 tracking-normal">
+            {request.items.map((item, index) => (
+              <li
+                key={`${index}-${item.content}`}
+                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-lg px-2 py-1.5"
+              >
+                <span className="mt-0.5">
+                  {getChecklistItemIcon(item.done)}
+                </span>
+                <div
+                  className={cn(
+                    "min-w-0 font-medium text-foreground/85",
+                    item.done &&
+                      "text-muted-foreground line-through decoration-muted-foreground/50",
+                  )}
+                >
+                  {item.content}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </article>
+  );
+});
+
 type ChatComposerHandle = {
   clear: () => void;
   focus: () => void;
@@ -1586,12 +1724,24 @@ type VisibleAssistantProcessStep = ChatAssistantProcessStep & {
   sourceStepIds: string[];
 };
 
+function keepOnlyLatestChecklistListStep<T extends ChatAssistantProcessStep>(
+  processSteps: T[],
+): T[] {
+  return processSteps;
+}
+
+function cancelUnfinishedChecklistListSteps(
+  processSteps: ChatAssistantProcessStep[],
+): ChatAssistantProcessStep[] {
+  return processSteps;
+}
+
 function getVisibleAssistantProcessSteps(
   processSteps: ChatAssistantProcessStep[],
 ): VisibleAssistantProcessStep[] {
   const visibleSteps: VisibleAssistantProcessStep[] = [];
 
-  for (const step of processSteps) {
+  for (const step of keepOnlyLatestChecklistListStep(processSteps)) {
     if (step.type === "thinking" && !step.content.trim()) {
       continue;
     }
@@ -2524,7 +2674,9 @@ export default function Home() {
 
     if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
       scheduleStickyScrollToBottom({
-        settleFrames: isActiveChatGenerating() ? STICKY_SCROLL_SETTLE_FRAMES : 2,
+        settleFrames: isActiveChatGenerating()
+          ? STICKY_SCROLL_SETTLE_FRAMES
+          : 2,
       });
       return;
     }
@@ -2666,13 +2818,20 @@ export default function Home() {
   function getEnabledTools() {
     const enabledCommandTools = toolsSettings.enabled
       ? loadedTools.filter(
-          (tool) => tool.enabled && tool.name !== ASK_USER_TOOL_NAME,
+          (tool) =>
+            tool.enabled &&
+            tool.name !== ASK_USER_TOOL_NAME &&
+            tool.name !== CHECKLIST_WRITE_TOOL_NAME,
         )
       : [];
 
-    return toolsSettings.enabled && toolsSettings.askUserEnabled
-      ? [ASK_USER_TOOL, ...enabledCommandTools]
-      : enabledCommandTools;
+    if (!toolsSettings.enabled) return enabledCommandTools;
+
+    return [
+      ...(toolsSettings.askUserEnabled ? [ASK_USER_TOOL] : []),
+      ...(toolsSettings.checklistWriteEnabled ? [CHECKLIST_WRITE_TOOL] : []),
+      ...enabledCommandTools,
+    ];
   }
 
   function formatJsonLikeCodeBlock(value: string) {
@@ -3223,6 +3382,80 @@ ${value}
     );
   }
 
+  function parseChecklistWriteRequest(args: unknown): ChecklistWriteRequest {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      throw new Error("checklist_write arguments must be a JSON object.");
+    }
+
+    const source = args as Record<string, unknown>;
+    if (!Array.isArray(source.items) || source.items.length === 0) {
+      throw new Error("checklist_write requires at least one checklist item.");
+    }
+
+    if (source.items.length > MAX_CHECKLIST_ITEMS) {
+      throw new Error(
+        `checklist_write supports at most ${MAX_CHECKLIST_ITEMS} items.`,
+      );
+    }
+
+    const items: ChecklistItem[] = source.items.map((rawItem, index) => {
+      if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+        throw new Error(`checklist_write item ${index + 1} must be an object.`);
+      }
+
+      const itemSource = rawItem as Record<string, unknown>;
+      const content = readLimitedString(
+        itemSource,
+        "content",
+        MAX_CHECKLIST_CONTENT_LENGTH,
+        `checklist_write item ${index + 1} content`,
+      );
+
+      if (!content) {
+        throw new Error(
+          `checklist_write item ${index + 1} is missing content.`,
+        );
+      }
+
+      if (typeof itemSource.done !== "boolean") {
+        throw new Error(
+          `checklist_write item ${index + 1} must explicitly set done to true or false.`,
+        );
+      }
+
+      return { content, done: itemSource.done };
+    });
+
+    return { items };
+  }
+
+  function parseChecklistWriteRequestFromToolCall(toolCall: ChatToolCall) {
+    return parseChecklistWriteRequest(
+      parseToolArgumentsText(toolCall.function.arguments || "{}"),
+    );
+  }
+
+  function createChecklistWriteToolResult(
+    toolCall: ChatToolCall,
+    request: ChecklistWriteRequest,
+  ): ChatToolResult {
+    const done = request.items.filter((item) => item.done).length;
+
+    return {
+      toolCallId: toolCall.id,
+      toolName: CHECKLIST_WRITE_TOOL_NAME,
+      content: JSON.stringify(
+        {
+          ok: true,
+          total: request.items.length,
+          done,
+        },
+        null,
+        2,
+      ),
+    };
+  }
+
   function buildToolExecutionPreviewForCall(
     toolCall: ChatToolCall,
     result?: ChatToolResult,
@@ -3409,6 +3642,13 @@ ${value}
     });
   }
 
+  async function executeChecklistWriteToolCall(
+    toolCall: ChatToolCall,
+  ): Promise<ChatToolResult> {
+    const request = parseChecklistWriteRequestFromToolCall(toolCall);
+    return createChecklistWriteToolResult(toolCall, request);
+  }
+
   async function executeToolCall(
     toolCall: ChatToolCall,
     options: {
@@ -3425,6 +3665,10 @@ ${value}
     try {
       if (toolName === ASK_USER_TOOL_NAME) {
         return await executeAskUserToolCall(toolCall, options);
+      }
+
+      if (toolName === CHECKLIST_WRITE_TOOL_NAME) {
+        return await executeChecklistWriteToolCall(toolCall);
       }
 
       const argsText = toolCall.function.arguments.trim() || "{}";
@@ -4263,6 +4507,18 @@ ${value}
       }
       return next;
     });
+    updateAssistantVariant(
+      chatId,
+      generation.assistantMessageId,
+      generation.variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: keepOnlyLatestChecklistListStep(
+          cancelUnfinishedChecklistListSteps(variant.processSteps ?? []),
+        ),
+      }),
+      { touch: false },
+    );
     generation.controller.abort();
   }
 
@@ -4355,6 +4611,21 @@ ${value}
             }
           }
 
+          if (toolCall.function.name === CHECKLIST_WRITE_TOOL_NAME) {
+            try {
+              return {
+                id: createId(),
+                type: "checklist" as const,
+                status: "pending" as const,
+                toolCall,
+                request: parseChecklistWriteRequestFromToolCall(toolCall),
+              };
+            } catch {
+              // Keep invalid checklist_write calls visible as failed tool executions once
+              // executeToolCall returns the validation error.
+            }
+          }
+
           return {
             id: createId(),
             type: "tool_execution" as const,
@@ -4397,34 +4668,45 @@ ${value}
           return {
             ...variant,
             toolResults: [...existingResults, ...toolResults],
-            processSteps: (variant.processSteps ?? []).map((step) => {
-              if (
-                step.type !== "tool_execution" &&
-                step.type !== "user_input"
-              ) {
-                return step;
-              }
+            processSteps: keepOnlyLatestChecklistListStep(
+              (variant.processSteps ?? []).map((step) => {
+                if (
+                  step.type !== "tool_execution" &&
+                  step.type !== "user_input" &&
+                  step.type !== "checklist"
+                ) {
+                  return step;
+                }
 
-              const toolResult = toolResults.find(
-                (item) => item.toolCallId === step.toolCall.id,
-              );
+                const toolResult = toolResults.find(
+                  (item) => item.toolCallId === step.toolCall.id,
+                );
 
-              if (!toolResult) return step;
+                if (!toolResult) return step;
 
-              if (step.type === "user_input") {
+                if (step.type === "user_input") {
+                  return {
+                    ...step,
+                    status: toolResult.isError ? "failed" : "complete",
+                    toolResult,
+                  };
+                }
+
+                if (step.type === "checklist") {
+                  return {
+                    ...step,
+                    status: toolResult.isError ? "failed" : "complete",
+                    toolResult,
+                  };
+                }
+
                 return {
                   ...step,
                   status: toolResult.isError ? "failed" : "complete",
                   toolResult,
                 };
-              }
-
-              return {
-                ...step,
-                status: toolResult.isError ? "failed" : "complete",
-                toolResult,
-              };
-            }),
+              }),
+            ),
           };
         },
         { touch: false },
@@ -4628,16 +4910,19 @@ ${value}
               ? `\n\nError: ${labelForError(error)}`
               : `Error: ${labelForError(error)}`;
           const content = `${variant.content}${appendedContent}`;
+          const baseProcessSteps = keepOnlyLatestChecklistListStep(
+            cancelUnfinishedChecklistListSteps(variant.processSteps ?? []),
+          );
           const processSteps = appendedContent.trim()
             ? [
-                ...(variant.processSteps ?? []),
+                ...baseProcessSteps,
                 {
                   id: createId(),
                   type: "assistant_message" as const,
                   content: appendedContent,
                 },
               ]
-            : variant.processSteps;
+            : baseProcessSteps;
 
           return {
             ...variant,
@@ -5788,6 +6073,29 @@ ${value}
                                     }
                                     onCancel={() =>
                                       cancelAskUserRequest(step.toolCall.id)
+                                    }
+                                    onLayoutChange={handleAskUserLayoutChange}
+                                  />
+                                );
+                              }
+
+                              if (step.type === "checklist") {
+                                const manualCollapsed =
+                                  collapsedToolStepIds[step.id];
+                                const isCollapsed = manualCollapsed ?? false;
+
+                                return (
+                                  <ChecklistBlock
+                                    key={step.id}
+                                    id={step.id}
+                                    request={step.request}
+                                    status={step.status}
+                                    isCollapsed={isCollapsed}
+                                    onToggleCollapsed={() =>
+                                      toggleToolExecutionCollapsed(
+                                        step.id,
+                                        !isCollapsed,
+                                      )
                                     }
                                     onLayoutChange={handleAskUserLayoutChange}
                                   />

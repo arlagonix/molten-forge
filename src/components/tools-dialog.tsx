@@ -1,4 +1,4 @@
-import { Check, Lock, MessageSquareText, Plus, RefreshCcw, Trash2, Wrench, X } from "lucide-react";
+import { Check, ListTodo, Lock, MessageSquareText, Plus, RefreshCcw, Trash2, Wrench, X } from "lucide-react";
 import { memo, useEffect, useMemo, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 
@@ -43,6 +43,8 @@ const TOOL_TEST_STATES_STORAGE_KEY = "chat-forge-tool-test-states";
 const TOOL_TEST_STATE_SAVE_DELAY_MS = 350;
 const BUILTIN_ASK_USER_TOOL_NAME = "ask_user";
 const BUILTIN_ASK_USER_TOOL_ID = "builtin-ask-user";
+const BUILTIN_CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
+const BUILTIN_CHECKLIST_WRITE_TOOL_ID = "builtin-checklist-write";
 const BUILTIN_ASK_USER_TOOL_DESCRIPTION =
   "Pauses the assistant so it can ask focused clarification questions, including single-choice, multi-select, and text answers, then resumes the same response.";
 const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
@@ -96,6 +98,29 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
     },
   },
   required: ["questions"],
+};
+const BUILTIN_CHECKLIST_WRITE_TOOL_DESCRIPTION =
+  "Creates visible checklist snapshots for tracking progress during complex multi-step work.";
+const BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS = {
+  type: "object",
+  properties: {
+    items: {
+      type: "array",
+      description:
+        "Checklist items. Include the full current checklist snapshot. Each item must explicitly set done to true or false.",
+      minItems: 1,
+      maxItems: 10,
+      items: {
+        type: "object",
+        properties: {
+          content: { type: "string", description: "Short user-visible checklist item." },
+          done: { type: "boolean", description: "Whether this item is completed." },
+        },
+        required: ["content", "done"],
+      },
+    },
+  },
+  required: ["items"],
 };
 
 type ToolDraft = {
@@ -502,8 +527,11 @@ function validateToolDraft(tool: LoadedToolInfo) {
       "Tool name must use only letters, numbers, underscores, or hyphens.",
     );
   }
-  if (tool.name === BUILTIN_ASK_USER_TOOL_NAME) {
-    throw new Error("ask_user is a built-in tool name and cannot be used by a custom command tool.");
+  if (
+    tool.name === BUILTIN_ASK_USER_TOOL_NAME ||
+    tool.name === BUILTIN_CHECKLIST_WRITE_TOOL_NAME
+  ) {
+    throw new Error(`${tool.name} is a built-in tool name and cannot be used by a custom command tool.`);
   }
   if (!tool.description) throw new Error("Tool description is required.");
   if (tool.parameters.type !== "object") {
@@ -561,16 +589,19 @@ export const ToolsDialog = memo(function ToolsDialog({
   const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
 
   const isAskUserToolSelected = selectedToolName === BUILTIN_ASK_USER_TOOL_NAME;
+  const isChecklistWriteToolSelected =
+    selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME;
   const selectedTool = useMemo(
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 1;
+  const totalToolsCount = loadedTools.length + 2;
   const enabledToolsCount = useMemo(
     () =>
       loadedTools.filter((tool) => tool.enabled).length +
-      (toolsSettings.askUserEnabled ? 1 : 0),
-    [loadedTools, toolsSettings.askUserEnabled],
+      (toolsSettings.askUserEnabled ? 1 : 0) +
+      (toolsSettings.checklistWriteEnabled ? 1 : 0),
+    [loadedTools, toolsSettings.askUserEnabled, toolsSettings.checklistWriteEnabled],
   );
   const currentToolTestState = toolDraft
     ? toolTestStatesByToolId[toolDraft.id]
@@ -594,7 +625,12 @@ export const ToolsDialog = memo(function ToolsDialog({
 
     if (isEditingUnsavedTool) return;
 
-    if (selectedToolName === BUILTIN_ASK_USER_TOOL_NAME) return;
+    if (
+      selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
+      selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME
+    ) {
+      return;
+    }
 
     if (
       !selectedToolName ||
@@ -605,7 +641,10 @@ export const ToolsDialog = memo(function ToolsDialog({
   }, [loadedTools, selectedToolName, toolDraft]);
 
   useEffect(() => {
-    if (selectedToolName === BUILTIN_ASK_USER_TOOL_NAME) {
+    if (
+      selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
+      selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME
+    ) {
       setToolDraft(null);
       return;
     }
@@ -912,6 +951,57 @@ export const ToolsDialog = memo(function ToolsDialog({
                 />
               </div>
 
+              <div
+                key={BUILTIN_CHECKLIST_WRITE_TOOL_ID}
+                role="button"
+                tabIndex={0}
+                className={cn(
+                  "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isChecklistWriteToolSelected
+                    ? "border-primary/30 bg-accent text-accent-foreground"
+                    : "border-transparent hover:border-border hover:bg-muted/60",
+                )}
+                onClick={() => setSelectedToolName(BUILTIN_CHECKLIST_WRITE_TOOL_NAME)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedToolName(BUILTIN_CHECKLIST_WRITE_TOOL_NAME);
+                  }
+                }}
+              >
+                <ListTodo className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-1.5 truncate text-sm leading-5">
+                    <span className="truncate">{BUILTIN_CHECKLIST_WRITE_TOOL_NAME}</span>
+                    <Lock className="size-3 shrink-0 text-muted-foreground" />
+                  </div>
+                  <div className="truncate text-[11px] leading-4 text-muted-foreground">
+                    {toolsSettings.checklistWriteEnabled
+                      ? toolsSettings.enabled
+                        ? "Enabled · Built-in checklist"
+                        : "Enabled · Global tools off"
+                      : "Disabled · Built-in checklist"}
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={toolsSettings.checklistWriteEnabled}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) =>
+                    onToolsSettingsChange((current) => ({
+                      ...current,
+                      checklistWriteEnabled: event.target.checked,
+                    }))
+                  }
+                  className="mt-0.5 size-4 shrink-0 accent-primary"
+                  title={
+                    toolsSettings.checklistWriteEnabled
+                      ? "Disable checklist_write"
+                      : "Enable checklist_write"
+                  }
+                />
+              </div>
+
               {loadedTools.map((tool) => (
                 <div
                   key={tool.id}
@@ -1073,6 +1163,79 @@ export const ToolsDialog = memo(function ToolsDialog({
                   <div className="rounded-lg border bg-card p-3">
                     {renderJsonCodeBlock(
                       JSON.stringify(BUILTIN_ASK_USER_TOOL_PARAMETERS, null, 2),
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : isChecklistWriteToolSelected ? (
+              <div className="grid gap-5 pb-1">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Built-in tool
+                    </Label>
+                    <h3 className="mt-1 flex items-center gap-2 text-lg font-semibold text-foreground">
+                      <ListTodo className="size-5 text-muted-foreground" />
+                      {BUILTIN_CHECKLIST_WRITE_TOOL_NAME}
+                    </h3>
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-muted-foreground">
+                      {BUILTIN_CHECKLIST_WRITE_TOOL_DESCRIPTION}
+                    </p>
+                  </div>
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+                    <Lock className="size-3.5" />
+                    Locked
+                  </span>
+                </div>
+
+                <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-sm">
+                  <span className="min-w-0">
+                    <span className="block font-medium">Enable checklist_write</span>
+                    <span className="block text-xs leading-5 text-muted-foreground">
+                      When enabled globally, this sends the built-in
+                      checklist tool schema to the model.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    checked={toolsSettings.checklistWriteEnabled}
+                    onChange={(event) =>
+                      onToolsSettingsChange((current) => ({
+                        ...current,
+                        checklistWriteEnabled: event.target.checked,
+                      }))
+                    }
+                    className="size-4 shrink-0 accent-primary"
+                  />
+                </label>
+
+                {!toolsSettings.enabled && toolsSettings.checklistWriteEnabled && (
+                  <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                    Global tools are disabled, so checklist_write is currently not
+                    sent to the model even though this built-in tool is enabled.
+                  </div>
+                )}
+
+                <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+                  <Label>Behavior</Label>
+                  <div className="grid gap-2 text-sm leading-6 text-muted-foreground">
+                    <p>
+                      The assistant can call this tool during complex work to
+                      show a concise progress checklist in the chat. It completes
+                      immediately and does not pause generation.
+                    </p>
+                    <p>
+                      Each call creates a checklist snapshot. It supports up to
+                      10 short items. Each item has only content and done.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <Label>Parameters JSON schema</Label>
+                  <div className="rounded-lg border bg-card p-3">
+                    {renderJsonCodeBlock(
+                      JSON.stringify(BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS, null, 2),
                     )}
                   </div>
                 </div>

@@ -140,6 +140,8 @@ function normalizeToolsSettings(value: Partial<ToolsSettings> | undefined): Tool
     enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
     askUserEnabled:
       typeof value?.askUserEnabled === "boolean" ? value.askUserEnabled : true,
+    checklistWriteEnabled:
+      typeof value?.checklistWriteEnabled === "boolean" ? value.checklistWriteEnabled : true,
   };
 }
 

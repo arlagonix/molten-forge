@@ -117,6 +117,15 @@ export type AskUserResponse = {
 
 export type UserInputStatus = "waiting" | "complete" | "cancelled" | "failed";
 
+export type ChecklistItem = {
+  content: string;
+  done: boolean;
+};
+
+export type ChecklistWriteRequest = {
+  items: ChecklistItem[];
+};
+
 export type ChatAssistantProcessStep =
   | {
       id: string;
@@ -142,6 +151,14 @@ export type ChatAssistantProcessStep =
       toolCall: ChatToolCall;
       request: AskUserRequest;
       response?: AskUserResponse;
+      toolResult?: ChatToolResult;
+    }
+  | {
+      id: string;
+      type: "checklist";
+      status?: ToolExecutionStatus;
+      toolCall: ChatToolCall;
+      request: ChecklistWriteRequest;
       toolResult?: ChatToolResult;
     };
 
@@ -239,6 +256,7 @@ export type ToolLoadError = {
 export type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
+  checklistWriteEnabled: boolean;
 };
 
 export type ToolsState = {

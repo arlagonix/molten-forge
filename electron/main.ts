@@ -104,6 +104,7 @@ type PublicToolDefinition = ToolDefinition;
 type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
+  checklistWriteEnabled: boolean;
 };
 
 type ToolLoadError = {
@@ -125,6 +126,7 @@ const activeStreamControllers = new Map<string, AbortController>();
 const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
   askUserEnabled: true,
+  checklistWriteEnabled: true,
 };
 const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -337,6 +339,8 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
     enabled: typeof value.enabled === "boolean" ? value.enabled : true,
     askUserEnabled:
       typeof value.askUserEnabled === "boolean" ? value.askUserEnabled : true,
+    checklistWriteEnabled:
+      typeof value.checklistWriteEnabled === "boolean" ? value.checklistWriteEnabled : true,
   };
 }
 
