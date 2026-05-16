@@ -60,7 +60,7 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
             type: "string",
             enum: ["single_choice", "multi_select", "text"],
             description:
-              "single_choice chooses one option, multi_select chooses several options, text asks for a custom-only answer. Defaults to single_choice.",
+              "single_choice chooses one option, multi_select chooses several options, text asks for a custom-only answer.",
           },
           question: { type: "string" },
           description: { type: "string" },
@@ -91,7 +91,7 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
             },
           },
         },
-        required: ["id", "question"],
+        required: ["id", "type", "question"],
       },
     },
   },

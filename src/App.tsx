@@ -34,6 +34,7 @@ import type {
   FormEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
+  KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from "react";
@@ -179,6 +180,7 @@ const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
 const STICKY_SCROLL_SETTLE_FRAMES = 5;
+const FORCED_SCROLL_SETTLE_FRAMES = 8;
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
 const COMPOSER_DRAFTS_STORAGE_KEY = "chat-forge-composer-drafts";
 const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
@@ -216,7 +218,7 @@ const ASK_USER_TOOL: LoadedToolInfo = {
       questions: {
         type: "array",
         description:
-          "One to five questions. Each question defaults to single_choice when type is omitted.",
+          "One to five questions. Each question must set type to single_choice, multi_select, or text.",
         minItems: 1,
         maxItems: MAX_ASK_USER_QUESTIONS,
         items: {
@@ -231,7 +233,7 @@ const ASK_USER_TOOL: LoadedToolInfo = {
               type: "string",
               enum: ["single_choice", "multi_select", "text"],
               description:
-                "Use single_choice for one option, multi_select for several options, and text for custom-only user input. Defaults to single_choice.",
+                "Use single_choice for one option, multi_select for several options, and text for custom-only user input.",
             },
             question: { type: "string" },
             description: { type: "string" },
@@ -269,7 +271,7 @@ const ASK_USER_TOOL: LoadedToolInfo = {
               },
             },
           },
-          required: ["id", "question"],
+          required: ["id", "type", "question"],
         },
       },
     },
@@ -506,6 +508,7 @@ const AskUserBlock = memo(function AskUserBlock({
   onToggleCollapsed,
   onSubmit,
   onCancel,
+  onLayoutChange,
 }: {
   id: string;
   request: AskUserRequest;
@@ -516,6 +519,7 @@ const AskUserBlock = memo(function AskUserBlock({
   onToggleCollapsed: () => void;
   onSubmit: (response: AskUserResponse) => void;
   onCancel: () => void;
+  onLayoutChange?: () => void;
 }) {
   const [answers, setAnswers] = useState<Record<string, string>>(() =>
     createDefaultAskUserAnswers(request),
@@ -543,6 +547,10 @@ const AskUserBlock = memo(function AskUserBlock({
     );
     setActiveQuestionIndex(0);
   }, [request, response]);
+
+  useLayoutEffect(() => {
+    onLayoutChange?.();
+  }, [activeQuestionIndex, isCollapsed, effectiveStatus, response, onLayoutChange]);
 
   function getSelectedOptionLabel(questionId: string, optionId?: string) {
     const question = request.questions.find((item) => item.id === questionId);
@@ -644,6 +652,35 @@ const AskUserBlock = memo(function AskUserBlock({
     );
   }
 
+  function advanceOrSubmitActiveQuestion() {
+    if (!isQuestionAnswered(activeQuestion)) return;
+
+    if (activeQuestionIndex < activeQuestionCount - 1) {
+      goToNextQuestion();
+      return;
+    }
+
+    handleSubmit();
+  }
+
+  function handleSingleLineAnswerKeyDown(
+    event: ReactKeyboardEvent<HTMLInputElement>,
+  ) {
+    if (event.key !== "Enter" || event.shiftKey) return;
+
+    event.preventDefault();
+    advanceOrSubmitActiveQuestion();
+  }
+
+  function handleMultilineAnswerKeyDown(
+    event: ReactKeyboardEvent<HTMLTextAreaElement>,
+  ) {
+    if (event.key !== "Enter" || (!event.ctrlKey && !event.metaKey)) return;
+
+    event.preventDefault();
+    advanceOrSubmitActiveQuestion();
+  }
+
   function renderCompletedAnswerList() {
     if (!response) return null;
 
@@ -682,6 +719,7 @@ const AskUserBlock = memo(function AskUserBlock({
           readOnly={readOnly}
           maxLength={MAX_ASK_USER_CUSTOM_ANSWER_LENGTH}
           onChange={(event) => updateAnswer(event.target.value)}
+          onKeyDown={handleMultilineAnswerKeyDown}
           className="min-h-24 rounded-lg text-xs"
         />
       );
@@ -694,6 +732,7 @@ const AskUserBlock = memo(function AskUserBlock({
         readOnly={readOnly}
         maxLength={MAX_ASK_USER_CUSTOM_ANSWER_LENGTH}
         onChange={(event) => updateAnswer(event.target.value)}
+        onKeyDown={handleSingleLineAnswerKeyDown}
         className="h-8 rounded-lg text-xs"
       />
     );
@@ -855,6 +894,7 @@ const AskUserBlock = memo(function AskUserBlock({
             }}
             disabled={!canSubmit}
             maxLength={MAX_ASK_USER_CUSTOM_ANSWER_LENGTH}
+            onKeyDown={handleSingleLineAnswerKeyDown}
             className="h-8 rounded-lg text-xs"
           />
         ) : checked ? (
@@ -2146,12 +2186,15 @@ export default function Home() {
 
   function armStickyScrollToBottom() {
     clearStickyScrollSuppression();
-    markProgrammaticChatScroll(350);
+    markProgrammaticChatScroll(500);
     setChatAutoScrollEnabled(true);
     setIsNearChatBottom(true);
     setShowScrollToBottomButton(false);
     requestChatBottomScrollAfterRender();
-    scheduleStickyScrollToBottom({ force: true });
+    scheduleStickyScrollToBottom({
+      force: true,
+      settleFrames: FORCED_SCROLL_SETTLE_FRAMES,
+    });
   }
 
   function syncChatScrollState() {
@@ -2192,11 +2235,16 @@ export default function Home() {
       scrollElement.scrollHeight - scrollElement.clientHeight,
     );
 
-    if (Math.abs(scrollElement.scrollTop - nextScrollTop) <= 1) return;
-
     markProgrammaticChatScroll();
     scrollElement.scrollTop = nextScrollTop;
-    lastChatScrollTopRef.current = nextScrollTop;
+    chatBottomRef.current?.scrollIntoView({ block: "end" });
+
+    const finalScrollTop = Math.max(
+      0,
+      scrollElement.scrollHeight - scrollElement.clientHeight,
+    );
+    scrollElement.scrollTop = finalScrollTop;
+    lastChatScrollTopRef.current = finalScrollTop;
   }
 
   function scheduleStickyScrollToBottom({
@@ -2303,6 +2351,15 @@ export default function Home() {
     [activeChatId, generatingChatIds],
   );
 
+  const handleAskUserLayoutChange = useCallback(() => {
+    if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+      scheduleStickyScrollToBottom({ settleFrames: 2 });
+      return;
+    }
+
+    syncChatScrollState();
+  }, []);
+
   function registerMessageElement(messageId: string) {
     return (element: HTMLDivElement | null) => {
       if (element) {
@@ -2373,6 +2430,19 @@ export default function Home() {
 
     scheduleStickyScrollToBottom();
   }, [activeChatId, generatingChatIds, messages]);
+
+  useEffect(() => {
+    if (!activeChatId) return;
+
+    if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+      scheduleStickyScrollToBottom({
+        settleFrames: isActiveChatGenerating() ? STICKY_SCROLL_SETTLE_FRAMES : 2,
+      });
+      return;
+    }
+
+    syncChatScrollState();
+  }, [activeChatId, generatingChatIds]);
 
   useEffect(() => {
     function handleDocumentKeyDown(event: KeyboardEvent) {
@@ -5631,6 +5701,7 @@ ${value}
                                     onCancel={() =>
                                       cancelAskUserRequest(step.toolCall.id)
                                     }
+                                    onLayoutChange={handleAskUserLayoutChange}
                                   />
                                 );
                               }
