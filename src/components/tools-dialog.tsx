@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { createId, labelForError } from "@/lib/ai-chat/chat-utils";
 import {
@@ -216,6 +217,23 @@ function createBlankToolDraft(): ToolDraft {
     maxConcurrentRuns: "",
     delayBetweenRunsMs: "0",
   };
+}
+
+function areToolDraftsEqual(left: ToolDraft, right: ToolDraft) {
+  return (
+    left.id === right.id &&
+    left.name === right.name &&
+    left.enabled === right.enabled &&
+    left.description === right.description &&
+    left.parametersText === right.parametersText &&
+    left.command === right.command &&
+    left.argsText === right.argsText &&
+    left.cwd === right.cwd &&
+    left.input === right.input &&
+    left.timeoutMs === right.timeoutMs &&
+    left.maxConcurrentRuns === right.maxConcurrentRuns &&
+    left.delayBetweenRunsMs === right.delayBetweenRunsMs
+  );
 }
 
 function toolToDraft(tool: LoadedToolInfo): ToolDraft {
@@ -723,6 +741,23 @@ export const ToolsDialog = memo(function ToolsDialog({
     setToolDraft((current) => (current ? { ...current, ...patch } : current));
   }
 
+  const hasToolDraftChanges = useMemo(() => {
+    if (!toolDraft || isAskUserToolSelected || isChecklistWriteToolSelected) {
+      return false;
+    }
+
+    const originalDraft = selectedTool
+      ? toolToDraft(selectedTool)
+      : { ...createBlankToolDraft(), id: toolDraft.id };
+
+    return !areToolDraftsEqual(toolDraft, originalDraft);
+  }, [
+    isAskUserToolSelected,
+    isChecklistWriteToolSelected,
+    selectedTool,
+    toolDraft,
+  ]);
+
   async function refreshTools(showToast = false) {
     setIsLoadingTools(true);
 
@@ -969,25 +1004,44 @@ export const ToolsDialog = memo(function ToolsDialog({
               </span>
             </div>
 
-            <label className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-base">
+            <div
+              role="button"
+              tabIndex={0}
+              className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() =>
+                onToolsSettingsChange((current) => ({
+                  ...current,
+                  enabled: !current.enabled,
+                }))
+              }
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  onToolsSettingsChange((current) => ({
+                    ...current,
+                    enabled: !current.enabled,
+                  }));
+                }
+              }}
+            >
               <span className="min-w-0">
                 <span className="block font-medium">Enable tools globally</span>
                 <span className="block select-none text-sm leading-5 text-muted-foreground">
                   Disabled globally means no tool schemas are sent to the model.
                 </span>
               </span>
-              <input
-                type="checkbox"
+              <Switch
                 checked={toolsSettings.enabled}
-                onChange={(event) =>
+                onClick={(event) => event.stopPropagation()}
+                onCheckedChange={(checked) =>
                   onToolsSettingsChange((current) => ({
                     ...current,
-                    enabled: event.target.checked,
+                    enabled: checked,
                   }))
                 }
-                className="size-4 shrink-0 cursor-pointer accent-primary"
+                className="shrink-0 cursor-pointer"
               />
-            </label>
+            </div>
 
             <div className="mb-3 flex gap-2">
               <Button
@@ -1021,11 +1075,11 @@ export const ToolsDialog = memo(function ToolsDialog({
                     disabled={isLoadingTools}
                     onSelect={() => void importToolFiles()}
                   >
-                    <Download className="size-4" />
+                    <Upload className="size-4" />
                     Import tools...
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => void exportAllTools()}>
-                    <Upload className="size-4" />
+                    <Download className="size-4" />
                     Export all tools...
                   </DropdownMenuItem>
                   <DropdownMenuItem
@@ -1040,10 +1094,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                     onSelect={() => void refreshTools(true)}
                   >
                     <RefreshCcw
-                      className={cn(
-                        "size-4",
-                        isLoadingTools && "animate-spin",
-                      )}
+                      className={cn("size-4", isLoadingTools && "animate-spin")}
                     />
                     Reload from app storage
                   </DropdownMenuItem>
@@ -1070,7 +1121,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                   }
                 }}
               >
-                <MessageSquareText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <MessageSquareText className="mt-1 size-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
                     <span className="truncate">
@@ -1084,17 +1135,16 @@ export const ToolsDialog = memo(function ToolsDialog({
                       : "Disabled · Built-in"}
                   </div>
                 </div>
-                <input
-                  type="checkbox"
+                <Switch
                   checked={toolsSettings.askUserEnabled}
                   onClick={(event) => event.stopPropagation()}
-                  onChange={(event) =>
+                  onCheckedChange={(checked) =>
                     onToolsSettingsChange((current) => ({
                       ...current,
-                      askUserEnabled: event.target.checked,
+                      askUserEnabled: checked,
                     }))
                   }
-                  className="mt-0.5 size-4 shrink-0 cursor-pointer accent-primary"
+                  className="mt-0.5 shrink-0 cursor-pointer"
                   title={
                     toolsSettings.askUserEnabled
                       ? "Disable ask_user"
@@ -1123,7 +1173,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                   }
                 }}
               >
-                <ListTodo className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <ListTodo className="mt-1 size-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
                     <span className="truncate">
@@ -1137,17 +1187,16 @@ export const ToolsDialog = memo(function ToolsDialog({
                       : "Disabled · Built-in"}
                   </div>
                 </div>
-                <input
-                  type="checkbox"
+                <Switch
                   checked={toolsSettings.checklistWriteEnabled}
                   onClick={(event) => event.stopPropagation()}
-                  onChange={(event) =>
+                  onCheckedChange={(checked) =>
                     onToolsSettingsChange((current) => ({
                       ...current,
-                      checklistWriteEnabled: event.target.checked,
+                      checklistWriteEnabled: checked,
                     }))
                   }
-                  className="mt-0.5 size-4 shrink-0 cursor-pointer accent-primary"
+                  className="mt-0.5 shrink-0 cursor-pointer"
                   title={
                     toolsSettings.checklistWriteEnabled
                       ? "Disable checklist_write"
@@ -1175,7 +1224,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                     }
                   }}
                 >
-                  <Wrench className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                  <Wrench className="mt-1 size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-base leading-6">
                       {tool.name}
@@ -1184,14 +1233,13 @@ export const ToolsDialog = memo(function ToolsDialog({
                       {tool.enabled ? "Enabled" : "Disabled"} · {tool.command}
                     </div>
                   </div>
-                  <input
-                    type="checkbox"
+                  <Switch
                     checked={tool.enabled}
                     onClick={(event) => event.stopPropagation()}
-                    onChange={async (event) => {
+                    onCheckedChange={async (checked) => {
                       const updated = {
                         ...tool,
-                        enabled: event.target.checked,
+                        enabled: checked,
                       };
                       try {
                         const saved = await saveTool(updated);
@@ -1210,7 +1258,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                         );
                       }
                     }}
-                    className="mt-0.5 size-4 shrink-0 cursor-pointer accent-primary"
+                    className="mt-0.5 shrink-0 cursor-pointer"
                     title={tool.enabled ? "Disable tool" : "Enable tool"}
                   />
                 </div>
@@ -1246,425 +1294,455 @@ export const ToolsDialog = memo(function ToolsDialog({
             )}
           </aside>
 
-          <div className="min-h-0 overflow-y-auto overscroll-contain px-5 py-4">
+          <div className="min-h-0 flex flex-col overflow-hidden">
             {isAskUserToolSelected ? (
-              <div className="grid gap-5 pb-1">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
+              <>
+                <div className="z-20 shrink-0 border-b bg-background px-5 py-4">
+                  <div className="flex items-center justify-between gap-4">
                     <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                       Built-in tool
                     </Label>
-                    <h3 className="mt-1 flex items-center gap-2 text-lg font-semibold text-foreground">
-                      <MessageSquareText className="size-5 text-muted-foreground" />
-                      {BUILTIN_ASK_USER_TOOL_NAME}
-                    </h3>
-                    <p className="mt-1 max-w-2xl text-base leading-6 text-muted-foreground">
-                      {BUILTIN_ASK_USER_TOOL_DESCRIPTION}
-                    </p>
-                  </div>
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
-                    <Lock className="size-3.5" />
-                    Locked
-                  </span>
-                </div>
-
-                {!toolsSettings.enabled && toolsSettings.askUserEnabled && (
-                  <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
-                    Global tools are disabled, so ask_user is currently not sent
-                    to the model even though this built-in tool is enabled.
-                  </div>
-                )}
-
-                <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
-                  <Label>Behavior</Label>
-                  <div className="grid gap-2 text-base leading-6 text-muted-foreground">
-                    <p>
-                      The assistant can call this tool when it needs a decision
-                      before continuing. The response pauses, shows one compact
-                      form, and resumes after you submit the answers.
-                    </p>
-                    <p>
-                      It supports up to 5 questions per form. Questions can be
-                      single-choice, multi-select, or text-only. Choice
-                      questions support up to 8 model-provided options, and each
-                      option should include a short label plus a gray helper
-                      description when useful. Chat Forge always adds a custom
-                      “Type your answer” option to choice questions.
-                    </p>
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                      <Lock className="size-3.5" />
+                      Locked
+                    </span>
                   </div>
                 </div>
 
-                <div className="grid gap-2">
-                  <Label>Parameters JSON schema</Label>
-                  {renderJsonCodeBlock(
-                    JSON.stringify(BUILTIN_ASK_USER_TOOL_PARAMETERS, null, 2),
-                  )}
-                </div>
-              </div>
-            ) : isChecklistWriteToolSelected ? (
-              <div className="grid gap-5 pb-1">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                      Built-in tool
-                    </Label>
-                    <h3 className="mt-1 flex items-center gap-2 text-lg font-semibold text-foreground">
-                      <ListTodo className="size-5 text-muted-foreground" />
-                      {BUILTIN_CHECKLIST_WRITE_TOOL_NAME}
-                    </h3>
-                    <p className="mt-1 max-w-2xl text-base leading-6 text-muted-foreground">
-                      {BUILTIN_CHECKLIST_WRITE_TOOL_DESCRIPTION}
-                    </p>
-                  </div>
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
-                    <Lock className="size-3.5" />
-                    Locked
-                  </span>
-                </div>
-
-                {!toolsSettings.enabled &&
-                  toolsSettings.checklistWriteEnabled && (
-                    <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
-                      Global tools are disabled, so checklist_write is currently
-                      not sent to the model even though this built-in tool is
-                      enabled.
-                    </div>
-                  )}
-
-                <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
-                  <Label>Behavior</Label>
-                  <div className="grid gap-2 text-base leading-6 text-muted-foreground">
-                    <p>
-                      The assistant can call this tool during complex work to
-                      show a concise progress checklist in the chat. It
-                      completes immediately and does not pause generation.
-                    </p>
-                    <p>
-                      Each call creates a checklist snapshot. It supports up to
-                      10 short items. Each item has only content and done.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label>Parameters JSON schema</Label>
-                  {renderJsonCodeBlock(
-                    JSON.stringify(
-                      BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS,
-                      null,
-                      2,
-                    ),
-                  )}
-                </div>
-              </div>
-            ) : toolDraft ? (
-              <div className="grid gap-5 pb-1">
-                <div>
-                  <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                    {selectedTool ? "Edit tool" : "Create tool"}
-                  </Label>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-name">Name</Label>
-                  <Input
-                    id="tool-name"
-                    value={toolDraft.name}
-                    onChange={(event) =>
-                      updateToolDraft({ name: event.target.value })
-                    }
-                    placeholder="calculate_square_root"
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-description">Description</Label>
-                  <Textarea
-                    id="tool-description"
-                    value={toolDraft.description}
-                    onChange={(event) =>
-                      updateToolDraft({ description: event.target.value })
-                    }
-                    placeholder="Describe when the model should use this tool."
-                    className="min-h-20 resize-y"
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-command">Command</Label>
-                  <Input
-                    id="tool-command"
-                    value={toolDraft.command}
-                    onChange={(event) =>
-                      updateToolDraft({ command: event.target.value })
-                    }
-                    placeholder="node / python / rg / git"
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-schema">Parameters JSON schema</Label>
-                  <Textarea
-                    id="tool-schema"
-                    value={toolDraft.parametersText}
-                    onChange={(event) =>
-                      updateToolDraft({ parametersText: event.target.value })
-                    }
-                    className="min-h-64 resize-y font-mono text-sm"
-                    spellCheck={false}
-                  />
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-args">Arguments, one per line</Label>
-                  <Textarea
-                    id="tool-args"
-                    value={toolDraft.argsText}
-                    onChange={(event) =>
-                      updateToolDraft({ argsText: event.target.value })
-                    }
-                    placeholder={
-                      "C:/Prime/Tools/math-tool/dist/index.js\n--query\n{{query}}"
-                    }
-                    className="min-h-32 resize-y font-mono text-sm"
-                    spellCheck={false}
-                  />
-                  <p className="text-sm leading-5 text-muted-foreground">
-                    Use <code>{"{{fieldName}}"}</code> placeholders for existing
-                    CLIs. Every placeholder must exist in schema.properties and
-                    schema.required.
-                  </p>
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="tool-input-mode">Input mode</Label>
-                    <Select
-                      value={toolDraft.input}
-                      onValueChange={(value) =>
-                        updateToolDraft({
-                          input: value === "none" ? "none" : "json-stdin",
-                        })
-                      }
-                    >
-                      <SelectTrigger
-                        id="tool-input-mode"
-                        className="rounded-lg"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="json-stdin">JSON stdin</SelectItem>
-                        <SelectItem value="none">None</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p className="text-sm leading-5 text-muted-foreground">
-                      JSON stdin is best for scripts you write. None is best for
-                      existing CLI flags/placeholders.
-                    </p>
-                  </div>
-                  <div className="grid gap-2 content-start">
-                    <Label htmlFor="tool-timeout">Timeout ms</Label>
-                    <Input
-                      id="tool-timeout"
-                      value={toolDraft.timeoutMs}
-                      onChange={(event) =>
-                        updateToolDraft({ timeoutMs: event.target.value })
-                      }
-                      inputMode="numeric"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid gap-3 rounded-lg border bg-muted/20 p-3">
-                  <div>
-                    <Label>Execution limits</Label>
-                    <p className="text-sm leading-5 text-muted-foreground">
-                      Leave concurrency empty for the current parallel behavior.
-                      Use 1 plus a delay for rate-limited tools.
-                    </p>
-                  </div>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="tool-max-concurrent-runs">
-                        Max concurrent runs
-                      </Label>
-                      <Input
-                        id="tool-max-concurrent-runs"
-                        value={toolDraft.maxConcurrentRuns}
-                        onChange={(event) =>
-                          updateToolDraft({
-                            maxConcurrentRuns: event.target.value,
-                          })
-                        }
-                        inputMode="numeric"
-                        placeholder="Empty = unlimited"
-                      />
-                    </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="tool-delay-between-runs">
-                        Delay between runs, ms
-                      </Label>
-                      <Input
-                        id="tool-delay-between-runs"
-                        value={toolDraft.delayBetweenRunsMs}
-                        onChange={(event) =>
-                          updateToolDraft({
-                            delayBetweenRunsMs: event.target.value,
-                          })
-                        }
-                        inputMode="numeric"
-                        placeholder="0"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid gap-2">
-                  <Label htmlFor="tool-cwd">Working directory</Label>
-                  <Input
-                    id="tool-cwd"
-                    value={toolDraft.cwd}
-                    onChange={(event) =>
-                      updateToolDraft({ cwd: event.target.value })
-                    }
-                    placeholder="Optional. Example: C:/Prime/Tools/math-tool"
-                  />
-                </div>
-
-                <Separator />
-
-                <div className="grid gap-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <Label>Test tool</Label>
-                      <p className="text-sm leading-5 text-muted-foreground">
-                        Run this manifest locally with sample model arguments.
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                  <div className="grid gap-5 pb-1">
+                    <div className="grid gap-1">
+                      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <MessageSquareText className="size-5 text-muted-foreground" />
+                        {BUILTIN_ASK_USER_TOOL_NAME}
+                      </h3>
+                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
+                        {BUILTIN_ASK_USER_TOOL_DESCRIPTION}
                       </p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="rounded-lg"
-                        onClick={clearCurrentToolTest}
-                        disabled={!currentToolTestState || isTestingCurrentTool}
-                      >
-                        Clear test
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="rounded-lg"
-                        onClick={runCurrentToolTest}
-                        disabled={isTestingCurrentTool}
-                      >
-                        {currentToolTestState?.status === "pending"
-                          ? "Waiting..."
-                          : isTestingCurrentTool
-                            ? "Running..."
-                            : "Run test"}
-                      </Button>
+
+                    {!toolsSettings.enabled && toolsSettings.askUserEnabled && (
+                      <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
+                        Global tools are disabled, so ask_user is currently not sent
+                        to the model even though this built-in tool is enabled.
+                      </div>
+                    )}
+
+                    <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+                      <Label>Behavior</Label>
+                      <div className="grid gap-2 text-base leading-6 text-muted-foreground">
+                        <p>
+                          The assistant can call this tool when it needs a decision
+                          before continuing. The response pauses, shows one compact
+                          form, and resumes after you submit the answers.
+                        </p>
+                        <p>
+                          It supports up to 5 questions per form. Questions can be
+                          single-choice, multi-select, or text-only. Choice
+                          questions support up to 8 model-provided options, and each
+                          option should include a short label plus a gray helper
+                          description when useful. Chat Forge always adds a custom
+                          “Type your answer” option to choice questions.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Parameters JSON schema</Label>
+                      {renderJsonCodeBlock(
+                        JSON.stringify(BUILTIN_ASK_USER_TOOL_PARAMETERS, null, 2),
+                      )}
                     </div>
                   </div>
-                  <Textarea
-                    value={currentToolTestArgsText}
-                    onChange={(event) =>
-                      updateCurrentToolTestArgsText(event.target.value)
-                    }
-                    disabled={isTestingCurrentTool}
-                    className="min-h-24 resize-y font-mono text-sm"
-                    spellCheck={false}
-                    placeholder='{ "value": 144 }'
-                  />
-                  {(currentToolTestResult ||
-                    currentToolTestExecutionPreview) && (
-                    <div className="grid gap-3 rounded-lg border bg-card p-3">
-                      <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                        {currentToolTestResult ? (
-                          <span>
-                            Exit: {currentToolTestResult.exitCode ?? "null"} ·{" "}
-                            {currentToolTestResult.timedOut
-                              ? "Timed out"
-                              : "Completed"}
-                          </span>
-                        ) : (
-                          <span>
-                            {currentToolTestState?.status === "pending"
-                              ? "Waiting for execution slot"
-                              : "Running command"}
-                          </span>
-                        )}
-                        {currentToolTestResult ? (
-                          currentToolTestResult.exitCode !== 0 ||
-                          currentToolTestResult.timedOut ? (
-                            <span className="inline-flex items-center gap-1 text-destructive">
-                              <X className="size-3.5" />
-                              Failed
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
-                              <Check className="size-3.5" />
-                              Complete
-                            </span>
-                          )
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-                            <Spinner className="size-3.5" />
-                            {currentToolTestState?.status === "pending"
-                              ? "Waiting"
-                              : "Running"}
-                          </span>
-                        )}
-                      </div>
-                      {renderToolExecutionPreview(
-                        currentToolTestExecutionPreview,
+                </div>
+              </>
+            ) : isChecklistWriteToolSelected ? (
+              <>
+                <div className="z-20 shrink-0 border-b bg-background px-5 py-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                      Built-in tool
+                    </Label>
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                      <Lock className="size-3.5" />
+                      Locked
+                    </span>
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                  <div className="grid gap-5 pb-1">
+                    <div className="grid gap-1">
+                      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <ListTodo className="size-5 text-muted-foreground" />
+                        {BUILTIN_CHECKLIST_WRITE_TOOL_NAME}
+                      </h3>
+                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
+                        {BUILTIN_CHECKLIST_WRITE_TOOL_DESCRIPTION}
+                      </p>
+                    </div>
+
+                    {!toolsSettings.enabled &&
+                      toolsSettings.checklistWriteEnabled && (
+                        <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
+                          Global tools are disabled, so checklist_write is currently
+                          not sent to the model even though this built-in tool is
+                          enabled.
+                        </div>
                       )}
-                      {currentToolTestResult && (
-                        <div className="grid gap-1.5">
-                          <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-                            Output
+
+                    <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+                      <Label>Behavior</Label>
+                      <div className="grid gap-2 text-base leading-6 text-muted-foreground">
+                        <p>
+                          The assistant can call this tool during complex work to
+                          show a concise progress checklist in the chat. It
+                          completes immediately and does not pause generation.
+                        </p>
+                        <p>
+                          Each call creates a checklist snapshot. It supports up to
+                          10 short items. Each item has only content and done.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Parameters JSON schema</Label>
+                      {renderJsonCodeBlock(
+                        JSON.stringify(
+                          BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS,
+                          null,
+                          2,
+                        ),
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : toolDraft ? (
+              <>
+                <div className="z-20 shrink-0 border-b bg-background px-5 py-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                      {selectedTool ? "Edit tool" : "Create tool"}
+                    </Label>
+                    {selectedTool && toolDraft && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="rounded-lg"
+                            title="Tool options"
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem
+                            onSelect={() => void exportCurrentTool()}
+                          >
+                            <Download className="size-4" />
+                            Export
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onSelect={() => void deleteCurrentTool()}
+                          >
+                            <Trash2 className="size-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                  <div className="grid gap-5 pb-1">
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-name">Name</Label>
+                      <Input
+                        id="tool-name"
+                        value={toolDraft.name}
+                        onChange={(event) =>
+                          updateToolDraft({ name: event.target.value })
+                        }
+                        placeholder="calculate_square_root"
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-description">Description</Label>
+                      <Textarea
+                        id="tool-description"
+                        value={toolDraft.description}
+                        onChange={(event) =>
+                          updateToolDraft({ description: event.target.value })
+                        }
+                        placeholder="Describe when the model should use this tool."
+                        className="min-h-20 resize-y"
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-command">Command</Label>
+                      <Input
+                        id="tool-command"
+                        value={toolDraft.command}
+                        onChange={(event) =>
+                          updateToolDraft({ command: event.target.value })
+                        }
+                        placeholder="node / python / rg / git"
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-schema">Parameters JSON schema</Label>
+                      <Textarea
+                        id="tool-schema"
+                        value={toolDraft.parametersText}
+                        onChange={(event) =>
+                          updateToolDraft({ parametersText: event.target.value })
+                        }
+                        className="min-h-64 resize-y font-mono text-sm"
+                        spellCheck={false}
+                      />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-args">Arguments, one per line</Label>
+                      <Textarea
+                        id="tool-args"
+                        value={toolDraft.argsText}
+                        onChange={(event) =>
+                          updateToolDraft({ argsText: event.target.value })
+                        }
+                        placeholder={
+                          "C:/Prime/Tools/math-tool/dist/index.js\n--query\n{{query}}"
+                        }
+                        className="min-h-32 resize-y font-mono text-sm"
+                        spellCheck={false}
+                      />
+                      <p className="text-sm leading-5 text-muted-foreground">
+                        Use <code>{"{{fieldName}}"}</code> placeholders for existing
+                        CLIs. Every placeholder must exist in schema.properties and
+                        schema.required.
+                      </p>
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="grid gap-2">
+                        <Label htmlFor="tool-input-mode">Input mode</Label>
+                        <Select
+                          value={toolDraft.input}
+                          onValueChange={(value) =>
+                            updateToolDraft({
+                              input: value === "none" ? "none" : "json-stdin",
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            id="tool-input-mode"
+                            className="rounded-lg"
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="json-stdin">JSON stdin</SelectItem>
+                            <SelectItem value="none">None</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-sm leading-5 text-muted-foreground">
+                          JSON stdin is best for scripts you write. None is best for
+                          existing CLI flags/placeholders.
+                        </p>
+                      </div>
+                      <div className="grid gap-2 content-start">
+                        <Label htmlFor="tool-timeout">Timeout ms</Label>
+                        <Input
+                          id="tool-timeout"
+                          value={toolDraft.timeoutMs}
+                          onChange={(event) =>
+                            updateToolDraft({ timeoutMs: event.target.value })
+                          }
+                          inputMode="numeric"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid gap-3 rounded-lg border bg-muted/20 p-3">
+                      <div>
+                        <Label>Execution limits</Label>
+                        <p className="text-sm leading-5 text-muted-foreground">
+                          Leave concurrency empty for the current parallel behavior.
+                          Use 1 plus a delay for rate-limited tools.
+                        </p>
+                      </div>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="grid gap-2">
+                          <Label htmlFor="tool-max-concurrent-runs">
+                            Max concurrent runs
+                          </Label>
+                          <Input
+                            id="tool-max-concurrent-runs"
+                            value={toolDraft.maxConcurrentRuns}
+                            onChange={(event) =>
+                              updateToolDraft({
+                                maxConcurrentRuns: event.target.value,
+                              })
+                            }
+                            inputMode="numeric"
+                            placeholder="Empty = unlimited"
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <Label htmlFor="tool-delay-between-runs">
+                            Delay between runs, ms
+                          </Label>
+                          <Input
+                            id="tool-delay-between-runs"
+                            value={toolDraft.delayBetweenRunsMs}
+                            onChange={(event) =>
+                              updateToolDraft({
+                                delayBetweenRunsMs: event.target.value,
+                              })
+                            }
+                            inputMode="numeric"
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="tool-cwd">Working directory</Label>
+                      <Input
+                        id="tool-cwd"
+                        value={toolDraft.cwd}
+                        onChange={(event) =>
+                          updateToolDraft({ cwd: event.target.value })
+                        }
+                        placeholder="Optional. Example: C:/Prime/Tools/math-tool"
+                      />
+                    </div>
+
+                    <Separator />
+
+                    <div className="grid gap-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <Label>Test tool</Label>
+                          <p className="text-sm leading-5 text-muted-foreground">
+                            Run this manifest locally with sample model arguments.
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="rounded-lg"
+                            onClick={clearCurrentToolTest}
+                            disabled={!currentToolTestState || isTestingCurrentTool}
+                          >
+                            Clear test
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            className="rounded-lg"
+                            onClick={runCurrentToolTest}
+                            disabled={isTestingCurrentTool}
+                          >
+                            {currentToolTestState?.status === "pending"
+                              ? "Waiting..."
+                              : isTestingCurrentTool
+                                ? "Running..."
+                                : "Run test"}
+                          </Button>
+                        </div>
+                      </div>
+                      <Textarea
+                        value={currentToolTestArgsText}
+                        onChange={(event) =>
+                          updateCurrentToolTestArgsText(event.target.value)
+                        }
+                        disabled={isTestingCurrentTool}
+                        className="min-h-24 resize-y font-mono text-sm"
+                        spellCheck={false}
+                        placeholder='{ "value": 144 }'
+                      />
+                      {(currentToolTestResult ||
+                        currentToolTestExecutionPreview) && (
+                        <div className="grid gap-3 rounded-lg border bg-card p-3">
+                          <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+                            {currentToolTestResult ? (
+                              <span>
+                                Exit: {currentToolTestResult.exitCode ?? "null"} ·{" "}
+                                {currentToolTestResult.timedOut
+                                  ? "Timed out"
+                                  : "Completed"}
+                              </span>
+                            ) : (
+                              <span>
+                                {currentToolTestState?.status === "pending"
+                                  ? "Waiting for execution slot"
+                                  : "Running command"}
+                              </span>
+                            )}
+                            {currentToolTestResult ? (
+                              currentToolTestResult.exitCode !== 0 ||
+                              currentToolTestResult.timedOut ? (
+                                <span className="inline-flex items-center gap-1 text-destructive">
+                                  <X className="size-3.5" />
+                                  Failed
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                                  <Check className="size-3.5" />
+                                  Complete
+                                </span>
+                              )
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                                <Spinner className="size-3.5" />
+                                {currentToolTestState?.status === "pending"
+                                  ? "Waiting"
+                                  : "Running"}
+                              </span>
+                            )}
                           </div>
-                          {renderJsonCodeBlock(currentToolTestResult.content)}
+                          {renderToolExecutionPreview(
+                            currentToolTestExecutionPreview,
+                          )}
+                          {currentToolTestResult && (
+                            <div className="grid gap-1.5">
+                              <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                                Output
+                              </div>
+                              {renderJsonCodeBlock(currentToolTestResult.content)}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
+                  </div>
                 </div>
-              </div>
+              </>
             ) : (
-              <div className="flex h-full items-center justify-center rounded-lg border border-dashed p-8 text-center text-base text-muted-foreground">
-                Select a tool or add a new one.
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
+                <div className="flex h-full items-center justify-center rounded-lg border border-dashed p-8 text-center text-base text-muted-foreground">
+                  Select a tool or add a new one.
+                </div>
               </div>
             )}
           </div>
         </div>
 
         <DialogFooter className="shrink-0 items-center justify-between border-t px-5 py-3">
-          <div className="flex gap-2">
-            {toolDraft && !isAskUserToolSelected && !isChecklistWriteToolSelected && (
-              <>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="rounded-lg"
-                  onClick={exportCurrentTool}
-                >
-                  <Upload className="size-4" />
-                  Export
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  className="rounded-lg"
-                  onClick={deleteCurrentTool}
-                >
-                  <Trash2 className="size-4" />
-                  Delete
-                </Button>
-              </>
-            )}
-          </div>
+          <div />
           <div className="flex gap-2">
             <Button
               type="button"
@@ -1679,7 +1757,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 type="button"
                 className="rounded-lg"
                 onClick={saveCurrentToolDraft}
-                disabled={!toolDraft || isSavingTool}
+                disabled={!toolDraft || isSavingTool || !hasToolDraftChanges}
               >
                 {isSavingTool ? "Saving..." : "Save"}
               </Button>

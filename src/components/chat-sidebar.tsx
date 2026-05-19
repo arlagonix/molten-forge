@@ -1,8 +1,7 @@
-import { memo } from "react";
 import {
   MessageSquareText,
   Moon,
-  MoreVertical,
+  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -11,6 +10,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import { memo } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -74,7 +74,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             className={triggerClassName}
             title="Menu"
           >
-            <MoreVertical className="size-4" />
+            <MoreHorizontal className="size-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -100,7 +100,9 @@ export const ChatSidebar = memo(function ChatSidebar({
             System prompt
           </DropdownMenuItem>
           <DropdownMenuItem
-            onClick={() => onSetTheme(resolvedTheme === "dark" ? "light" : "dark")}
+            onClick={() =>
+              onSetTheme(resolvedTheme === "dark" ? "light" : "dark")
+            }
           >
             {resolvedTheme === "dark" ? (
               <Sun className="size-4" />

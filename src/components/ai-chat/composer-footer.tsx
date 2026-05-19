@@ -2,6 +2,7 @@ import { memo } from "react";
 import { Check, ChevronsUpDown, Lock, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   Command,
   CommandEmpty,
@@ -15,10 +16,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  providerDisplayName,
-  providerLabel,
-} from "@/lib/ai-chat/chat-utils";
+import { providerDisplayName, providerLabel } from "@/lib/ai-chat/chat-utils";
 import type { LoadedToolInfo, ProviderConfig } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +24,9 @@ const ASK_USER_TOOL_NAME = "ask_user";
 const CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
 
 function isBuiltInToolName(toolName: string) {
-  return toolName === ASK_USER_TOOL_NAME || toolName === CHECKLIST_WRITE_TOOL_NAME;
+  return (
+    toolName === ASK_USER_TOOL_NAME || toolName === CHECKLIST_WRITE_TOOL_NAME
+  );
 }
 
 type VisibleProviderGroup = {
@@ -126,7 +126,9 @@ export const ComposerFooter = memo(function ComposerFooter({
                       <CommandItem
                         key={`${provider.id}:${model}`}
                         value={`${providerDisplayName(provider)} ${model}`}
-                        onSelect={() => onSelectProviderModel(provider.id, model)}
+                        onSelect={() =>
+                          onSelectProviderModel(provider.id, model)
+                        }
                         className="min-w-0 cursor-pointer"
                         title={`${providerDisplayName(provider)} · ${model}`}
                       >
@@ -205,12 +207,12 @@ export const ComposerFooter = memo(function ComposerFooter({
                         className="min-w-0 cursor-pointer items-start gap-2"
                         title={tool.description}
                       >
-                        <input
-                          type="checkbox"
+                        <Switch
                           checked={isSelected}
-                          readOnly
                           tabIndex={-1}
-                          className="mt-0.5 size-4 shrink-0 accent-primary"
+                          onClick={(event) => event.stopPropagation()}
+                          onCheckedChange={() => onToggleTool(tool.name)}
+                          className="mt-0.5 shrink-0 cursor-pointer"
                         />
                         <div className="min-w-0 flex-1">
                           <div className="flex min-w-0 items-center gap-1.5">
