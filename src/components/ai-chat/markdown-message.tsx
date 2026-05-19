@@ -5,6 +5,8 @@ import React, { isValidElement, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 
@@ -14,6 +16,74 @@ import { cn } from "@/lib/utils";
 type MarkdownMessageProps = {
   content: string;
   className?: string;
+};
+
+const SAFE_HTML_SCHEMA = {
+  tagNames: [
+    "a",
+    "b",
+    "blockquote",
+    "br",
+    "caption",
+    "code",
+    "col",
+    "colgroup",
+    "del",
+    "details",
+    "div",
+    "em",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "hr",
+    "i",
+    "input",
+    "ins",
+    "kbd",
+    "li",
+    "mark",
+    "ol",
+    "p",
+    "pre",
+    "s",
+    "small",
+    "span",
+    "strong",
+    "sub",
+    "summary",
+    "sup",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "u",
+    "ul",
+  ],
+  attributes: {
+    a: ["href", "title"],
+    code: [["className", /^language-./, "math-inline", "math-display"]],
+    col: ["span"],
+    colgroup: ["span"],
+    details: ["open"],
+    input: [
+      ["type", "checkbox"],
+      ["checked", true],
+      ["disabled", true],
+    ],
+    ol: ["start", "reversed", "type"],
+    td: ["abbr", "align", "colSpan", "headers", "rowSpan"],
+    th: ["abbr", "align", "colSpan", "headers", "rowSpan", "scope"],
+  },
+  protocols: {
+    href: ["http", "https", "irc", "ircs", "mailto", "xmpp"],
+  },
+  clobberPrefix: "chat-html-",
 };
 
 const LANGUAGE_LABELS: Record<string, string> = {
@@ -300,6 +370,8 @@ export function MarkdownMessage({ content, className }: MarkdownMessageProps) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
         rehypePlugins={[
+          rehypeRaw,
+          [rehypeSanitize, SAFE_HTML_SCHEMA],
           rehypeKatex,
           [rehypeHighlight, { detect: false, ignoreMissing: true }],
         ]}

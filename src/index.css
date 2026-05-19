@@ -339,6 +339,30 @@
     @apply my-4 border-border;
   }
 
+  .chat-markdown details {
+    @apply my-3 rounded border border-border px-3 py-2;
+  }
+
+  .chat-markdown summary {
+    @apply cursor-pointer font-medium;
+  }
+
+  .chat-markdown details > *:last-child {
+    margin-bottom: 0;
+  }
+
+  .chat-markdown kbd {
+    @apply rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-sm;
+  }
+
+  .chat-markdown mark {
+    @apply rounded bg-muted px-1 text-foreground;
+  }
+
+  .chat-markdown input[type="checkbox"] {
+    @apply mr-2 align-middle;
+  }
+
   .chat-markdown table {
     @apply my-3 block max-w-full table-auto border-collapse overflow-hidden;
   }
