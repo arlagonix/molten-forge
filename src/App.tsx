@@ -12,6 +12,7 @@ import {
   EyeOff,
   Info,
   ListTodo,
+  Lock,
   MessageSquareText,
   Moon,
   MoreVertical,
@@ -335,6 +336,22 @@ const TOOL_DESCRIPTION_PREVIEW_MAX_LENGTH = 95;
 
 function isValidToolName(toolName: string) {
   return TOOL_NAME_PATTERN.test(toolName);
+}
+
+function isBuiltInToolName(toolName: string) {
+  return toolName === ASK_USER_TOOL_NAME || toolName === CHECKLIST_WRITE_TOOL_NAME;
+}
+
+function compareToolsByDisplayOrder(
+  left: Pick<LoadedToolInfo, "name">,
+  right: Pick<LoadedToolInfo, "name">,
+) {
+  const leftIsBuiltIn = isBuiltInToolName(left.name);
+  const rightIsBuiltIn = isBuiltInToolName(right.name);
+
+  if (leftIsBuiltIn !== rightIsBuiltIn) return leftIsBuiltIn ? -1 : 1;
+
+  return left.name.localeCompare(right.name);
 }
 
 function parseToolMentionNames(content: string) {
@@ -1602,6 +1619,7 @@ const ChecklistBlock = memo(function ChecklistBlock({
 type ToolMentionOption = {
   name: string;
   description?: string;
+  isBuiltin?: boolean;
 };
 
 type ActiveToolMention = {
@@ -1850,8 +1868,11 @@ const ChatComposer = memo(
                       >
                         <Wrench className="mt-0.5 size-3.5 shrink-0 opacity-70" />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">
-                            {tool.name}
+                          <span className="flex min-w-0 items-center gap-1.5 font-medium">
+                            <span className="min-w-0 truncate">{tool.name}</span>
+                            {tool.isBuiltin && (
+                              <Lock className="size-3 shrink-0 text-muted-foreground" />
+                            )}
                           </span>
                           {tool.description && (
                             <span className="mt-0.5 line-clamp-1 text-muted-foreground">
@@ -2426,9 +2447,7 @@ export default function Home() {
       byName.set(tool.name, tool);
     }
 
-    return [...byName.values()].sort((left, right) =>
-      left.name.localeCompare(right.name),
-    );
+    return [...byName.values()].sort(compareToolsByDisplayOrder);
   }, [loadedTools]);
 
   const availableToolsByName = useMemo(() => {
@@ -2487,6 +2506,16 @@ export default function Home() {
       `${tool.name} ${tool.description}`.toLowerCase().includes(search),
     );
   }, [availableTools, chatToolSearchValue]);
+
+  const toolMentionOptions = useMemo<ToolMentionOption[]>(
+    () =>
+      availableTools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        isBuiltin: isBuiltInToolName(tool.name),
+      })),
+    [availableTools],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -6062,10 +6091,13 @@ ${value}
                           className="mt-0.5 size-4 shrink-0 accent-primary"
                         />
                         <div className="min-w-0 flex-1">
-                          <div className="flex min-w-0 items-center gap-2">
+                          <div className="flex min-w-0 items-center gap-1.5">
                             <span className="min-w-0 truncate font-medium">
                               {tool.name}
                             </span>
+                            {isBuiltInToolName(tool.name) && (
+                              <Lock className="size-3 shrink-0 text-muted-foreground" />
+                            )}
                           </div>
                           {tool.description && (
                             <div className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
@@ -7134,7 +7166,7 @@ ${value}
           onSend={sendMessage}
           onStop={stopGeneration}
           footerStart={renderComposerFooterStart()}
-          toolMentionOptions={availableTools}
+          toolMentionOptions={toolMentionOptions}
         />
       </section>
 

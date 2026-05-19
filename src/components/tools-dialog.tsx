@@ -1,6 +1,16 @@
-import { Check, ListTodo, Lock, MessageSquareText, Plus, RefreshCcw, Trash2, Wrench, X } from "lucide-react";
-import { memo, useEffect, useMemo, useState } from "react";
+import {
+  Check,
+  ListTodo,
+  Lock,
+  MessageSquareText,
+  Plus,
+  RefreshCcw,
+  Trash2,
+  Wrench,
+  X,
+} from "lucide-react";
 import type { Dispatch, SetStateAction } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { Button } from "@/components/ui/button";
@@ -25,12 +35,12 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { createId, labelForError } from "@/lib/ai-chat/chat-utils";
-import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import {
   deleteTool as deleteStoredTool,
   loadTools,
   saveTool,
 } from "@/lib/ai-chat/storage";
+import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import type {
   LoadedToolInfo,
   ToolCommandResult,
@@ -86,7 +96,8 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
                 },
                 description: {
                   type: "string",
-                  description: "Strongly recommended one-sentence explanation shown below the label.",
+                  description:
+                    "Strongly recommended one-sentence explanation shown below the label.",
                 },
               },
               required: ["id", "label"],
@@ -113,8 +124,14 @@ const BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS = {
       items: {
         type: "object",
         properties: {
-          content: { type: "string", description: "Short user-visible checklist item." },
-          done: { type: "boolean", description: "Whether this item is completed." },
+          content: {
+            type: "string",
+            description: "Short user-visible checklist item.",
+          },
+          done: {
+            type: "boolean",
+            description: "Whether this item is completed.",
+          },
         },
         required: ["content", "done"],
       },
@@ -198,7 +215,9 @@ function toolToDraft(tool: LoadedToolInfo): ToolDraft {
     input: tool.input,
     timeoutMs: String(tool.timeoutMs),
     maxConcurrentRuns:
-      tool.maxConcurrentRuns === undefined ? "" : String(tool.maxConcurrentRuns),
+      tool.maxConcurrentRuns === undefined
+        ? ""
+        : String(tool.maxConcurrentRuns),
     delayBetweenRunsMs: String(tool.delayBetweenRunsMs ?? 0),
   };
 }
@@ -265,14 +284,15 @@ function loadToolTestStates(): Record<string, ToolTestState> {
 
           const candidate = value as Partial<ToolTestState>;
           const argsText =
-            typeof candidate.argsText === "string"
-              ? candidate.argsText
-              : "{}";
+            typeof candidate.argsText === "string" ? candidate.argsText : "{}";
           const result = isToolCommandResult(candidate.result)
             ? candidate.result
             : null;
 
-          return [toolId, { argsText, result } satisfies ToolTestState] as const;
+          return [
+            toolId,
+            { argsText, result } satisfies ToolTestState,
+          ] as const;
         })
         .filter(
           (entry): entry is readonly [string, ToolTestState] => entry !== null,
@@ -297,7 +317,9 @@ function saveToolTestStates(states: Record<string, ToolTestState>) {
         return [toolId, { argsText, result }] as const;
       })
       .filter(
-        (entry): entry is readonly [
+        (
+          entry,
+        ): entry is readonly [
           string,
           { argsText: string; result: ToolCommandResult | null },
         ] => entry !== null,
@@ -389,7 +411,12 @@ function extractTemplatePlaceholders(args: string[]) {
 }
 
 function getToolArgValue(args: unknown, key: string) {
-  if (!args || typeof args !== "object" || Array.isArray(args) || !(key in args)) {
+  if (
+    !args ||
+    typeof args !== "object" ||
+    Array.isArray(args) ||
+    !(key in args)
+  ) {
     throw new Error(`Missing required tool argument: ${key}`);
   }
 
@@ -456,10 +483,7 @@ function buildToolExecutionPreview(
   };
 }
 
-function buildToolExecutionPreviewForDraft(
-  draft: ToolDraft,
-  argsText: string,
-) {
+function buildToolExecutionPreviewForDraft(draft: ToolDraft, argsText: string) {
   try {
     return buildToolExecutionPreview(
       {
@@ -531,7 +555,9 @@ function validateToolDraft(tool: LoadedToolInfo) {
     tool.name === BUILTIN_ASK_USER_TOOL_NAME ||
     tool.name === BUILTIN_CHECKLIST_WRITE_TOOL_NAME
   ) {
-    throw new Error(`${tool.name} is a built-in tool name and cannot be used by a custom command tool.`);
+    throw new Error(
+      `${tool.name} is a built-in tool name and cannot be used by a custom command tool.`,
+    );
   }
   if (!tool.description) throw new Error("Tool description is required.");
   if (tool.parameters.type !== "object") {
@@ -601,7 +627,11 @@ export const ToolsDialog = memo(function ToolsDialog({
       loadedTools.filter((tool) => tool.enabled).length +
       (toolsSettings.askUserEnabled ? 1 : 0) +
       (toolsSettings.checklistWriteEnabled ? 1 : 0),
-    [loadedTools, toolsSettings.askUserEnabled, toolsSettings.checklistWriteEnabled],
+    [
+      loadedTools,
+      toolsSettings.askUserEnabled,
+      toolsSettings.checklistWriteEnabled,
+    ],
   );
   const currentToolTestState = toolDraft
     ? toolTestStatesByToolId[toolDraft.id]
@@ -921,15 +951,15 @@ export const ToolsDialog = memo(function ToolsDialog({
                 <MessageSquareText className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                    <span className="truncate">{BUILTIN_ASK_USER_TOOL_NAME}</span>
+                    <span className="truncate">
+                      {BUILTIN_ASK_USER_TOOL_NAME}
+                    </span>
                     <Lock className="size-3 shrink-0 text-muted-foreground" />
                   </div>
                   <div className="truncate text-sm leading-5 text-muted-foreground">
                     {toolsSettings.askUserEnabled
-                      ? toolsSettings.enabled
-                        ? "Enabled · Built-in interactive"
-                        : "Enabled · Global tools off"
-                      : "Disabled · Built-in interactive"}
+                      ? "Enabled · Built-in"
+                      : "Disabled · Built-in"}
                   </div>
                 </div>
                 <input
@@ -961,7 +991,9 @@ export const ToolsDialog = memo(function ToolsDialog({
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
                 )}
-                onClick={() => setSelectedToolName(BUILTIN_CHECKLIST_WRITE_TOOL_NAME)}
+                onClick={() =>
+                  setSelectedToolName(BUILTIN_CHECKLIST_WRITE_TOOL_NAME)
+                }
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -972,15 +1004,15 @@ export const ToolsDialog = memo(function ToolsDialog({
                 <ListTodo className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                    <span className="truncate">{BUILTIN_CHECKLIST_WRITE_TOOL_NAME}</span>
+                    <span className="truncate">
+                      {BUILTIN_CHECKLIST_WRITE_TOOL_NAME}
+                    </span>
                     <Lock className="size-3 shrink-0 text-muted-foreground" />
                   </div>
                   <div className="truncate text-sm leading-5 text-muted-foreground">
                     {toolsSettings.checklistWriteEnabled
-                      ? toolsSettings.enabled
-                        ? "Enabled · Built-in checklist"
-                        : "Enabled · Global tools off"
-                      : "Disabled · Built-in checklist"}
+                      ? "Enabled · Built-in"
+                      : "Disabled · Built-in"}
                   </div>
                 </div>
                 <input
@@ -1023,7 +1055,9 @@ export const ToolsDialog = memo(function ToolsDialog({
                 >
                   <Wrench className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-base leading-6">{tool.name}</div>
+                    <div className="truncate text-base leading-6">
+                      {tool.name}
+                    </div>
                     <div className="truncate text-sm leading-5 text-muted-foreground">
                       {tool.enabled ? "Enabled" : "Disabled"} · {tool.command}
                     </div>
@@ -1150,10 +1184,11 @@ export const ToolsDialog = memo(function ToolsDialog({
                     </p>
                     <p>
                       It supports up to 5 questions per form. Questions can be
-                      single-choice, multi-select, or text-only. Choice questions
-                      support up to 8 model-provided options, and each option
-                      should include a short label plus a gray helper description when useful.
-                      Chat Forge always adds a custom “Type your answer” option to choice questions.
+                      single-choice, multi-select, or text-only. Choice
+                      questions support up to 8 model-provided options, and each
+                      option should include a short label plus a gray helper
+                      description when useful. Chat Forge always adds a custom
+                      “Type your answer” option to choice questions.
                     </p>
                   </div>
                 </div>
@@ -1190,10 +1225,12 @@ export const ToolsDialog = memo(function ToolsDialog({
 
                 <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-base">
                   <span className="min-w-0">
-                    <span className="block font-medium">Enable checklist_write</span>
+                    <span className="block font-medium">
+                      Enable checklist_write
+                    </span>
                     <span className="block text-sm leading-5 text-muted-foreground">
-                      When enabled globally, this sends the built-in
-                      checklist tool schema to the model.
+                      When enabled globally, this sends the built-in checklist
+                      tool schema to the model.
                     </span>
                   </span>
                   <input
@@ -1209,20 +1246,22 @@ export const ToolsDialog = memo(function ToolsDialog({
                   />
                 </label>
 
-                {!toolsSettings.enabled && toolsSettings.checklistWriteEnabled && (
-                  <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
-                    Global tools are disabled, so checklist_write is currently not
-                    sent to the model even though this built-in tool is enabled.
-                  </div>
-                )}
+                {!toolsSettings.enabled &&
+                  toolsSettings.checklistWriteEnabled && (
+                    <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
+                      Global tools are disabled, so checklist_write is currently
+                      not sent to the model even though this built-in tool is
+                      enabled.
+                    </div>
+                  )}
 
                 <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
                   <Label>Behavior</Label>
                   <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                     <p>
                       The assistant can call this tool during complex work to
-                      show a concise progress checklist in the chat. It completes
-                      immediately and does not pause generation.
+                      show a concise progress checklist in the chat. It
+                      completes immediately and does not pause generation.
                     </p>
                     <p>
                       Each call creates a checklist snapshot. It supports up to
@@ -1235,7 +1274,11 @@ export const ToolsDialog = memo(function ToolsDialog({
                   <Label>Parameters JSON schema</Label>
                   <div className="rounded-lg border bg-card p-3">
                     {renderJsonCodeBlock(
-                      JSON.stringify(BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS, null, 2),
+                      JSON.stringify(
+                        BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS,
+                        null,
+                        2,
+                      ),
                     )}
                   </div>
                 </div>
@@ -1330,7 +1373,10 @@ export const ToolsDialog = memo(function ToolsDialog({
                         })
                       }
                     >
-                      <SelectTrigger id="tool-input-mode" className="rounded-lg">
+                      <SelectTrigger
+                        id="tool-input-mode"
+                        className="rounded-lg"
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -1457,7 +1503,8 @@ export const ToolsDialog = memo(function ToolsDialog({
                     spellCheck={false}
                     placeholder='{ "value": 144 }'
                   />
-                  {(currentToolTestResult || currentToolTestExecutionPreview) && (
+                  {(currentToolTestResult ||
+                    currentToolTestExecutionPreview) && (
                     <div className="grid gap-3 rounded-lg border bg-card p-3">
                       <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
                         {currentToolTestResult ? (
@@ -1496,7 +1543,9 @@ export const ToolsDialog = memo(function ToolsDialog({
                           </span>
                         )}
                       </div>
-                      {renderToolExecutionPreview(currentToolTestExecutionPreview)}
+                      {renderToolExecutionPreview(
+                        currentToolTestExecutionPreview,
+                      )}
                       {currentToolTestResult && (
                         <div className="grid gap-1.5">
                           <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
