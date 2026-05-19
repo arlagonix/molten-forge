@@ -1631,6 +1631,18 @@ ipcMain.handle(
         reasoning: finalReasoning,
         toolCalls: [...streamedToolCalls.values()].filter((toolCall) => toolCall.id && toolCall.function.name),
       };
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return {
+          usage,
+          finishReason: finishReason ?? "cancelled",
+          content: "",
+          reasoning: "",
+          toolCalls: [],
+        };
+      }
+
+      throw error;
     } finally {
       activeStreamControllers.delete(streamId);
     }

@@ -520,6 +520,10 @@ export async function streamProviderChat({
       }
     });
 
+    if (signal?.aborted) {
+      throw new DOMException("Generation was cancelled.", "AbortError");
+    }
+
     tagParser.flush();
 
     const finalRawContent = typeof result.content === "string" ? result.content : "";

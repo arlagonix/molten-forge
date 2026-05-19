@@ -2,14 +2,35 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { MarkdownMessage } from "./markdown-message";
 
+const FENCED_CODE_BLOCK_PATTERN = /(^|\n) {0,3}(```+|~~~+)/g;
+
+function hasUnclosedFencedCodeBlock(content: string) {
+  FENCED_CODE_BLOCK_PATTERN.lastIndex = 0;
+
+  let hasUnclosedFence = false;
+  while (FENCED_CODE_BLOCK_PATTERN.exec(content)) {
+    hasUnclosedFence = !hasUnclosedFence;
+  }
+
+  return hasUnclosedFence;
+}
+
 const AssistantMessageContent = memo(function AssistantMessageContent({
   content,
   className,
+  skipSyntaxHighlight = false,
 }: {
   content: string;
   className?: string;
+  skipSyntaxHighlight?: boolean;
 }) {
-  return <MarkdownMessage content={content} className={className} />;
+  return (
+    <MarkdownMessage
+      content={content}
+      className={className}
+      skipSyntaxHighlight={skipSyntaxHighlight}
+    />
+  );
 });
 
 function takeSafeVisibleSlice(remaining: string, maxChars: number) {
@@ -97,15 +118,21 @@ function useSmoothStreamingText({
   const visibleContentRef = useRef(content);
   const visualStreamingRef = useRef(false);
   const lastFlushVersionRef = useRef(flushVersion);
+  const onVisualProgressRef = useRef(onVisualProgress);
+  const onVisualStreamingChangeRef = useRef(onVisualStreamingChange);
 
-  const setVisualStreaming = useCallback(
-    (isVisuallyStreaming: boolean) => {
-      if (visualStreamingRef.current === isVisuallyStreaming) return;
-      visualStreamingRef.current = isVisuallyStreaming;
-      onVisualStreamingChange?.(isVisuallyStreaming);
-    },
-    [onVisualStreamingChange],
-  );
+  onVisualProgressRef.current = onVisualProgress;
+  onVisualStreamingChangeRef.current = onVisualStreamingChange;
+
+  const notifyVisualProgress = useCallback(() => {
+    onVisualProgressRef.current?.();
+  }, []);
+
+  const setVisualStreaming = useCallback((isVisuallyStreaming: boolean) => {
+    if (visualStreamingRef.current === isVisuallyStreaming) return;
+    visualStreamingRef.current = isVisuallyStreaming;
+    onVisualStreamingChangeRef.current?.(isVisuallyStreaming);
+  }, []);
 
   useEffect(() => {
     if (forceInstant) {
@@ -113,7 +140,7 @@ function useSmoothStreamingText({
       visibleContentRef.current = content;
       setVisibleContent(content);
       setVisualStreaming(false);
-      onVisualProgress?.();
+      notifyVisualProgress();
       return;
     }
 
@@ -122,7 +149,7 @@ function useSmoothStreamingText({
       visibleContentRef.current = content;
       setVisibleContent(content);
       setVisualStreaming(false);
-      onVisualProgress?.();
+      notifyVisualProgress();
       return;
     }
 
@@ -130,7 +157,7 @@ function useSmoothStreamingText({
       visibleContentRef.current = content;
       setVisibleContent(content);
       setVisualStreaming(false);
-      onVisualProgress?.();
+      notifyVisualProgress();
       return;
     }
 
@@ -139,7 +166,7 @@ function useSmoothStreamingText({
     content,
     flushVersion,
     forceInstant,
-    onVisualProgress,
+    notifyVisualProgress,
     setVisualStreaming,
   ]);
 
@@ -169,7 +196,7 @@ function useSmoothStreamingText({
       visibleContentRef.current = nextVisibleContent;
       setVisibleContent(nextVisibleContent);
       setVisualStreaming(nextVisibleContent.length < content.length);
-      onVisualProgress?.();
+      notifyVisualProgress();
 
       if (nextVisibleContent.length < content.length) {
         timeoutId = window.setTimeout(tick, isApiStreaming ? 22 : 16);
@@ -191,7 +218,7 @@ function useSmoothStreamingText({
     content,
     forceInstant,
     isApiStreaming,
-    onVisualProgress,
+    notifyVisualProgress,
     setVisualStreaming,
   ]);
 
@@ -206,6 +233,7 @@ type SmoothAssistantMessageContentProps = {
   forceInstant?: boolean;
   onVisualProgress?: () => void;
   onVisualStreamingChange?: (isVisuallyStreaming: boolean) => void;
+  skipSyntaxHighlight?: boolean;
 };
 
 export const SmoothAssistantMessageContent = memo(
@@ -217,6 +245,7 @@ export const SmoothAssistantMessageContent = memo(
     forceInstant = false,
     onVisualProgress,
     onVisualStreamingChange,
+    skipSyntaxHighlight = false,
   }: SmoothAssistantMessageContentProps) {
     const visibleContent = useSmoothStreamingText({
       content,
@@ -227,8 +256,15 @@ export const SmoothAssistantMessageContent = memo(
       onVisualStreamingChange,
     });
 
+    const shouldSkipSyntaxHighlight =
+      skipSyntaxHighlight && hasUnclosedFencedCodeBlock(visibleContent);
+
     return (
-      <AssistantMessageContent content={visibleContent} className={className} />
+      <AssistantMessageContent
+        content={visibleContent}
+        className={className}
+        skipSyntaxHighlight={shouldSkipSyntaxHighlight}
+      />
     );
   },
   (previous, next) =>
@@ -236,5 +272,6 @@ export const SmoothAssistantMessageContent = memo(
     previous.className === next.className &&
     previous.isApiStreaming === next.isApiStreaming &&
     previous.flushVersion === next.flushVersion &&
-    previous.forceInstant === next.forceInstant,
+    previous.forceInstant === next.forceInstant &&
+    previous.skipSyntaxHighlight === next.skipSyntaxHighlight,
 );

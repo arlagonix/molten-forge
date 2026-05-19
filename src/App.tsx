@@ -25,11 +25,8 @@ import { ProviderSettingsDialog } from "@/components/provider-settings-dialog";
 import { ToolsDialog } from "@/components/tools-dialog";
 import { Button } from "@/components/ui/button";
 import {
-  buildTokenMetrics,
-  createId,
   createNewProvider,
   createProviderId,
-  getActiveVariant,
   getProviderFallbackModel,
   groupChatsByActivityDate,
   labelForError,
@@ -37,9 +34,7 @@ import {
   normalizeProviderModels,
   providerDisplayName,
   sortChatsByUpdatedAt,
-  titleFromMessage,
 } from "@/lib/ai-chat/chat-utils";
-import { streamProviderChat } from "@/lib/ai-chat/direct-provider-client";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
   createEmptyChat,
@@ -55,7 +50,6 @@ import {
   saveSystemPrompt,
   saveToolsSettings,
 } from "@/lib/ai-chat/storage";
-import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import {
   ASK_USER_TOOL,
   ASK_USER_TOOL_NAME,
@@ -63,20 +57,10 @@ import {
   CHECKLIST_WRITE_TOOL_NAME,
   DEFAULT_TOOLS_SETTINGS,
   compareToolsByDisplayOrder,
-  createAskUserToolResult,
-  createChecklistWriteToolResult,
   isBuiltInToolName,
   isValidToolName,
-  parseAskUserRequestFromToolCall,
-  parseChecklistWriteRequestFromToolCall,
-  parseToolArgumentsText,
-  parseToolMentionNames,
 } from "@/lib/ai-chat/builtin-tools";
 import type {
-  AskUserRequest,
-  AskUserResponse,
-  ChatAssistantProcessStep,
-  ChatAssistantVariant,
   ChatMessage,
   ChatSession,
   ChatToolCall,
@@ -86,9 +70,9 @@ import type {
   ProvidersState,
   ToolExecutionStatus,
   ToolsSettings,
-  UserInputStatus,
 } from "@/lib/ai-chat/types";
 import { useChatActions } from "@/hooks/use-chat-actions";
+import { useChatGeneration } from "@/hooks/use-chat-generation";
 import { useChatAutoscroll } from "@/hooks/use-chat-autoscroll";
 import { useMessageContextMenu } from "@/hooks/use-message-context-menu";
 import { useStableCallback } from "@/hooks/use-stable-callback";
@@ -100,14 +84,8 @@ const APP_NAME = "Chat Forge";
 const APP_VERSION_LABEL = `v${__APP_VERSION__}`;
 const APP_TITLE = `${APP_NAME} ${APP_VERSION_LABEL}`;
 
-const CHAT_BOTTOM_THRESHOLD_PX = 32;
-const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
-const STICKY_SCROLL_SUPPRESSION_MS = 1000;
-const STICKY_SCROLL_SETTLE_FRAMES = 5;
-const FORCED_SCROLL_SETTLE_FRAMES = 8;
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
 const COMPOSER_DRAFTS_STORAGE_KEY = "chat-forge-composer-drafts";
-const MAX_TOOL_ROUNDS = 20;
 
 function loadComposerDrafts(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -150,58 +128,6 @@ function saveComposerDrafts(drafts: Record<string, string>) {
   );
 }
 
-type StreamBufferEvent =
-  | {
-      type: "content";
-      delta: string;
-      assistantMessageStepId: string;
-    }
-  | {
-      type: "reasoning";
-      delta: string;
-      reasoningStepId: string;
-    };
-
-type StreamBuffer = {
-  chatId: string;
-  assistantMessageId: string;
-  variantId: string;
-  events: StreamBufferEvent[];
-};
-
-type ActiveProcessStepRef = {
-  type: "thinking" | "assistant_message" | "tool_execution" | "user_input";
-  id?: string;
-};
-
-function keepOnlyLatestChecklistListStep<T extends ChatAssistantProcessStep>(
-  processSteps: T[],
-): T[] {
-  return processSteps;
-}
-
-function cancelUnfinishedChecklistListSteps(
-  processSteps: ChatAssistantProcessStep[],
-): ChatAssistantProcessStep[] {
-  return processSteps;
-}
-
-type ActiveGeneration = {
-  controller: AbortController;
-  assistantMessageId: string;
-  variantId: string;
-};
-
-type PendingAskUserRequest = {
-  chatId: string;
-  assistantMessageId: string;
-  variantId: string;
-  stepId: string;
-  resolve: (result: ChatToolResult) => void;
-  reject: (error: unknown) => void;
-  cleanup: () => void;
-};
-
 type FindInPageResultState = {
   activeMatchOrdinal: number;
   matches: number;
@@ -235,9 +161,6 @@ export default function Home() {
   );
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
-  const [streamingAssistantByChatId, setStreamingAssistantByChatId] = useState<
-    Record<string, string>
-  >({});
   const [visualStreamingMessageIds, setVisualStreamingMessageIds] = useState<
     string[]
   >([]);
@@ -273,20 +196,15 @@ export default function Home() {
     closeMessageContextMenu,
   } = useMessageContextMenu();
   const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
+  const messageElementRefCallbacks = useRef(
+    new Map<string, (element: HTMLDivElement | null) => void>(),
+  );
   const chatComposerRef = useRef<ChatComposerHandle | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
-  const generationRefs = useRef<Record<string, ActiveGeneration>>({});
-  const pendingAskUserRequestsRef = useRef<
-    Record<string, PendingAskUserRequest>
-  >({});
-  const streamBuffersRef = useRef<Record<string, StreamBuffer>>({});
-  const streamActiveProcessStepRefs = useRef<
-    Record<string, ActiveProcessStepRef>
-  >({});
-  const streamFlushTimeoutRefs = useRef<Record<string, number>>({});
   const didHydrateRef = useRef(false);
   const composerDraftSaveTimeoutRef = useRef<number | null>(null);
-
+  const chatSaveTimeoutRef = useRef<number | null>(null);
+  const savedChatSnapshotsRef = useRef<Record<string, string>>({});
 
   const { resolvedTheme, setTheme } = useTheme();
 
@@ -408,13 +326,23 @@ export default function Home() {
   }
 
   function registerMessageElement(messageId: string) {
-    return (element: HTMLDivElement | null) => {
+    const existingCallback = messageElementRefCallbacks.current.get(messageId);
+
+    if (existingCallback) {
+      return existingCallback;
+    }
+
+    const callback = (element: HTMLDivElement | null) => {
       if (element) {
         messageElementRefs.current.set(messageId, element);
       } else {
         messageElementRefs.current.delete(messageId);
+        messageElementRefCallbacks.current.delete(messageId);
       }
     };
+
+    messageElementRefCallbacks.current.set(messageId, callback);
+    return callback;
   }
 
   const sortedChats = useMemo(() => sortChatsByUpdatedAt(chats), [chats]);
@@ -647,6 +575,9 @@ export default function Home() {
         setSystemPrompt(loadedSystemPrompt);
         setToolsSettings(loadedToolsSettings);
         setLoadedTools(loadedToolManifests);
+        savedChatSnapshotsRef.current = Object.fromEntries(
+          nextChats.map((chat) => [chat.id, JSON.stringify(chat)]),
+        );
         setChats(nextChats);
         setActiveChatId(nextActiveChatId);
         didHydrateRef.current = true;
@@ -658,6 +589,9 @@ export default function Home() {
           ...createEmptyChat(),
           providerId: fallbackProvider.id,
           model: getProviderFallbackModel(fallbackProvider),
+        };
+        savedChatSnapshotsRef.current = {
+          [fallbackChat.id]: JSON.stringify(fallbackChat),
         };
         setProvidersState({
           providers: [fallbackProvider],
@@ -675,17 +609,6 @@ export default function Home() {
 
     return () => {
       cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      Object.values(streamFlushTimeoutRefs.current).forEach((timeoutId) =>
-        window.clearTimeout(timeoutId),
-      );
-      Object.values(generationRefs.current).forEach((generation) =>
-        generation.controller.abort(),
-      );
     };
   }, []);
 
@@ -755,6 +678,10 @@ export default function Home() {
         window.clearTimeout(composerDraftSaveTimeoutRef.current);
       }
 
+      if (chatSaveTimeoutRef.current !== null) {
+        window.clearTimeout(chatSaveTimeoutRef.current);
+      }
+
       saveComposerDrafts(composerDraftsRef.current);
     };
   }, []);
@@ -762,14 +689,43 @@ export default function Home() {
   useEffect(() => {
     if (!didHydrateRef.current || chats.length === 0) return;
 
-    const timeoutId = window.setTimeout(() => {
-      Promise.all(chats.map((chat) => saveChat(chat))).catch((error) =>
+    if (chatSaveTimeoutRef.current !== null) {
+      window.clearTimeout(chatSaveTimeoutRef.current);
+    }
+
+    const saveDelayMs = generatingChatIds.length > 0 ? 1000 : 250;
+
+    chatSaveTimeoutRef.current = window.setTimeout(() => {
+      chatSaveTimeoutRef.current = null;
+
+      const nextSnapshots: Record<string, string> = {};
+      const changedChats: ChatSession[] = [];
+
+      for (const chat of chats) {
+        const snapshot = JSON.stringify(chat);
+        nextSnapshots[chat.id] = snapshot;
+
+        if (savedChatSnapshotsRef.current[chat.id] !== snapshot) {
+          changedChats.push(chat);
+        }
+      }
+
+      savedChatSnapshotsRef.current = nextSnapshots;
+
+      if (changedChats.length === 0) return;
+
+      Promise.all(changedChats.map((chat) => saveChat(chat))).catch((error) =>
         console.error("Failed to save chats:", error),
       );
-    }, 250);
+    }, saveDelayMs);
 
-    return () => window.clearTimeout(timeoutId);
-  }, [chats]);
+    return () => {
+      if (chatSaveTimeoutRef.current !== null) {
+        window.clearTimeout(chatSaveTimeoutRef.current);
+        chatSaveTimeoutRef.current = null;
+      }
+    };
+  }, [chats, generatingChatIds.length]);
 
   function showSuccess(message: string, description?: string) {
     toast(message, description ? { description } : undefined);
@@ -791,69 +747,7 @@ export default function Home() {
     return window.chatForgeTools;
   }
 
-  function getGlobalEnabledTools() {
-    const enabledCommandTools = toolsSettings.enabled
-      ? loadedTools.filter(
-          (tool) =>
-            tool.enabled &&
-            tool.name !== ASK_USER_TOOL_NAME &&
-            tool.name !== CHECKLIST_WRITE_TOOL_NAME,
-        )
-      : [];
 
-    if (!toolsSettings.enabled) return enabledCommandTools;
-
-    return [
-      ...(toolsSettings.askUserEnabled ? [ASK_USER_TOOL] : []),
-      ...(toolsSettings.checklistWriteEnabled ? [CHECKLIST_WRITE_TOOL] : []),
-      ...enabledCommandTools,
-    ];
-  }
-
-  function getEnabledToolsForChat(
-    chat: ChatSession,
-    oneShotToolNames: string[] = [],
-  ) {
-    const byName = new Map<string, LoadedToolInfo>();
-    const chatDisabledToolNames = new Set(chat.disabledToolNames ?? []);
-
-    for (const tool of getGlobalEnabledTools()) {
-      if (chatDisabledToolNames.has(tool.name)) continue;
-      if (!byName.has(tool.name)) byName.set(tool.name, tool);
-    }
-
-    for (const toolName of chat.enabledToolNames ?? []) {
-      if (chatDisabledToolNames.has(toolName)) continue;
-
-      const tool = availableToolsByName.get(toolName);
-      if (tool && !byName.has(tool.name)) byName.set(tool.name, tool);
-    }
-
-    for (const toolName of oneShotToolNames) {
-      const tool = availableToolsByName.get(toolName);
-      if (tool && !byName.has(tool.name)) byName.set(tool.name, tool);
-    }
-
-    return [...byName.values()];
-  }
-
-  function validateToolMentionsForRequest(content: string) {
-    const toolNames = parseToolMentionNames(content);
-    const unknownToolNames = toolNames.filter(
-      (toolName) => !availableToolsByName.has(toolName),
-    );
-
-    if (unknownToolNames.length > 0) {
-      showError(
-        unknownToolNames.length === 1
-          ? `Tool not found: ${unknownToolNames[0]}`
-          : `Tools not found: ${unknownToolNames.join(", ")}`,
-      );
-      return undefined;
-    }
-
-    return toolNames;
-  }
 
   function isToolExecutionCollapsed(stepId: string) {
     const manualState = collapsedToolStepIds[stepId];
@@ -895,147 +789,6 @@ export default function Home() {
       />
     );
   }
-
-  async function executeAskUserToolCall(
-    toolCall: ChatToolCall,
-    options: {
-      chatId: string;
-      assistantMessageId: string;
-      variantId: string;
-      stepId: string;
-      signal?: AbortSignal;
-    },
-  ): Promise<ChatToolResult> {
-    parseAskUserRequestFromToolCall(toolCall);
-
-    return new Promise<ChatToolResult>((resolve, reject) => {
-      let settled = false;
-
-      const cleanup = () => {
-        delete pendingAskUserRequestsRef.current[toolCall.id];
-        options.signal?.removeEventListener("abort", abortHandler);
-      };
-
-      const settleResolve = (result: ChatToolResult) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve(result);
-      };
-
-      const settleReject = (error: unknown) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(error);
-      };
-
-      const abortHandler = () => {
-        updateAssistantUserInputStepStatus(
-          options.chatId,
-          options.assistantMessageId,
-          options.variantId,
-          options.stepId,
-          "cancelled",
-        );
-        settleReject(
-          new DOMException("Generation was cancelled.", "AbortError"),
-        );
-      };
-
-      pendingAskUserRequestsRef.current[toolCall.id] = {
-        chatId: options.chatId,
-        assistantMessageId: options.assistantMessageId,
-        variantId: options.variantId,
-        stepId: options.stepId,
-        resolve: settleResolve,
-        reject: settleReject,
-        cleanup,
-      };
-
-      updateAssistantUserInputStepStatus(
-        options.chatId,
-        options.assistantMessageId,
-        options.variantId,
-        options.stepId,
-        "waiting",
-      );
-
-      if (options.signal?.aborted) {
-        abortHandler();
-        return;
-      }
-
-      options.signal?.addEventListener("abort", abortHandler, { once: true });
-    });
-  }
-
-  async function executeChecklistWriteToolCall(
-    toolCall: ChatToolCall,
-  ): Promise<ChatToolResult> {
-    const request = parseChecklistWriteRequestFromToolCall(toolCall);
-    return createChecklistWriteToolResult(toolCall, request);
-  }
-
-  async function executeToolCall(
-    toolCall: ChatToolCall,
-    options: {
-      chatId: string;
-      assistantMessageId: string;
-      variantId: string;
-      stepId: string;
-      signal?: AbortSignal;
-    },
-  ): Promise<ChatToolResult> {
-    const toolName = toolCall.function.name;
-    const tool = loadedTools.find((candidate) => candidate.name === toolName);
-
-    try {
-      if (toolName === ASK_USER_TOOL_NAME) {
-        return await executeAskUserToolCall(toolCall, options);
-      }
-
-      if (toolName === CHECKLIST_WRITE_TOOL_NAME) {
-        return await executeChecklistWriteToolCall(toolCall);
-      }
-
-      const argsText = toolCall.function.arguments.trim() || "{}";
-      const args = JSON.parse(argsText);
-      const result = await runQueuedTool(
-        toolName,
-        tool,
-        () => getToolsBridge().execute({ name: toolName, args }),
-        (status) =>
-          updateAssistantToolStepStatus(
-            options.chatId,
-            options.assistantMessageId,
-            options.variantId,
-            options.stepId,
-            status,
-          ),
-      );
-
-      return {
-        toolCallId: toolCall.id,
-        toolName: result.toolName || toolName,
-        content: result.content,
-        isError: result.timedOut || result.exitCode !== 0,
-        execution: result.execution,
-      };
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        throw error;
-      }
-
-      return {
-        toolCallId: toolCall.id,
-        toolName,
-        content: `Error: ${labelForError(error)}`,
-        isError: true,
-      };
-    }
-  }
-
   function updateChat(
     chatId: string,
     updater: (chat: ChatSession) => ChatSession,
@@ -1090,406 +843,45 @@ export default function Home() {
     [activeChatId],
   );
 
-  function appendToAssistantVariant(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    events: StreamBufferEvent[],
-  ) {
-    if (!events.length) return;
 
-    updateChatMessages(
-      chatId,
-      (currentMessages) =>
-        currentMessages.map((message) => {
-          if (
-            message.id !== assistantMessageId ||
-            message.role !== "assistant"
-          ) {
-            return message;
-          }
 
-          return {
-            ...message,
-            variants: message.variants.map((variant) => {
-              if (variant.id !== variantId) return variant;
-
-              let contentDelta = "";
-              let reasoningDelta = "";
-              const contentDeltasByStepId = new Map<string, string>();
-              const reasoningDeltasByStepId = new Map<string, string>();
-
-              for (const event of events) {
-                if (event.type === "content") {
-                  contentDelta += event.delta;
-                  contentDeltasByStepId.set(
-                    event.assistantMessageStepId,
-                    `${contentDeltasByStepId.get(event.assistantMessageStepId) ?? ""}${event.delta}`,
-                  );
-                } else {
-                  reasoningDelta += event.delta;
-                  reasoningDeltasByStepId.set(
-                    event.reasoningStepId,
-                    `${reasoningDeltasByStepId.get(event.reasoningStepId) ?? ""}${event.delta}`,
-                  );
-                }
-              }
-
-              const processSteps = (variant.processSteps ?? []).map((step) => {
-                if (step.type === "assistant_message") {
-                  const delta = contentDeltasByStepId.get(step.id);
-                  return delta
-                    ? { ...step, content: step.content + delta }
-                    : step;
-                }
-
-                if (step.type === "thinking") {
-                  const delta = reasoningDeltasByStepId.get(step.id);
-                  return delta
-                    ? { ...step, content: step.content + delta }
-                    : step;
-                }
-
-                return step;
-              });
-
-              return {
-                ...variant,
-                content: contentDelta
-                  ? variant.content + contentDelta
-                  : variant.content,
-                reasoning: reasoningDelta
-                  ? `${variant.reasoning ?? ""}${reasoningDelta}`
-                  : variant.reasoning,
-                processSteps,
-              };
-            }),
-          };
-        }),
-      { touch: false },
-    );
-  }
-
-  function getStreamBufferKey(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-  ) {
-    return `${chatId}:${assistantMessageId}:${variantId}`;
-  }
-
-  function flushBufferedAssistantVariant(bufferKey: string) {
-    const buffered = streamBuffersRef.current[bufferKey];
-    if (!buffered || buffered.events.length === 0) return;
-
-    const events = buffered.events;
-    streamBuffersRef.current[bufferKey] = {
-      ...buffered,
-      events: [],
-    };
-
-    appendToAssistantVariant(
-      buffered.chatId,
-      buffered.assistantMessageId,
-      buffered.variantId,
-      events,
-    );
-  }
-
-  function flushAllBufferedAssistantVariants() {
-    Object.keys(streamBuffersRef.current).forEach((bufferKey) => {
-      flushBufferedAssistantVariant(bufferKey);
-    });
-  }
-
-  function scheduleBufferedAssistantFlush(bufferKey: string) {
-    if (streamFlushTimeoutRefs.current[bufferKey] !== undefined) return;
-
-    streamFlushTimeoutRefs.current[bufferKey] = window.setTimeout(
-      () => {
-        delete streamFlushTimeoutRefs.current[bufferKey];
-        flushBufferedAssistantVariant(bufferKey);
-      },
-      autoScrollEnabledRef.current ? 50 : 110,
-    );
-  }
-
-  function appendBufferedAssistantVariant(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    event: StreamBufferEvent,
-  ) {
-    const bufferKey = getStreamBufferKey(chatId, assistantMessageId, variantId);
-    const buffered = streamBuffersRef.current[bufferKey] ?? {
-      chatId,
-      assistantMessageId,
-      variantId,
-      events: [],
-    };
-
-    streamBuffersRef.current[bufferKey] = {
-      ...buffered,
-      events: [...buffered.events, event],
-    };
-
-    scheduleBufferedAssistantFlush(bufferKey);
-  }
-
-  function setActiveStreamProcessStep(
-    bufferKey: string,
-    step: ActiveProcessStepRef,
-  ) {
-    streamActiveProcessStepRefs.current[bufferKey] = step;
-  }
-
-  function getActiveStreamProcessStep(bufferKey: string) {
-    return streamActiveProcessStepRefs.current[bufferKey];
-  }
-
-  function updateAssistantVariant(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    updater: (variant: ChatAssistantVariant) => ChatAssistantVariant,
-    options: { touch?: boolean } = {},
-  ) {
-    updateChatMessages(
-      chatId,
-      (currentMessages) =>
-        currentMessages.map((message) => {
-          if (
-            message.id !== assistantMessageId ||
-            message.role !== "assistant"
-          ) {
-            return message;
-          }
-
-          return {
-            ...message,
-            variants: message.variants.map((variant) =>
-              variant.id === variantId ? updater(variant) : variant,
-            ),
-          };
-        }),
-      options,
-    );
-  }
-
-  function appendAssistantProcessSteps(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    steps: ChatAssistantProcessStep[],
-  ) {
-    if (!steps.length) return;
-
-    updateAssistantVariant(
-      chatId,
-      assistantMessageId,
-      variantId,
-      (variant) => ({
-        ...variant,
-        processSteps: [...(variant.processSteps ?? []), ...steps],
-      }),
-      { touch: false },
-    );
-  }
-
-  function updateAssistantToolStepStatus(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    stepId: string,
-    status: ToolExecutionStatus,
-  ) {
-    updateAssistantVariant(
-      chatId,
-      assistantMessageId,
-      variantId,
-      (variant) => ({
-        ...variant,
-        processSteps: (variant.processSteps ?? []).map((step) =>
-          step.id === stepId && step.type === "tool_execution"
-            ? { ...step, status }
-            : step,
-        ),
-      }),
-      { touch: false },
-    );
-  }
-
-  function updateAssistantUserInputStepStatus(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    stepId: string,
-    status: UserInputStatus,
-  ) {
-    updateAssistantVariant(
-      chatId,
-      assistantMessageId,
-      variantId,
-      (variant) => ({
-        ...variant,
-        processSteps: (variant.processSteps ?? []).map((step) =>
-          step.id === stepId && step.type === "user_input"
-            ? { ...step, status }
-            : step,
-        ),
-      }),
-      { touch: false },
-    );
-  }
-
-  function completeAssistantUserInputStep(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    stepId: string,
-    response: AskUserResponse,
-    toolResult: ChatToolResult,
-  ) {
-    updateAssistantVariant(
-      chatId,
-      assistantMessageId,
-      variantId,
-      (variant) => ({
-        ...variant,
-        processSteps: (variant.processSteps ?? []).map((step) =>
-          step.id === stepId && step.type === "user_input"
-            ? {
-                ...step,
-                status: "complete",
-                response,
-                toolResult,
-              }
-            : step,
-        ),
-      }),
-      { touch: false },
-    );
-  }
-
-  function submitAskUserResponse(
-    toolCall: ChatToolCall,
-    request: AskUserRequest,
-    response: AskUserResponse,
-  ) {
-    const pendingRequest = pendingAskUserRequestsRef.current[toolCall.id];
-    if (!pendingRequest) {
-      showError("This input request is no longer active.");
-      return;
-    }
-
-    const toolResult = createAskUserToolResult(toolCall, request, response);
-    completeAssistantUserInputStep(
-      pendingRequest.chatId,
-      pendingRequest.assistantMessageId,
-      pendingRequest.variantId,
-      pendingRequest.stepId,
-      response,
-      toolResult,
-    );
-    pendingRequest.resolve(toolResult);
-
-    if (pendingRequest.chatId === activeChatId) {
-      scheduleStickyScrollToBottom({
-        force: true,
-        settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
-      });
-    }
-  }
-
-  function cancelAskUserRequest(toolCallId: string) {
-    const pendingRequest = pendingAskUserRequestsRef.current[toolCallId];
-    if (!pendingRequest) {
-      showError("This input request is no longer active.");
-      return;
-    }
-
-    updateAssistantUserInputStepStatus(
-      pendingRequest.chatId,
-      pendingRequest.assistantMessageId,
-      pendingRequest.variantId,
-      pendingRequest.stepId,
-      "cancelled",
-    );
-
-    generationRefs.current[pendingRequest.chatId]?.controller.abort();
-    pendingRequest.reject(
-      new DOMException("Generation was cancelled.", "AbortError"),
-    );
-  }
-
-  function ensureAssistantMessageProcessStep(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    bufferKey: string,
-  ) {
-    const activeStep = getActiveStreamProcessStep(bufferKey);
-    if (activeStep?.type === "assistant_message" && activeStep.id) {
-      return activeStep.id;
-    }
-
-    const assistantMessageStepId = createId();
-    appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
-      { id: assistantMessageStepId, type: "assistant_message", content: "" },
-    ]);
-    setActiveStreamProcessStep(bufferKey, {
-      type: "assistant_message",
-      id: assistantMessageStepId,
-    });
-
-    return assistantMessageStepId;
-  }
-
-  function ensureThinkingProcessStep(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    bufferKey: string,
-  ) {
-    const activeStep = getActiveStreamProcessStep(bufferKey);
-    if (activeStep?.type === "thinking" && activeStep.id) {
-      return activeStep.id;
-    }
-
-    const thinkingStepId = createId();
-    appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
-      { id: thinkingStepId, type: "thinking", content: "" },
-    ]);
-    setActiveStreamProcessStep(bufferKey, {
-      type: "thinking",
-      id: thinkingStepId,
-    });
-
-    return thinkingStepId;
-  }
-
-  function selectAssistantVariant(messageId: string, variantIndex: number) {
-    updateActiveChatMessages(
-      (currentMessages) =>
-        currentMessages.map((message) => {
-          if (message.id !== messageId || message.role !== "assistant") {
-            return message;
-          }
-
-          const safeIndex = Math.min(
-            Math.max(variantIndex, 0),
-            message.variants.length - 1,
-          );
-
-          return {
-            ...message,
-            activeVariantIndex: safeIndex,
-          };
-        }),
-      { touch: false },
-    );
-  }
-
+  const {
+    sendMessage,
+    regenerateAssistantMessage,
+    submitEditedUserMessage,
+    selectAssistantVariant,
+    stopChatGeneration,
+    isChatGenerating,
+    submitAskUserResponse,
+    cancelAskUserRequest,
+    canSubmitAskUserResponse,
+  } = useChatGeneration({
+    activeChat,
+    activeChatId,
+    activeProvider,
+    providers,
+    chats,
+    systemPrompt,
+    toolsSettings,
+    loadedTools,
+    availableToolsByName,
+    autoScrollEnabledRef,
+    generatingChatIds,
+    setGeneratingChatIds,
+    setEditingMessageId,
+    setSettingsOpen,
+    setVisualFlushRequests,
+    updateActiveChatMessages,
+    updateChat,
+    updateChatMessages,
+    armStickyScrollToBottom,
+    scheduleStickyScrollToBottom,
+    isStickyScrollSuppressed,
+    syncChatScrollState,
+    executeExternalTool: (toolName, args) =>
+      getToolsBridge().execute({ name: toolName, args }),
+    showError,
+  });
   function updateProvidersState(
     updater: (state: ProvidersState) => ProvidersState,
   ) {
@@ -1622,815 +1014,6 @@ export default function Home() {
     }
   }
 
-  function validateProviderForGeneration(providerForRun: ProviderConfig) {
-    if (!providerForRun.baseUrl.trim()) {
-      showError("Provider base URL is required.");
-      setSettingsOpen(true);
-      return false;
-    }
-
-    if (!providerForRun.model.trim()) {
-      showError(
-        "Model name is required",
-        "Select a visible model in the sidebar model selector.",
-      );
-      return false;
-    }
-
-    return true;
-  }
-
-  function resolveProviderForChat(chat: ChatSession) {
-    const provider =
-      providers.find((item) => item.id === chat.providerId) ?? activeProvider;
-    const model = chat.model?.trim() || getProviderFallbackModel(provider);
-
-    return normalizeProviderForState({ ...provider, model });
-  }
-
-  function setChatGenerating(chatId: string, isGenerating: boolean) {
-    setGeneratingChatIds((currentChatIds) => {
-      const nextChatIds = isGenerating
-        ? [...new Set([...currentChatIds, chatId])]
-        : currentChatIds.filter((currentChatId) => currentChatId !== chatId);
-      return nextChatIds;
-    });
-  }
-
-  function isChatGenerating(chatId: string) {
-    return (
-      Boolean(generationRefs.current[chatId]) ||
-      generatingChatIds.includes(chatId)
-    );
-  }
-
-  function stopChatGeneration(chatId: string) {
-    const generation = generationRefs.current[chatId];
-    if (!generation) return;
-
-    flushBufferedAssistantVariant(
-      getStreamBufferKey(
-        chatId,
-        generation.assistantMessageId,
-        generation.variantId,
-      ),
-    );
-    const chat = chats.find((item) => item.id === chatId);
-    const assistantMessage = chat?.messages.find(
-      (message): message is Extract<ChatMessage, { role: "assistant" }> =>
-        message.id === generation.assistantMessageId &&
-        message.role === "assistant",
-    );
-    const activeVariant = assistantMessage
-      ? getActiveVariant(assistantMessage)
-      : undefined;
-    const visualFlushKeys = [
-      generation.assistantMessageId,
-      ...(activeVariant?.processSteps ?? []).map(
-        (step) => `${generation.assistantMessageId}:${step.id}`,
-      ),
-    ];
-
-    setVisualFlushRequests((current) => {
-      const next = { ...current };
-      for (const key of visualFlushKeys) {
-        next[key] = (next[key] ?? 0) + 1;
-      }
-      return next;
-    });
-    updateAssistantVariant(
-      chatId,
-      generation.assistantMessageId,
-      generation.variantId,
-      (variant) => ({
-        ...variant,
-        processSteps: keepOnlyLatestChecklistListStep(
-          cancelUnfinishedChecklistListSteps(variant.processSteps ?? []),
-        ),
-      }),
-      { touch: false },
-    );
-    generation.controller.abort();
-  }
-
-  async function runAssistantVariant({
-    chatId,
-    contextMessages,
-    userMessage,
-    assistantMessageId,
-    variantId,
-    responseStartedAtMs,
-    providerForRun,
-    toolsForRun,
-  }: {
-    chatId: string;
-    contextMessages: ChatMessage[];
-    userMessage: string;
-    assistantMessageId: string;
-    variantId: string;
-    responseStartedAtMs: number;
-    providerForRun: ProviderConfig;
-    toolsForRun: LoadedToolInfo[];
-  }) {
-    const controller = new AbortController();
-    generationRefs.current[chatId] = {
-      controller,
-      assistantMessageId,
-      variantId,
-    };
-    setChatGenerating(chatId, true);
-    setStreamingAssistantByChatId((current) => ({
-      ...current,
-      [chatId]: assistantMessageId,
-    }));
-
-    if (chatId === activeChatId) {
-      armStickyScrollToBottom();
-    }
-
-    toast.dismiss();
-
-    let toolCallsForContext: ChatToolCall[] = [];
-    let toolResultsForContext: ChatToolResult[] = [];
-    let accumulatedContent = "";
-    let accumulatedReasoning = "";
-
-    const markVariantDone = (
-      streamResult: Awaited<ReturnType<typeof streamProviderChat>>,
-    ) => {
-      const durationMs = Math.max(1, performance.now() - responseStartedAtMs);
-
-      updateAssistantVariant(
-        chatId,
-        assistantMessageId,
-        variantId,
-        (variant) => ({
-          ...variant,
-          status: "done",
-          metrics: {
-            startedAt:
-              variant.metrics?.startedAt ??
-              new Date(Date.now() - durationMs).toISOString(),
-            ...variant.metrics,
-            completedAt: new Date().toISOString(),
-            ...buildTokenMetrics({
-              content: variant.content,
-              durationMs,
-              usage: streamResult.usage,
-              provider: providerForRun,
-              finishReason: streamResult.finishReason,
-            }),
-          },
-        }),
-      );
-    };
-
-    const appendToolCallsToVariant = (toolCalls: ChatToolCall[]) => {
-      toolCallsForContext = [...toolCallsForContext, ...toolCalls];
-      const toolSteps: ChatAssistantProcessStep[] = toolCalls.map(
-        (toolCall) => {
-          if (toolCall.function.name === ASK_USER_TOOL_NAME) {
-            try {
-              return {
-                id: createId(),
-                type: "user_input" as const,
-                status: "waiting" as const,
-                toolCall,
-                request: parseAskUserRequestFromToolCall(toolCall),
-              };
-            } catch {
-              // Keep invalid ask_user calls visible as failed tool executions once
-              // executeToolCall returns the validation error.
-            }
-          }
-
-          if (toolCall.function.name === CHECKLIST_WRITE_TOOL_NAME) {
-            try {
-              return {
-                id: createId(),
-                type: "checklist" as const,
-                status: "pending" as const,
-                toolCall,
-                request: parseChecklistWriteRequestFromToolCall(toolCall),
-              };
-            } catch {
-              // Keep invalid checklist_write calls visible as failed tool executions once
-              // executeToolCall returns the validation error.
-            }
-          }
-
-          return {
-            id: createId(),
-            type: "tool_execution" as const,
-            status: "pending" as const,
-            toolCall,
-          };
-        },
-      );
-
-      updateAssistantVariant(
-        chatId,
-        assistantMessageId,
-        variantId,
-        (variant) => ({
-          ...variant,
-          toolCalls: [...(variant.toolCalls ?? []), ...toolCalls],
-          processSteps: [...(variant.processSteps ?? []), ...toolSteps],
-        }),
-        { touch: false },
-      );
-
-      return new Map(
-        toolCalls.map(
-          (toolCall, index) =>
-            [toolCall.id, toolSteps[index]?.id ?? toolCall.id] as const,
-        ),
-      );
-    };
-
-    const applyToolResultToVisibleStep = (toolResult: ChatToolResult) => {
-      updateAssistantVariant(
-        chatId,
-        assistantMessageId,
-        variantId,
-        (variant) => ({
-          ...variant,
-          processSteps: keepOnlyLatestChecklistListStep(
-            (variant.processSteps ?? []).map((step) => {
-              if (
-                step.type !== "tool_execution" &&
-                step.type !== "user_input" &&
-                step.type !== "checklist"
-              ) {
-                return step;
-              }
-
-              if (step.toolCall.id !== toolResult.toolCallId) return step;
-
-              return {
-                ...step,
-                status: toolResult.isError ? "failed" : "complete",
-                toolResult,
-              };
-            }),
-          ),
-        }),
-        { touch: false },
-      );
-    };
-
-    const applyToolResultsToVariant = (toolResults: ChatToolResult[]) => {
-      toolResultsForContext = [...toolResultsForContext, ...toolResults];
-
-      updateAssistantVariant(
-        chatId,
-        assistantMessageId,
-        variantId,
-        (variant) => {
-          const existingResults = variant.toolResults ?? [];
-          const existingResultIds = new Set(
-            existingResults.map((result) => result.toolCallId),
-          );
-          const newResults = toolResults.filter(
-            (toolResult) => !existingResultIds.has(toolResult.toolCallId),
-          );
-
-          return {
-            ...variant,
-            toolResults: [...existingResults, ...newResults],
-          };
-        },
-        { touch: false },
-      );
-    };
-
-    const bufferKey = getStreamBufferKey(chatId, assistantMessageId, variantId);
-
-    const buildContinuationMessages = (): ChatMessage[] => [
-      ...contextMessages,
-      {
-        id: createId(),
-        role: "user",
-        content: userMessage,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: assistantMessageId,
-        role: "assistant",
-        activeVariantIndex: 0,
-        createdAt: new Date().toISOString(),
-        variants: [
-          {
-            id: variantId,
-            content: accumulatedContent,
-            reasoning: accumulatedReasoning,
-            status: "streaming",
-            createdAt: new Date().toISOString(),
-            toolCalls: toolCallsForContext,
-            toolResults: toolResultsForContext,
-          },
-        ],
-      },
-    ];
-
-    try {
-      let currentMessages = contextMessages;
-      let currentUserMessage: string | undefined = userMessage;
-      let lastStreamResult:
-        | Awaited<ReturnType<typeof streamProviderChat>>
-        | undefined;
-
-      for (let toolRound = 0; toolRound <= MAX_TOOL_ROUNDS; toolRound += 1) {
-        const thinkingStepId = createId();
-        appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
-          { id: thinkingStepId, type: "thinking", content: "" },
-        ]);
-        setActiveStreamProcessStep(bufferKey, {
-          type: "thinking",
-          id: thinkingStepId,
-        });
-
-        if (chatId === activeChatId) {
-          scheduleStickyScrollToBottom({
-            settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
-          });
-        }
-
-        const streamResult = await streamProviderChat({
-          provider: providerForRun,
-          systemPrompt,
-          messages: currentMessages,
-          userMessage: currentUserMessage,
-          signal: controller.signal,
-          tools: toolsForRun,
-          onContentDelta: (delta) => {
-            accumulatedContent += delta;
-            const assistantMessageStepId = ensureAssistantMessageProcessStep(
-              chatId,
-              assistantMessageId,
-              variantId,
-              bufferKey,
-            );
-            appendBufferedAssistantVariant(
-              chatId,
-              assistantMessageId,
-              variantId,
-              {
-                type: "content",
-                delta,
-                assistantMessageStepId,
-              },
-            );
-
-            if (chatId === activeChatId) {
-              scheduleStickyScrollToBottom();
-            }
-          },
-          onReasoningDelta: (delta) => {
-            accumulatedReasoning += delta;
-
-            const activeStep = getActiveStreamProcessStep(bufferKey);
-            const isWhitespaceOnlyReasoning = delta.trim().length === 0;
-
-            // Some OpenAI-compatible providers emit whitespace-only reasoning
-            // deltas in the middle of normal content streaming. Those invisible
-            // reasoning chunks should not split one visible assistant answer into
-            // multiple message blocks.
-            if (isWhitespaceOnlyReasoning && activeStep?.type !== "thinking") {
-              return;
-            }
-
-            const reasoningStepId = ensureThinkingProcessStep(
-              chatId,
-              assistantMessageId,
-              variantId,
-              bufferKey,
-            );
-            appendBufferedAssistantVariant(
-              chatId,
-              assistantMessageId,
-              variantId,
-              {
-                type: "reasoning",
-                delta,
-                reasoningStepId,
-              },
-            );
-
-            if (chatId === activeChatId) {
-              scheduleStickyScrollToBottom();
-            }
-          },
-        });
-
-        lastStreamResult = streamResult;
-
-        flushBufferedAssistantVariant(bufferKey);
-
-        const toolCalls = streamResult.toolCalls ?? [];
-        if (!toolCalls.length) break;
-
-        if (toolRound >= MAX_TOOL_ROUNDS) {
-          throw new Error(
-            `Stopped after ${MAX_TOOL_ROUNDS} tool rounds to avoid an infinite loop.`,
-          );
-        }
-
-        const toolStepIdsByToolCallId = appendToolCallsToVariant(toolCalls);
-        setActiveStreamProcessStep(bufferKey, { type: "tool_execution" });
-
-        if (chatId === activeChatId) {
-          scheduleStickyScrollToBottom({
-            force: true,
-            settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
-          });
-        }
-
-        const toolResults = await Promise.all(
-          toolCalls.map(async (toolCall) => {
-            const toolResult = await executeToolCall(toolCall, {
-              chatId,
-              assistantMessageId,
-              variantId,
-              stepId: toolStepIdsByToolCallId.get(toolCall.id) ?? toolCall.id,
-              signal: controller.signal,
-            });
-
-            applyToolResultToVisibleStep(toolResult);
-
-            if (chatId === activeChatId) {
-              scheduleStickyScrollToBottom({
-                force: true,
-                settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
-              });
-            }
-
-            return toolResult;
-          }),
-        );
-        applyToolResultsToVariant(toolResults);
-
-        if (chatId === activeChatId) {
-          scheduleStickyScrollToBottom({
-            force: true,
-            settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
-          });
-        }
-
-        currentMessages = buildContinuationMessages();
-        currentUserMessage = undefined;
-      }
-
-      flushBufferedAssistantVariant(bufferKey);
-
-      markVariantDone(lastStreamResult ?? {});
-    } catch (error) {
-      const wasAborted =
-        error instanceof DOMException && error.name === "AbortError";
-
-      flushBufferedAssistantVariant(bufferKey);
-
-      const durationMs = Math.max(1, performance.now() - responseStartedAtMs);
-
-      if (wasAborted) {
-        setVisualFlushRequests((current) => ({
-          ...current,
-          [assistantMessageId]: (current[assistantMessageId] ?? 0) + 1,
-        }));
-      }
-      updateAssistantVariant(
-        chatId,
-        assistantMessageId,
-        variantId,
-        (variant) => {
-          const currentContent = variant.content.trim();
-          const appendedContent = wasAborted
-            ? variant.content
-              ? ""
-              : "Generation stopped."
-            : currentContent
-              ? `\n\nError: ${labelForError(error)}`
-              : `Error: ${labelForError(error)}`;
-          const content = `${variant.content}${appendedContent}`;
-          const baseProcessSteps = keepOnlyLatestChecklistListStep(
-            cancelUnfinishedChecklistListSteps(variant.processSteps ?? []),
-          );
-          const processSteps = appendedContent.trim()
-            ? [
-                ...baseProcessSteps,
-                {
-                  id: createId(),
-                  type: "assistant_message" as const,
-                  content: appendedContent,
-                },
-              ]
-            : baseProcessSteps;
-
-          return {
-            ...variant,
-            status: wasAborted ? "done" : "error",
-            content,
-            processSteps,
-            metrics: {
-              startedAt:
-                variant.metrics?.startedAt ??
-                new Date(Date.now() - durationMs).toISOString(),
-              ...variant.metrics,
-              completedAt: new Date().toISOString(),
-              ...buildTokenMetrics({
-                content,
-                durationMs,
-                provider: providerForRun,
-              }),
-            },
-          };
-        },
-      );
-    } finally {
-      delete streamActiveProcessStepRefs.current[bufferKey];
-      delete streamBuffersRef.current[bufferKey];
-      const currentGeneration = generationRefs.current[chatId];
-      if (currentGeneration?.controller === controller) {
-        delete generationRefs.current[chatId];
-        setChatGenerating(chatId, false);
-        setStreamingAssistantByChatId((current) => {
-          const { [chatId]: _removed, ...remaining } = current;
-          return remaining;
-        });
-      }
-
-      if (chatId === activeChatId) {
-        if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
-          scheduleStickyScrollToBottom({
-            force: true,
-            settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
-          });
-        } else {
-          syncChatScrollState();
-        }
-      }
-    }
-  }
-
-  async function sendMessage(content: string) {
-    const userMessage = content.trim();
-
-    if (!activeChat) return false;
-    if (isChatGenerating(activeChat.id)) return false;
-
-    const providerForRun = resolveProviderForChat(activeChat);
-    if (!validateProviderForGeneration(providerForRun)) return false;
-
-    if (!userMessage) {
-      showError("Message is required.");
-      return false;
-    }
-
-    const oneShotToolNames = validateToolMentionsForRequest(userMessage);
-    if (!oneShotToolNames) return false;
-
-    const toolsForRun = getEnabledToolsForChat(activeChat, oneShotToolNames);
-
-    const userChatMessage: ChatMessage = {
-      id: createId(),
-      role: "user",
-      content: userMessage,
-      createdAt: new Date().toISOString(),
-    };
-
-    const assistantMessageId = createId();
-    const variantId = createId();
-    const responseStartedAtMs = performance.now();
-    const responseStartedAt = new Date().toISOString();
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      variants: [
-        {
-          id: variantId,
-          content: "",
-          reasoning: "",
-          status: "streaming",
-          createdAt: responseStartedAt,
-          metrics: {
-            startedAt: responseStartedAt,
-          },
-          processSteps: [],
-        },
-      ],
-      activeVariantIndex: 0,
-      createdAt: responseStartedAt,
-    };
-
-    const contextMessages = activeChat.messages;
-    const nextMessages = [
-      ...activeChat.messages,
-      userChatMessage,
-      assistantMessage,
-    ];
-
-    // Enable sticky bottom behavior for this new generation.
-    armStickyScrollToBottom();
-    updateChat(activeChat.id, (chat) => ({
-      ...chat,
-      title:
-        chat.messages.length === 0 && chat.title === "New chat"
-          ? titleFromMessage(userMessage)
-          : chat.title,
-      messages: nextMessages,
-      providerId: providerForRun.id,
-      model: providerForRun.model,
-      updatedAt: responseStartedAt,
-    }));
-
-    void runAssistantVariant({
-      chatId: activeChat.id,
-      contextMessages,
-      userMessage,
-      assistantMessageId,
-      variantId,
-      responseStartedAtMs,
-      providerForRun,
-      toolsForRun,
-    });
-
-    return true;
-  }
-
-  async function regenerateAssistantMessage(assistantMessageId: string) {
-    if (!activeChat) return;
-    if (isChatGenerating(activeChat.id)) return;
-
-    const providerForRun = resolveProviderForChat(activeChat);
-    if (!validateProviderForGeneration(providerForRun)) return;
-
-    const assistantIndex = activeChat.messages.findIndex(
-      (message) =>
-        message.id === assistantMessageId && message.role === "assistant",
-    );
-    if (assistantIndex < 0) return;
-
-    let userIndex = -1;
-    for (let index = assistantIndex - 1; index >= 0; index -= 1) {
-      if (activeChat.messages[index]?.role === "user") {
-        userIndex = index;
-        break;
-      }
-    }
-
-    const userMessageSource = activeChat.messages[userIndex];
-    if (!userMessageSource || userMessageSource.role !== "user") {
-      showError("Could not find the user message to regenerate from.");
-      return;
-    }
-
-    const userMessage = userMessageSource.content;
-    const oneShotToolNames = validateToolMentionsForRequest(userMessage);
-    if (!oneShotToolNames) return;
-
-    const toolsForRun = getEnabledToolsForChat(activeChat, oneShotToolNames);
-    const contextMessages = activeChat.messages.slice(0, userIndex);
-    const variantId = createId();
-    const responseStartedAtMs = performance.now();
-    const responseStartedAt = new Date().toISOString();
-
-    armStickyScrollToBottom();
-
-    updateActiveChatMessages(
-      (currentMessages) =>
-        currentMessages.slice(0, assistantIndex + 1).map((message) => {
-          if (
-            message.id !== assistantMessageId ||
-            message.role !== "assistant"
-          ) {
-            return message;
-          }
-
-          return {
-            ...message,
-            variants: [
-              ...message.variants,
-              {
-                id: variantId,
-                content: "",
-                reasoning: "",
-                status: "streaming",
-                createdAt: responseStartedAt,
-                metrics: {
-                  startedAt: responseStartedAt,
-                },
-                processSteps: [],
-              },
-            ],
-            activeVariantIndex: message.variants.length,
-          };
-        }),
-      { touch: false },
-    );
-
-    armStickyScrollToBottom();
-
-    await runAssistantVariant({
-      chatId: activeChat.id,
-      contextMessages,
-      userMessage,
-      assistantMessageId,
-      variantId,
-      responseStartedAtMs,
-      providerForRun,
-      toolsForRun,
-    });
-  }
-
-  async function submitEditedUserMessage(
-    messageId: string,
-    editedContent: string,
-  ) {
-    if (!activeChat) return;
-    if (isChatGenerating(activeChat.id)) return;
-
-    const providerForRun = resolveProviderForChat(activeChat);
-    if (!validateProviderForGeneration(providerForRun)) return;
-
-    const userMessage = editedContent.trim();
-    if (!userMessage) {
-      showError("Message is required.");
-      return;
-    }
-
-    const oneShotToolNames = validateToolMentionsForRequest(userMessage);
-    if (!oneShotToolNames) return;
-
-    const toolsForRun = getEnabledToolsForChat(activeChat, oneShotToolNames);
-
-    const userIndex = activeChat.messages.findIndex(
-      (message) => message.id === messageId && message.role === "user",
-    );
-    const currentMessage = activeChat.messages[userIndex];
-
-    if (userIndex < 0 || !currentMessage || currentMessage.role !== "user") {
-      showError("Could not find the message to edit.");
-      return;
-    }
-
-    const assistantMessageId = createId();
-    const variantId = createId();
-    const responseStartedAtMs = performance.now();
-    const responseStartedAt = new Date().toISOString();
-    const editedUserMessage: ChatMessage = {
-      ...currentMessage,
-      content: userMessage,
-    };
-    const assistantMessage: ChatMessage = {
-      id: assistantMessageId,
-      role: "assistant",
-      variants: [
-        {
-          id: variantId,
-          content: "",
-          reasoning: "",
-          status: "streaming",
-          createdAt: responseStartedAt,
-          metrics: {
-            startedAt: responseStartedAt,
-          },
-          processSteps: [],
-        },
-      ],
-      activeVariantIndex: 0,
-      createdAt: responseStartedAt,
-    };
-    const contextMessages = activeChat.messages.slice(0, userIndex);
-    const nextMessages = [
-      ...contextMessages,
-      editedUserMessage,
-      assistantMessage,
-    ];
-
-    armStickyScrollToBottom();
-    setEditingMessageId(null);
-
-    updateChat(activeChat.id, (chat) => ({
-      ...chat,
-      title: userIndex === 0 ? titleFromMessage(userMessage) : chat.title,
-      messages: nextMessages,
-      providerId: providerForRun.id,
-      model: providerForRun.model,
-      updatedAt: responseStartedAt,
-    }));
-
-    await runAssistantVariant({
-      chatId: activeChat.id,
-      contextMessages,
-      userMessage,
-      assistantMessageId,
-      variantId,
-      responseStartedAtMs,
-      providerForRun,
-      toolsForRun,
-    });
-  }
-
   const {
     startEditingUserMessage,
     cancelEditingUserMessage,
@@ -2485,9 +1068,7 @@ export default function Home() {
   );
   const stableRegisterMessageElement = useStableCallback(registerMessageElement);
   const stableRenderToolExecutionBlock = useStableCallback(renderToolExecutionBlock);
-  const stableCanSubmitAskUserResponse = useStableCallback((toolCallId: string) =>
-    Boolean(pendingAskUserRequestsRef.current[toolCallId]),
-  );
+  const stableCanSubmitAskUserResponse = useStableCallback(canSubmitAskUserResponse);
   const stableCaptureMessageContext = useStableCallback(captureMessageContext);
   const stableCloseMessageContextMenu = useStableCallback(closeMessageContextMenu);
   const stableCopyLinkHref = useStableCallback(copyLinkHref);

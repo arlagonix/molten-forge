@@ -432,6 +432,7 @@ const ChatMessageItem = memo(
                           content={step.content}
                           className="chat-markdown-compact shrink-0"
                           isApiStreaming={isThinkingStreaming}
+                          skipSyntaxHighlight={isThinkingStreaming}
                           flushVersion={stepFlushVersion}
                           forceInstant={!isThinkingStreaming}
                           onVisualProgress={() =>
@@ -467,6 +468,7 @@ const ChatMessageItem = memo(
                         <SmoothAssistantMessageContent
                           content={step.content}
                           isApiStreaming={isAssistantBlockStreaming}
+                          skipSyntaxHighlight={isAssistantBlockStreaming}
                           flushVersion={stepFlushVersion}
                           onVisualProgress={() =>
                             onAssistantVisualProgress(activeChatId)
@@ -556,6 +558,7 @@ const ChatMessageItem = memo(
                     content={reasoning}
                     className="chat-markdown-compact shrink-0"
                     isApiStreaming={status === "streaming" && !content}
+                    skipSyntaxHighlight={status === "streaming" && !content}
                     flushVersion={visualFlushRequests[message.id] ?? 0}
                     forceInstant={Boolean(content)}
                     onVisualProgress={() =>
@@ -635,6 +638,7 @@ const ChatMessageItem = memo(
                     <SmoothAssistantMessageContent
                       content={content}
                       isApiStreaming={status === "streaming"}
+                      skipSyntaxHighlight={status === "streaming"}
                       flushVersion={visualFlushRequests[message.id] ?? 0}
                       onVisualProgress={() =>
                         onAssistantVisualProgress(activeChatId)

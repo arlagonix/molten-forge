@@ -18,6 +18,7 @@ import { cn } from "@/lib/utils";
 type MarkdownMessageProps = {
   content: string;
   className?: string;
+  skipSyntaxHighlight?: boolean;
 };
 
 const SAFE_HTML_SCHEMA = {
@@ -368,11 +369,17 @@ function CodeBlock({
 
 const REMARK_PLUGINS: PluggableList = [remarkGfm, remarkMath];
 
-const REHYPE_PLUGINS: PluggableList = [
+const REHYPE_PLUGINS_WITH_HIGHLIGHT: PluggableList = [
   rehypeRaw,
   [rehypeSanitize, SAFE_HTML_SCHEMA],
   rehypeKatex,
   [rehypeHighlight, { detect: false, ignoreMissing: true }],
+];
+
+const REHYPE_PLUGINS_WITHOUT_HIGHLIGHT: PluggableList = [
+  rehypeRaw,
+  [rehypeSanitize, SAFE_HTML_SCHEMA],
+  rehypeKatex,
 ];
 
 const MARKDOWN_COMPONENTS: Components = {
@@ -397,12 +404,17 @@ const MARKDOWN_COMPONENTS: Components = {
 export const MarkdownMessage = React.memo(function MarkdownMessage({
   content,
   className,
+  skipSyntaxHighlight = false,
 }: MarkdownMessageProps) {
   return (
     <div className={cn("chat-markdown min-w-0 max-w-full", className)}>
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
-        rehypePlugins={REHYPE_PLUGINS}
+        rehypePlugins={
+          skipSyntaxHighlight
+            ? REHYPE_PLUGINS_WITHOUT_HIGHLIGHT
+            : REHYPE_PLUGINS_WITH_HIGHLIGHT
+        }
         components={MARKDOWN_COMPONENTS}
       >
         {normalizeMarkdownContent(content)}
