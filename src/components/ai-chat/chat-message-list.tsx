@@ -1,3 +1,4 @@
+import { Spinner as RadixSpinner } from "@radix-ui/themes";
 import {
   Brain,
   Check,
@@ -14,7 +15,10 @@ import { memo } from "react";
 
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { SmoothAssistantMessageContent } from "@/components/ai-chat/smooth-assistant-message";
-import { AskUserBlock, ChecklistBlock } from "@/components/ai-chat/tool-interaction-blocks";
+import {
+  AskUserBlock,
+  ChecklistBlock,
+} from "@/components/ai-chat/tool-interaction-blocks";
 import { TooltipIconButton } from "@/components/ai-chat/tooltip-icon-button";
 import { UserMessageEditor } from "@/components/ai-chat/user-message-editor";
 import { Button } from "@/components/ui/button";
@@ -366,7 +370,9 @@ const ChatMessageItem = memo(
     const activeVariant =
       message.role === "assistant" ? getActiveVariant(message) : undefined;
     const content =
-      message.role === "assistant" ? (activeVariant?.content ?? "") : message.content;
+      message.role === "assistant"
+        ? (activeVariant?.content ?? "")
+        : message.content;
     const reasoning = activeVariant?.reasoning ?? "";
     const toolCalls = activeVariant?.toolCalls ?? [];
     const toolResults = activeVariant?.toolResults ?? [];
@@ -488,7 +494,8 @@ const ChatMessageItem = memo(
 
               if (step.type === "user_input") {
                 const manualCollapsed = collapsedToolStepIds[step.id];
-                const isCollapsed = manualCollapsed ?? step.status !== "waiting";
+                const isCollapsed =
+                  manualCollapsed ?? step.status !== "waiting";
 
                 return (
                   <AskUserBlock
@@ -714,7 +721,9 @@ const ChatMessageItem = memo(
                       }}
                     >
                       <RefreshCcw className="size-4" />
-                      {status === "error" ? "Retry answer" : "Regenerate answer"}
+                      {status === "error"
+                        ? "Retry answer"
+                        : "Regenerate answer"}
                     </button>
                   )}
                   {message.role === "user" && (
@@ -797,8 +806,15 @@ const ChatMessageItem = memo(
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <div className="min-h-6 min-w-0 flex-1 text-left">
                 {isMessageStreaming ? (
-                  <span className="generating-gradient-text font-medium">
-                    Generating
+                  <span className="inline-flex items-center gap-1.5">
+                    <RadixSpinner
+                      aria-hidden="true"
+                      className="generating-radix-spinner"
+                      size="1"
+                    />
+                    <span className="generating-gradient-text font-medium">
+                      Generating
+                    </span>
                   </span>
                 ) : generatedModelName ? (
                   <span
@@ -845,7 +861,8 @@ const ChatMessageItem = memo(
                         )
                       }
                       disabled={
-                        message.activeVariantIndex >= variantCount - 1 || isSending
+                        message.activeVariantIndex >= variantCount - 1 ||
+                        isSending
                       }
                     >
                       <ChevronRight className="size-3.5" />
@@ -902,7 +919,9 @@ const ChatMessageItem = memo(
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  label={status === "error" ? "Retry answer" : "Regenerate answer"}
+                  label={
+                    status === "error" ? "Retry answer" : "Regenerate answer"
+                  }
                   onClick={() => onRegenerateAssistantMessage(message.id)}
                   disabled={isSending}
                 >
@@ -913,7 +932,9 @@ const ChatMessageItem = memo(
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  label={copiedMessageId === message.id ? "Copied" : "Copy answer"}
+                  label={
+                    copiedMessageId === message.id ? "Copied" : "Copy answer"
+                  }
                   onClick={() => onCopyMessageContent(message.id, content)}
                   disabled={!content.trim()}
                 >
@@ -959,7 +980,10 @@ const ChatMessageItem = memo(
       return false;
     }
     if (
-      hasVisualStreamingForMessage(previous.visualStreamingMessageIds, messageId) !==
+      hasVisualStreamingForMessage(
+        previous.visualStreamingMessageIds,
+        messageId,
+      ) !==
       hasVisualStreamingForMessage(next.visualStreamingMessageIds, messageId)
     ) {
       return false;

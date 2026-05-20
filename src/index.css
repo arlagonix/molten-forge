@@ -209,6 +209,40 @@
     }
   }
 
+  .context-usage-token-label {
+    /* font-family: var(--font-jetbrains-mono); */
+  }
+
+  .chat-forge-radix-theme.radix-themes {
+    min-height: auto;
+    background: transparent;
+    color: inherit;
+    font-family: inherit;
+  }
+
+  @supports (min-height: 100dvh) {
+    .chat-forge-radix-theme.radix-themes:where([data-is-root-theme="true"]) {
+      min-height: auto;
+    }
+  }
+
+  .generating-radix-spinner {
+    flex-shrink: 0;
+    color: var(--primary);
+  }
+
+  .generating-radix-spinner :where(.rt-SpinnerLeaf) {
+    background-image: linear-gradient(
+      90deg,
+      var(--muted-foreground),
+      var(--primary),
+      var(--foreground),
+      var(--primary),
+      var(--muted-foreground)
+    ) !important;
+    background-size: 200% auto;
+    animation: generating-gradient-slide 2s linear infinite;
+  }
   .generating-gradient-text {
     /* background-image: linear-gradient(90deg, #ffaa40, #9c40ff, #ffaa40); */
     background-image: linear-gradient(

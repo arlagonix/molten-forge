@@ -27,11 +27,12 @@ import { Button } from "@/components/ui/button";
 import {
   createNewProvider,
   createProviderId,
+  getEffectiveModelContext,
+  getEnabledProviderModels,
   getProviderFallbackModel,
   groupChatsByActivityDate,
   labelForError,
   normalizeProviderForState,
-  normalizeProviderModels,
   providerDisplayName,
   sortChatsByUpdatedAt,
 } from "@/lib/ai-chat/chat-utils";
@@ -377,14 +378,41 @@ export default function Home() {
   const isSending = activeChat
     ? generatingChatIds.includes(activeChat.id)
     : false;
+  const latestContextUsage = useMemo(() => {
+    const context = getEffectiveModelContext(activeChatProvider, activeChatModel);
+    const assistantMessages = [...messages].reverse().filter(
+      (message) => message.role === "assistant",
+    );
+
+    for (const message of assistantMessages) {
+      if (message.role !== "assistant") continue;
+      const variant = message.variants[message.activeVariantIndex];
+      if (variant?.metrics?.model && variant.metrics.model !== activeChatModel) {
+        continue;
+      }
+      const usage = variant?.metrics?.tokenUsage;
+      const usedTokens = usage?.promptTokens ?? usage?.totalTokens;
+      if (usedTokens !== undefined && Number.isFinite(usedTokens)) {
+        return {
+          usedTokens,
+          limitTokens: context.length,
+          limitSource: context.source,
+        };
+      }
+    }
+
+    return {
+      usedTokens: undefined,
+      limitTokens: context.length,
+      limitSource: context.source,
+    };
+  }, [activeChatModel, activeChatProvider, messages]);
   const visibleProviderGroups = useMemo(() => {
     const search = sidebarModelSearchValue.trim().toLowerCase();
 
     return providers
       .map((provider) => {
-        const models = normalizeProviderModels(
-          provider.enabledModelIds ?? [],
-        ).filter((model) =>
+        const models = getEnabledProviderModels(provider).filter((model) =>
           search
             ? `${providerDisplayName(provider)} ${model}`
                 .toLowerCase()
@@ -905,11 +933,11 @@ export default function Home() {
       ...currentState,
       providers: currentState.providers.map((provider) =>
         provider.id === currentState.activeProviderId
-          ? {
+          ? normalizeProviderForState({
               ...provider,
               ...patch,
               id: provider.id,
-            }
+            })
           : provider,
       ),
     }));
@@ -992,7 +1020,7 @@ export default function Home() {
       activeProviderId: providerId,
       providers: currentState.providers.map((provider) =>
         provider.id === providerId
-          ? { ...provider, model: normalizedModel }
+          ? normalizeProviderForState({ ...provider, model: normalizedModel })
           : provider,
       ),
     }));
@@ -1238,6 +1266,7 @@ export default function Home() {
           onDraftChange={updateActiveComposerDraft}
           onSend={sendMessage}
           onStop={stopGeneration}
+          contextUsage={latestContextUsage}
           footerStart={<ComposerFooter
             activeChatExists={Boolean(activeChat)}
             isSending={isSending}

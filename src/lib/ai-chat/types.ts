@@ -7,6 +7,18 @@ export type ProviderGenerationSettings = {
   requestTimeoutMs?: number;
 };
 
+export type ProviderModelContext = {
+  manualContextLength?: number;
+  detectedContextLength?: number;
+  speculatedContextLength?: number;
+};
+
+export type ProviderModelConfig = ProviderGenerationSettings & {
+  enabled?: boolean;
+  showInMenu?: boolean;
+  context?: ProviderModelContext;
+};
+
 export type ProviderConfig = {
   id: string;
   name: string;
@@ -14,11 +26,16 @@ export type ProviderConfig = {
   apiKey: string;
   model: string;
   models?: string[];
+  enabled?: boolean;
+  modelConfigs?: Record<string, ProviderModelConfig>;
+  /** Deprecated: migrated into modelConfigs. */
   enabledModelIds?: string[];
   headers?: Record<string, string>;
   /** Deprecated: kept only so old IndexedDB records can be migrated. */
   customHeaders?: string;
+  /** Deprecated: migrated into modelConfigs. */
   defaultSettings?: ProviderGenerationSettings;
+  /** Deprecated: migrated into modelConfigs. */
   modelSettings?: Record<string, ProviderGenerationSettings>;
 };
 

@@ -1,5 +1,7 @@
 import {
   getProviderFallbackModel,
+  isModelEnabled,
+  isProviderEnabled,
   normalizeProviderForState,
 } from "@/lib/ai-chat/chat-utils";
 import {
@@ -34,6 +36,15 @@ export function resolveProviderForChat({
 }
 
 export function validateProviderForGeneration(providerForRun: ProviderConfig) {
+  if (!isProviderEnabled(providerForRun)) {
+    return {
+      ok: false as const,
+      message: "Provider is disabled.",
+      description: "Enable the provider in provider settings or select another model.",
+      shouldOpenSettings: true,
+    };
+  }
+
   if (!providerForRun.baseUrl.trim()) {
     return {
       ok: false as const,
@@ -47,6 +58,15 @@ export function validateProviderForGeneration(providerForRun: ProviderConfig) {
       ok: false as const,
       message: "Model name is required",
       description: "Select a visible model in the sidebar model selector.",
+    };
+  }
+
+  if (!isModelEnabled(providerForRun, providerForRun.model)) {
+    return {
+      ok: false as const,
+      message: "Model is disabled.",
+      description: "Enable the model in provider settings or select another model.",
+      shouldOpenSettings: true,
     };
   }
 

@@ -15,6 +15,7 @@ import { Lock, Send, Square, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { ContextUsageIndicator, type ContextUsageInfo } from "@/components/ai-chat/context-usage-indicator";
 
 export type ToolMentionOption = {
   name: string;
@@ -66,6 +67,7 @@ export const ChatComposer = memo(
       onSend: (content: string) => Promise<boolean> | boolean;
       onStop: () => void;
       footerStart?: ReactNode;
+      contextUsage?: ContextUsageInfo;
       toolMentionOptions?: ToolMentionOption[];
     }
   >(function ChatComposer(
@@ -78,6 +80,7 @@ export const ChatComposer = memo(
       onSend,
       onStop,
       footerStart,
+      contextUsage,
       toolMentionOptions = [],
     },
     ref,
@@ -383,6 +386,7 @@ export const ChatComposer = memo(
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0 flex-1">{footerStart}</div>
+              <ContextUsageIndicator usage={contextUsage ?? {}} />
               {isSending ? (
                 <Button
                   type="button"

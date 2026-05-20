@@ -268,18 +268,23 @@ export const AskUserBlock = memo(function AskUserBlock({
     if (!response) return null;
 
     return (
-      <ul className="mt-2 grid list-disc gap-2 pl-4 text-sm normal-case leading-5 tracking-normal">
-        {request.questions.map((question) => (
-          <li key={question.id} className="pl-1">
-            <div className="grid gap-0">
-              <span className="text-muted-foreground">{question.question}</span>
-              <span className="font-medium text-foreground/85">
-                {getAnswerSummary(question)}
-              </span>
-            </div>
-          </li>
-        ))}
-      </ul>
+      <div className="mt-2 grid gap-2 text-sm normal-case leading-5 tracking-normal">
+        {request.questions.length > 0 && (
+          <dl className="grid gap-2 text-sm leading-5 normal-case tracking-normal">
+            {request.questions.map((question) => (
+              <div key={question.id} className="grid">
+                <dt className="text-muted-foreground">
+                  Q: {question.question}
+                </dt>
+                <dd className="font-medium text-foreground/85">
+                  <span className="font-normal">A:</span>{" "}
+                  {getAnswerSummary(question)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </div>
     );
   }
 

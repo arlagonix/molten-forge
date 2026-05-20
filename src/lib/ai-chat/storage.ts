@@ -1,5 +1,5 @@
 import { defaultGenerationSettings, defaultProvider } from "./provider-presets";
-import { sortChatsByUpdatedAt } from "./chat-utils";
+import { normalizeProviderForState, sortChatsByUpdatedAt } from "./chat-utils";
 import type {
   ChatSession,
   LoadedToolInfo,
@@ -105,29 +105,13 @@ function parseCustomHeaders(customHeaders?: string): Record<string, string> {
 
 export function normalizeProvider(provider: Partial<ProviderConfig>): ProviderConfig {
   const legacyHeaders = parseCustomHeaders(provider.customHeaders);
-  const headers = provider.headers ?? legacyHeaders;
-  const models = [...new Set((provider.models ?? []).filter(Boolean).map((model) => model.trim()))].sort((a, b) => a.localeCompare(b));
-  const enabledModelIds = [...new Set((provider.enabledModelIds ?? (provider.model ? [provider.model] : [])).filter(Boolean).map((model) => model.trim()))];
-  const model = provider.model?.trim() || enabledModelIds[0] || "";
 
-  return {
+  return normalizeProviderForState({
     ...defaultProvider,
     ...provider,
     id: provider.id?.trim() || `provider-${createId()}`,
-    name: provider.name ?? "",
-    baseUrl: provider.baseUrl ?? "",
-    apiKey: provider.apiKey ?? "",
-    model,
-    models: [...new Set([...models, ...enabledModelIds, model].filter(Boolean))].sort((a, b) => a.localeCompare(b)),
-    enabledModelIds,
-    headers,
-    customHeaders: undefined,
-    defaultSettings: {
-      ...defaultGenerationSettings,
-      ...(provider.defaultSettings ?? {}),
-    },
-    modelSettings: provider.modelSettings ?? {},
-  };
+    headers: provider.headers ?? legacyHeaders,
+  });
 }
 
 function normalizeProvidersState(value?: ProvidersState): ProvidersState {

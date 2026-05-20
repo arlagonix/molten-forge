@@ -157,6 +157,7 @@ export function getActiveModelSettings(provider: ProviderConfig): ProviderGenera
     ...defaultGenerationSettings,
     ...(provider.defaultSettings ?? {}),
     ...(provider.modelSettings?.[provider.model] ?? {}),
+    ...(provider.modelConfigs?.[provider.model] ?? {}),
   };
 }
 
@@ -266,6 +267,13 @@ type ModelLike = {
   id?: unknown;
   name?: unknown;
   display_name?: unknown;
+  [key: string]: unknown;
+};
+
+export type LoadedProviderModel = {
+  id: string;
+  contextLength?: number;
+  contextLengthSource?: "detected" | "speculated";
 };
 
 function getModelId(model: ModelLike) {
@@ -275,7 +283,62 @@ function getModelId(model: ModelLike) {
   return undefined;
 }
 
-function normalizeModelList(data: unknown) {
+function readPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
+}
+
+function readNestedContextLength(value: unknown, path: string[]) {
+  let current = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || !(key in current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+  return readPositiveNumber(current);
+}
+
+function getModelContextMetadata(model: ModelLike): Pick<LoadedProviderModel, "contextLength" | "contextLengthSource"> {
+  const loadedInstances = Array.isArray(model.loaded_instances)
+    ? model.loaded_instances
+    : [];
+
+  for (const instance of loadedInstances) {
+    const detected =
+      readNestedContextLength(instance, ["config", "context_length"]) ??
+      readNestedContextLength(instance, ["config", "contextLength"]) ??
+      readNestedContextLength(instance, ["config", "max_context_length"]) ??
+      readNestedContextLength(instance, ["config", "maxContextLength"]);
+    if (detected !== undefined) {
+      return { contextLength: detected, contextLengthSource: "detected" };
+    }
+  }
+
+  const detected =
+    readNestedContextLength(model, ["top_provider", "context_length"]) ??
+    readNestedContextLength(model, ["topProvider", "contextLength"]);
+  if (detected !== undefined) {
+    return { contextLength: detected, contextLengthSource: "detected" };
+  }
+
+  const speculated =
+    readPositiveNumber(model.context_length) ??
+    readPositiveNumber(model.contextLength) ??
+    readPositiveNumber(model.max_context_length) ??
+    readPositiveNumber(model.maxContextLength) ??
+    readNestedContextLength(model, ["limits", "context"]) ??
+    readNestedContextLength(model, ["limit", "context"]);
+
+  if (speculated !== undefined) {
+    return { contextLength: speculated, contextLengthSource: "speculated" };
+  }
+
+  return {};
+}
+
+function normalizeLoadedModelList(data: unknown): LoadedProviderModel[] {
   const source = (() => {
     if (Array.isArray(data)) return data;
     if (data && typeof data === "object" && "data" in data && Array.isArray(data.data)) return data.data;
@@ -283,15 +346,29 @@ function normalizeModelList(data: unknown) {
     return [];
   })();
 
-  const normalized = source
-    .map((model: unknown) => {
-      if (typeof model === "string") return model;
-      if (!model || typeof model !== "object") return undefined;
-      return getModelId(model as ModelLike);
-    })
-    .filter((model: unknown): model is string => typeof model === "string" && model.trim().length > 0);
+  const byId = new Map<string, LoadedProviderModel>();
 
-  return [...new Set(normalized)].sort((left, right) => left.localeCompare(right));
+  for (const item of source) {
+    if (typeof item === "string") {
+      const id = item.trim();
+      if (id && !byId.has(id)) byId.set(id, { id });
+      continue;
+    }
+
+    if (!item || typeof item !== "object") continue;
+    const id = getModelId(item as ModelLike)?.trim();
+    if (!id) continue;
+
+    const context = getModelContextMetadata(item as ModelLike);
+    const existing = byId.get(id);
+    byId.set(id, {
+      id,
+      contextLength: existing?.contextLength ?? context.contextLength,
+      contextLengthSource: existing?.contextLengthSource ?? context.contextLengthSource,
+    });
+  }
+
+  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function createReasoningTagParser({
@@ -376,7 +453,7 @@ function assertElectronBridge() {
   return window.codeForgeAI;
 }
 
-export async function loadProviderModels(provider: ProviderConfig): Promise<string[]> {
+export async function loadProviderModels(provider: ProviderConfig): Promise<LoadedProviderModel[]> {
   if (!provider.baseUrl.trim()) {
     throw new Error("Provider base URL is required.");
   }
@@ -387,7 +464,7 @@ export async function loadProviderModels(provider: ProviderConfig): Promise<stri
     headers: provider.headers,
   });
 
-  return normalizeModelList(data);
+  return normalizeLoadedModelList(data);
 }
 
 export async function sendProviderChat({

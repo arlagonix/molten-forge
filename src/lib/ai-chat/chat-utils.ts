@@ -7,6 +7,7 @@ import type {
   ChatTokenUsage,
   ProviderConfig,
   ProviderGenerationSettings,
+  ProviderModelConfig,
 } from "./types";
 
 export function createId() {
@@ -27,45 +28,170 @@ export function normalizeProviderModels(models: string[]) {
   );
 }
 
-export function getProviderFallbackModel(
-  provider: Pick<ProviderConfig, "model" | "enabledModelIds">,
-) {
-  return (
-    provider.model.trim() ||
-    normalizeProviderModels(provider.enabledModelIds ?? [])[0] ||
-    ""
+export function isProviderEnabled(provider: Pick<ProviderConfig, "enabled">) {
+  return provider.enabled !== false;
+}
+
+export function isModelShownInMenu(provider: ProviderConfig, model: string) {
+  const normalizedModel = model.trim();
+  if (!normalizedModel) return false;
+
+  const config = provider.modelConfigs?.[normalizedModel];
+  if (typeof config?.showInMenu === "boolean") return config.showInMenu;
+  if (typeof config?.enabled === "boolean") return config.enabled;
+
+  return normalizeProviderModels(provider.enabledModelIds ?? []).includes(normalizedModel);
+}
+
+export function isModelEnabled(provider: ProviderConfig, model: string) {
+  const normalizedModel = model.trim();
+  if (!normalizedModel || !isModelShownInMenu(provider, normalizedModel)) return false;
+
+  const config = provider.modelConfigs?.[normalizedModel];
+  if (typeof config?.enabled === "boolean") return config.enabled;
+
+  return normalizeProviderModels(provider.enabledModelIds ?? []).includes(normalizedModel);
+}
+
+export function getShownProviderModels(provider: ProviderConfig) {
+  return normalizeProviderModels(provider.models ?? []).filter((model) =>
+    isModelShownInMenu(provider, model),
   );
 }
 
+export function getEnabledProviderModels(provider: ProviderConfig) {
+  if (!isProviderEnabled(provider)) return [];
+
+  return getShownProviderModels(provider).filter((model) =>
+    isModelEnabled(provider, model),
+  );
+}
+
+export function getProviderFallbackModel(provider: ProviderConfig) {
+  const currentModel = provider.model.trim();
+  if (currentModel && isProviderEnabled(provider) && isModelEnabled(provider, currentModel)) {
+    return currentModel;
+  }
+
+  return getEnabledProviderModels(provider)[0] || "";
+}
+
 export function providerLabel(provider: ProviderConfig) {
-  const model = getProviderFallbackModel(provider) || "No model selected";
+  const model = getProviderFallbackModel(provider) || provider.model.trim() || "No model selected";
   return `${providerDisplayName(provider)} · ${model}`;
+}
+
+export function getModelConfig(provider: ProviderConfig, model = provider.model) {
+  const normalizedModel = model.trim();
+  return normalizedModel ? provider.modelConfigs?.[normalizedModel] : undefined;
+}
+
+export function getEffectiveModelContext(provider: ProviderConfig, model = provider.model) {
+  const context = getModelConfig(provider, model)?.context;
+  const manual = context?.manualContextLength;
+  const detected = context?.detectedContextLength;
+  const speculated = context?.speculatedContextLength;
+
+  if (manual !== undefined && Number.isFinite(manual) && manual > 0) {
+    return { length: manual, source: "manual" as const };
+  }
+
+  if (detected !== undefined && Number.isFinite(detected) && detected > 0) {
+    return { length: detected, source: "detected" as const };
+  }
+
+  if (speculated !== undefined && Number.isFinite(speculated) && speculated > 0) {
+    return { length: speculated, source: "speculated" as const };
+  }
+
+  return { length: undefined, source: "unknown" as const };
+}
+
+function normalizePositiveOptionalNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : undefined;
 }
 
 export function normalizeProviderForState(
   provider: ProviderConfig,
 ): ProviderConfig {
-  const models = normalizeProviderModels(provider.models ?? []);
-  const enabledModelIds = normalizeProviderModels(
-    provider.enabledModelIds ?? [],
+  const legacyEnabledModelIds = normalizeProviderModels(
+    provider.enabledModelIds ?? (provider.model ? [provider.model] : []),
   );
-  const model = provider.model.trim();
+  const legacyDefaultSettings = {
+    ...defaultGenerationSettings,
+    ...(provider.defaultSettings ?? {}),
+  };
+  const legacyModelSettings = provider.modelSettings ?? {};
+  const models = normalizeProviderModels([
+    ...(provider.models ?? []),
+    ...legacyEnabledModelIds,
+    provider.model ?? "",
+    ...Object.keys(provider.modelConfigs ?? {}),
+    ...Object.keys(legacyModelSettings),
+  ]);
+  const modelConfigs = { ...(provider.modelConfigs ?? {}) };
 
-  return {
+  for (const model of models) {
+    const existing = modelConfigs[model] ?? {};
+    const legacySettings = legacyModelSettings[model] ?? {};
+    const wasLegacyEnabled = legacyEnabledModelIds.includes(model);
+    const hasExplicitEnabled = typeof existing.enabled === "boolean";
+    const hasExplicitShowInMenu = typeof existing.showInMenu === "boolean";
+    const showInMenu = hasExplicitShowInMenu
+      ? existing.showInMenu
+      : wasLegacyEnabled;
+
+    modelConfigs[model] = {
+      ...sanitizeGenerationSettings({
+        ...legacyDefaultSettings,
+        ...legacySettings,
+        ...existing,
+      }),
+      enabled: hasExplicitEnabled ? existing.enabled : wasLegacyEnabled,
+      showInMenu,
+      context: {
+        ...(existing.context ?? {}),
+        manualContextLength: normalizePositiveOptionalNumber(
+          existing.context?.manualContextLength,
+        ),
+        detectedContextLength: normalizePositiveOptionalNumber(
+          existing.context?.detectedContextLength,
+        ),
+        speculatedContextLength: normalizePositiveOptionalNumber(
+          existing.context?.speculatedContextLength,
+        ),
+      },
+    } satisfies ProviderModelConfig;
+  }
+
+  const preferredModel = provider.model?.trim() ?? "";
+  const normalizedProvider: ProviderConfig = {
     ...provider,
+    enabled: provider.enabled !== false,
     name: provider.name ?? "",
     baseUrl: provider.baseUrl ?? "",
     apiKey: provider.apiKey ?? "",
-    model,
-    models: normalizeProviderModels([...models, ...enabledModelIds, model]),
-    enabledModelIds,
+    model: preferredModel,
+    models,
+    modelConfigs,
+    enabledModelIds: getEnabledProviderModels({
+      ...provider,
+      enabled: provider.enabled !== false,
+      models,
+      modelConfigs,
+    }),
     headers: provider.headers ?? {},
     customHeaders: undefined,
-    defaultSettings: {
-      ...defaultGenerationSettings,
-      ...(provider.defaultSettings ?? {}),
-    },
+    defaultSettings: legacyDefaultSettings,
     modelSettings: provider.modelSettings ?? {},
+  };
+
+  const fallbackModel = getProviderFallbackModel(normalizedProvider);
+  return {
+    ...normalizedProvider,
+    model: fallbackModel || preferredModel,
   };
 }
 
@@ -82,6 +208,8 @@ export function createNewProvider(): ProviderConfig {
     apiKey: "",
     model: "",
     models: [],
+    enabled: true,
+    modelConfigs: {},
     enabledModelIds: [],
     headers: {},
     defaultSettings: defaultGenerationSettings,
