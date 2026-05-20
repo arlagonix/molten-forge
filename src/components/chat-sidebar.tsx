@@ -14,6 +14,7 @@ import {
   Sun,
   Trash2,
   Wrench,
+  BookOpen,
 } from "lucide-react";
 import { memo, useState } from "react";
 
@@ -55,6 +56,7 @@ type ChatSidebarProps = {
   onCreateNewChat: () => void;
   onOpenProviders: () => void;
   onOpenTools: () => void;
+  onOpenSkills: () => void;
   onOpenSystemPrompt: () => void;
   onToggleAiTitleGeneration: (checked: boolean) => void;
   onSetTheme: (theme: "light" | "dark") => void;
@@ -81,6 +83,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onCreateNewChat,
   onOpenProviders,
   onOpenTools,
+  onOpenSkills,
   onOpenSystemPrompt,
   onToggleAiTitleGeneration,
   onSetTheme,
@@ -138,6 +141,10 @@ export const ChatSidebar = memo(function ChatSidebar({
           <DropdownMenuItem onClick={onOpenTools}>
             <Wrench className="size-4" />
             Tools
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onOpenSkills}>
+            <BookOpen className="size-4" />
+            Skills
           </DropdownMenuItem>
           <DropdownMenuItem onClick={onOpenSystemPrompt}>
             <MessageSquareText className="size-4" />

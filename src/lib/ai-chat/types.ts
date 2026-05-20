@@ -96,6 +96,9 @@ export type ChatToolResult = {
   content: string;
   isError?: boolean;
   execution?: ToolExecutionPreview;
+  loadedSkillName?: string;
+  loadedSkillInstructions?: string;
+  loadedSkillRecommendedToolNames?: string[];
 };
 
 export type ToolExecutionStatus = "pending" | "running" | "complete" | "failed";
@@ -231,6 +234,9 @@ export type ChatSession = {
   model?: string;
   enabledToolNames?: string[];
   disabledToolNames?: string[];
+  enabledSkillNames?: string[];
+  disabledSkillNames?: string[];
+  activeSkillNames?: string[];
 };
 
 export type ApiToolCall = ChatToolCall;
@@ -280,6 +286,17 @@ export type ToolDefinition = {
 
 export type LoadedToolInfo = ToolDefinition;
 
+export type SkillDefinition = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  description: string;
+  instructions: string;
+  recommendedToolNames: string[];
+};
+
+export type LoadedSkillInfo = SkillDefinition;
+
 export type ToolLoadError = {
   source: string;
   message: string;
@@ -306,10 +323,36 @@ export type ToolExportResult = {
   path?: string;
 };
 
+export type SkillImportIssue = {
+  source: string;
+  skillName?: string;
+  message: string;
+};
+
+export type SkillImportResult = {
+  cancelled: boolean;
+  imported: number;
+  updated: number;
+  skipped: SkillImportIssue[];
+  invalid: SkillImportIssue[];
+  renamed: SkillImportIssue[];
+};
+
+export type SkillExportResult = {
+  cancelled: boolean;
+  exported: number;
+  path?: string;
+};
+
 export type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
   checklistWriteEnabled: boolean;
+  loadSkillEnabled: boolean;
+};
+
+export type SkillsSettings = {
+  enabled: boolean;
 };
 
 export type ToolsState = {

@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Check, ChevronsUpDown, Lock, Wrench } from "lucide-react";
+import { BookOpen, Check, ChevronsUpDown, Lock, Wrench } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -17,7 +17,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { providerDisplayName, providerLabel } from "@/lib/ai-chat/chat-utils";
-import type { LoadedToolInfo, ProviderConfig } from "@/lib/ai-chat/types";
+import type {
+  LoadedSkillInfo,
+  LoadedToolInfo,
+  ProviderConfig,
+} from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
 const ASK_USER_TOOL_NAME = "ask_user";
@@ -52,6 +56,14 @@ type ComposerFooterProps = {
   toolSearchValue: string;
   onToolSearchValueChange: (value: string) => void;
   onToggleTool: (toolName: string) => void;
+  visibleChatSkills: LoadedSkillInfo[];
+  selectedSkillNames: string[];
+  activeSkillNames: string[];
+  isSkillPickerOpen: boolean;
+  onSkillPickerOpenChange: (open: boolean) => void;
+  skillSearchValue: string;
+  onSkillSearchValueChange: (value: string) => void;
+  onToggleSkill: (skillName: string) => void;
 };
 
 export const ComposerFooter = memo(function ComposerFooter({
@@ -72,8 +84,18 @@ export const ComposerFooter = memo(function ComposerFooter({
   toolSearchValue,
   onToolSearchValueChange,
   onToggleTool,
+  visibleChatSkills,
+  selectedSkillNames,
+  activeSkillNames,
+  isSkillPickerOpen,
+  onSkillPickerOpenChange,
+  skillSearchValue,
+  onSkillSearchValueChange,
+  onToggleSkill,
 }: ComposerFooterProps) {
   const selectedNames = new Set(selectedToolNames);
+  const selectedSkillNameSet = new Set(selectedSkillNames);
+  const activeSkillNameSet = new Set(activeSkillNames);
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -235,6 +257,94 @@ export const ComposerFooter = memo(function ComposerFooter({
                 </CommandGroup>
               ) : (
                 <CommandEmpty>No tools found.</CommandEmpty>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
+      <Popover
+        open={isSkillPickerOpen}
+        onOpenChange={(open) => {
+          onSkillPickerOpenChange(open);
+          if (!open) onSkillSearchValueChange("");
+        }}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            role="combobox"
+            disabled={!activeChatExists || isSending}
+            aria-expanded={isSkillPickerOpen}
+            className="h-9 shrink-0 justify-between gap-2 rounded-lg px-3 text-left font-normal"
+            title={
+              isSending
+                ? "Wait until this chat finishes generating"
+                : "Select skills available to the model in this chat"
+            }
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <BookOpen className="size-4 shrink-0 opacity-70" />
+            </span>
+            <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="w-[min(24rem,calc(100vw-2rem))] rounded-lg p-0"
+        >
+          <Command shouldFilter={false}>
+            <CommandInput
+              value={skillSearchValue}
+              onValueChange={onSkillSearchValueChange}
+              placeholder="Search skills..."
+            />
+            <CommandList>
+              {visibleChatSkills.length > 0 ? (
+                <CommandGroup heading="Available skills">
+                  {visibleChatSkills.map((skill) => {
+                    const isSelected = selectedSkillNameSet.has(skill.name);
+                    const isActive = activeSkillNameSet.has(skill.name);
+
+                    return (
+                      <CommandItem
+                        key={skill.name}
+                        value={`${skill.name} ${skill.description}`}
+                        onSelect={() => onToggleSkill(skill.name)}
+                        className="min-w-0 cursor-pointer items-start gap-2"
+                        title={skill.description}
+                      >
+                        <Switch
+                          checked={isSelected}
+                          tabIndex={-1}
+                          onClick={(event) => event.stopPropagation()}
+                          onCheckedChange={() => onToggleSkill(skill.name)}
+                          className="mt-0.5 shrink-0 cursor-pointer"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span className="min-w-0 truncate font-medium">
+                              {skill.name}
+                            </span>
+                            {isActive && (
+                              <span className="shrink-0 rounded-md border bg-muted/60 px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                                active
+                              </span>
+                            )}
+                          </div>
+                          {skill.description && (
+                            <div className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                              {skill.description}
+                            </div>
+                          )}
+                        </div>
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              ) : (
+                <CommandEmpty>No skills found.</CommandEmpty>
               )}
             </CommandList>
           </Command>

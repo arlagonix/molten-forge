@@ -1,10 +1,14 @@
 import type {
   AppSettings,
   ChatTokenUsage,
+  LoadedSkillInfo,
   LoadedToolInfo,
   ToolCommandResult,
+  SkillExportResult,
+  SkillImportResult,
   ToolExportResult,
   ToolImportResult,
+  SkillsSettings,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
 
@@ -43,7 +47,9 @@ type AiStreamResult = {
 type AiStreamHandle = {
   id: string;
   cancel: () => void;
-  result: (onDelta: (event: AiStreamDeltaEvent) => void) => Promise<AiStreamResult>;
+  result: (
+    onDelta: (event: AiStreamDeltaEvent) => void,
+  ) => Promise<AiStreamResult>;
 };
 
 declare global {
@@ -71,7 +77,9 @@ declare global {
   interface Window {
     chatForgeStorage?: {
       isInitialized: () => Promise<boolean>;
-      migrateFromIndexedDb: (snapshot: ChatForgeIndexedDbSnapshot) => Promise<unknown>;
+      migrateFromIndexedDb: (
+        snapshot: ChatForgeIndexedDbSnapshot,
+      ) => Promise<unknown>;
       loadProvidersState: () => Promise<any>;
       saveProvidersState: (value: unknown) => Promise<void>;
       loadSystemPrompt: () => Promise<string | undefined>;
@@ -79,13 +87,18 @@ declare global {
       loadActiveChatId: () => Promise<string | undefined>;
       saveActiveChatId: (chatId: string) => Promise<void>;
       loadCachedProviderModels: (cacheKey: string) => Promise<string[]>;
-      saveCachedProviderModels: (cacheKey: string, models: string[]) => Promise<void>;
+      saveCachedProviderModels: (
+        cacheKey: string,
+        models: string[],
+      ) => Promise<void>;
       loadChats: () => Promise<any[]>;
       saveChat: (chat: unknown) => Promise<void>;
       deleteChat: (chatId: string) => Promise<void>;
       deleteAllChats: () => Promise<void>;
       loadToolsSettings: () => Promise<ToolsSettings | undefined>;
       saveToolsSettings: (value: ToolsSettings) => Promise<void>;
+      loadSkillsSettings: () => Promise<SkillsSettings | undefined>;
+      saveSkillsSettings: (value: SkillsSettings) => Promise<void>;
       loadAppSettings: () => Promise<AppSettings | undefined>;
       saveAppSettings: (value: AppSettings) => Promise<void>;
       loadTools: () => Promise<LoadedToolInfo[]>;
@@ -95,20 +108,31 @@ declare global {
       exportTool: (tool: LoadedToolInfo) => Promise<ToolExportResult>;
       exportTools: (tools: LoadedToolInfo[]) => Promise<ToolExportResult>;
       openToolsFolder: () => Promise<void>;
+      loadSkills: () => Promise<LoadedSkillInfo[]>;
+      saveSkill: (skill: LoadedSkillInfo) => Promise<LoadedSkillInfo>;
+      deleteSkill: (skillId: string) => Promise<void>;
+      importSkills: () => Promise<SkillImportResult>;
+      exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
+      exportSkills: (skills: LoadedSkillInfo[]) => Promise<SkillExportResult>;
+      openSkillsFolder: () => Promise<void>;
     };
   }
 }
-
 
 declare global {
   interface Window {
     chatForgeTools?: {
-      execute: (request: { name: string; args: unknown }) => Promise<ToolCommandResult>;
-      test: (request: { tool: LoadedToolInfo; args: unknown }) => Promise<ToolCommandResult>;
+      execute: (request: {
+        name: string;
+        args: unknown;
+      }) => Promise<ToolCommandResult>;
+      test: (request: {
+        tool: LoadedToolInfo;
+        args: unknown;
+      }) => Promise<ToolCommandResult>;
     };
   }
 }
-
 
 type FindInPageRequest = {
   text: string;
@@ -132,9 +156,15 @@ type FindInPageResult = {
 declare global {
   interface Window {
     chatForgeFind?: {
-      findInPage: (request: FindInPageRequest) => Promise<{ requestId: number }>;
-      stopFindInPage: (action?: "clearSelection" | "keepSelection" | "activateSelection") => Promise<void>;
-      onFoundInPage: (callback: (result: FindInPageResult) => void) => () => void;
+      findInPage: (
+        request: FindInPageRequest,
+      ) => Promise<{ requestId: number }>;
+      stopFindInPage: (
+        action?: "clearSelection" | "keepSelection" | "activateSelection",
+      ) => Promise<void>;
+      onFoundInPage: (
+        callback: (result: FindInPageResult) => void,
+      ) => () => void;
     };
   }
 }

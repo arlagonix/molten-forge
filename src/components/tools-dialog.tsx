@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   Check,
   Copy,
   Download,
@@ -73,6 +74,8 @@ const BUILTIN_ASK_USER_TOOL_NAME = "ask_user";
 const BUILTIN_ASK_USER_TOOL_ID = "builtin-ask-user";
 const BUILTIN_CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
 const BUILTIN_CHECKLIST_WRITE_TOOL_ID = "builtin-checklist-write";
+const BUILTIN_LOAD_SKILL_TOOL_NAME = "load_skill";
+const BUILTIN_LOAD_SKILL_TOOL_ID = "builtin-load-skill";
 const BUILTIN_ASK_USER_TOOL_DESCRIPTION =
   "Pauses the assistant so it can ask focused clarification questions, including single-choice, multi-select, and text answers, then resumes the same response.";
 const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
@@ -130,6 +133,19 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
 };
 const BUILTIN_CHECKLIST_WRITE_TOOL_DESCRIPTION =
   "Creates visible checklist snapshots for tracking progress during complex multi-step work.";
+const BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION =
+  "Loads full instructions for one relevant skill and activates it for the current chat when skills are available.";
+const BUILTIN_LOAD_SKILL_TOOL_PARAMETERS = {
+  type: "object",
+  properties: {
+    skillName: {
+      type: "string",
+      description: "Exact skill name to load from the available skills list.",
+    },
+  },
+  required: ["skillName"],
+};
+
 const BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS = {
   type: "object",
   properties: {
@@ -588,7 +604,8 @@ function validateToolDraft(tool: LoadedToolInfo) {
   }
   if (
     tool.name === BUILTIN_ASK_USER_TOOL_NAME ||
-    tool.name === BUILTIN_CHECKLIST_WRITE_TOOL_NAME
+    tool.name === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
+    tool.name === BUILTIN_LOAD_SKILL_TOOL_NAME
   ) {
     throw new Error(
       `${tool.name} is a built-in tool name and cannot be used by a custom command tool.`,
@@ -675,20 +692,24 @@ export const ToolsDialog = memo(function ToolsDialog({
   const isAskUserToolSelected = selectedToolName === BUILTIN_ASK_USER_TOOL_NAME;
   const isChecklistWriteToolSelected =
     selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME;
+  const isLoadSkillToolSelected =
+    selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME;
   const selectedTool = useMemo(
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 2;
+  const totalToolsCount = loadedTools.length + 3;
   const enabledToolsCount = useMemo(
     () =>
       loadedTools.filter((tool) => tool.enabled).length +
       (toolsSettings.askUserEnabled ? 1 : 0) +
-      (toolsSettings.checklistWriteEnabled ? 1 : 0),
+      (toolsSettings.checklistWriteEnabled ? 1 : 0) +
+      (toolsSettings.loadSkillEnabled ? 1 : 0),
     [
       loadedTools,
       toolsSettings.askUserEnabled,
       toolsSettings.checklistWriteEnabled,
+      toolsSettings.loadSkillEnabled,
     ],
   );
   const currentToolTestState = toolDraft
@@ -715,7 +736,8 @@ export const ToolsDialog = memo(function ToolsDialog({
 
     if (
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
-      selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME
+      selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
+      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME
     ) {
       return;
     }
@@ -731,7 +753,8 @@ export const ToolsDialog = memo(function ToolsDialog({
   useEffect(() => {
     if (
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
-      selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME
+      selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
+      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME
     ) {
       setToolDraft(null);
       return;
@@ -756,7 +779,12 @@ export const ToolsDialog = memo(function ToolsDialog({
   }
 
   const hasToolDraftChanges = useMemo(() => {
-    if (!toolDraft || isAskUserToolSelected || isChecklistWriteToolSelected) {
+    if (
+      !toolDraft ||
+      isAskUserToolSelected ||
+      isChecklistWriteToolSelected ||
+      isLoadSkillToolSelected
+    ) {
       return false;
     }
 
@@ -768,6 +796,7 @@ export const ToolsDialog = memo(function ToolsDialog({
   }, [
     isAskUserToolSelected,
     isChecklistWriteToolSelected,
+    isLoadSkillToolSelected,
     selectedTool,
     toolDraft,
   ]);
@@ -1235,6 +1264,53 @@ export const ToolsDialog = memo(function ToolsDialog({
                 />
               </div>
 
+              <div
+                key={BUILTIN_LOAD_SKILL_TOOL_ID}
+                role="button"
+                tabIndex={0}
+                className={cn(
+                  "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isLoadSkillToolSelected
+                    ? "border-primary/30 bg-accent text-accent-foreground"
+                    : "border-transparent hover:border-border hover:bg-muted/60",
+                )}
+                onClick={() =>
+                  setSelectedToolName(BUILTIN_LOAD_SKILL_TOOL_NAME)
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedToolName(BUILTIN_LOAD_SKILL_TOOL_NAME);
+                  }
+                }}
+              >
+                <BookOpen className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
+                    <span className="truncate">
+                      {BUILTIN_LOAD_SKILL_TOOL_NAME}
+                    </span>
+                    <Lock className="size-3 shrink-0 text-muted-foreground" />
+                  </div>
+                </div>
+                <Switch
+                  checked={toolsSettings.loadSkillEnabled}
+                  onClick={(event) => event.stopPropagation()}
+                  onCheckedChange={(checked) =>
+                    onToolsSettingsChange((current) => ({
+                      ...current,
+                      loadSkillEnabled: checked,
+                    }))
+                  }
+                  className="mt-0.5 shrink-0 cursor-pointer"
+                  title={
+                    toolsSettings.loadSkillEnabled
+                      ? "Disable load_skill"
+                      : "Enable load_skill"
+                  }
+                />
+              </div>
+
               {loadedTools.map((tool) => (
                 <div
                   key={tool.id}
@@ -1324,8 +1400,8 @@ export const ToolsDialog = memo(function ToolsDialog({
           <div className="min-h-0 flex flex-col overflow-hidden">
             {isAskUserToolSelected ? (
               <>
-                <div className="z-20 shrink-0 border-b bg-background px-5 py-4">
-                  <div className="flex items-center justify-between gap-4">
+                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
+                  <div className="flex w-full items-center justify-between gap-4">
                     <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                       Built-in tool
                     </Label>
@@ -1384,8 +1460,8 @@ export const ToolsDialog = memo(function ToolsDialog({
               </>
             ) : isChecklistWriteToolSelected ? (
               <>
-                <div className="z-20 shrink-0 border-b bg-background px-5 py-4">
-                  <div className="flex items-center justify-between gap-4">
+                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
+                  <div className="flex w-full items-center justify-between gap-4">
                     <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                       Built-in tool
                     </Label>
@@ -1437,10 +1513,66 @@ export const ToolsDialog = memo(function ToolsDialog({
                   </div>
                 </div>
               </>
+            ) : isLoadSkillToolSelected ? (
+              <>
+                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
+                  <div className="flex w-full items-center justify-between gap-4">
+                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                      Built-in tool
+                    </Label>
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                      <Lock className="size-3.5" />
+                      Locked
+                    </span>
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                  <div className="grid gap-5 pb-1">
+                    <div className="grid gap-1">
+                      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <BookOpen className="size-5 text-muted-foreground" />
+                        {BUILTIN_LOAD_SKILL_TOOL_NAME}
+                      </h3>
+                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
+                        {BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION}
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+                      <Label>Behavior</Label>
+                      <div className="grid gap-2 text-base leading-6 text-muted-foreground">
+                        <p>
+                          The assistant can call this tool to load a skill from
+                          the current model-selectable skill list. The loaded
+                          skill becomes active in the chat and its instructions
+                          are included in future requests.
+                        </p>
+                        <p>
+                          Availability is controlled by this built-in tool
+                          switch, Skills settings, and the chat skill picker.
+                          Custom command tool settings do not affect it.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Parameters JSON schema</Label>
+                      {renderJsonCodeBlock(
+                        JSON.stringify(
+                          BUILTIN_LOAD_SKILL_TOOL_PARAMETERS,
+                          null,
+                          2,
+                        ),
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
             ) : toolDraft ? (
               <>
-                <div className="z-20 shrink-0 border-b bg-background px-5 py-4">
-                  <div className="flex items-center justify-between gap-4">
+                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
+                  <div className="flex w-full items-center justify-between gap-4">
                     <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                       {selectedTool ? "Edit tool" : "Create tool"}
                     </Label>
@@ -1780,24 +1912,44 @@ export const ToolsDialog = memo(function ToolsDialog({
         <DialogFooter className="shrink-0 items-center justify-between border-t px-5 py-3">
           <div />
           <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              className="rounded-lg"
-              onClick={() => onOpenChange(false)}
-            >
-              Close
-            </Button>
-            {!isAskUserToolSelected && !isChecklistWriteToolSelected && (
+            {!isAskUserToolSelected &&
+            !isChecklistWriteToolSelected &&
+            !isLoadSkillToolSelected &&
+            toolDraft ? (
               <Button
                 type="button"
+                variant="secondary"
                 className="rounded-lg"
-                onClick={saveCurrentToolDraft}
-                disabled={!toolDraft || isSavingTool || !hasToolDraftChanges}
+                onClick={() => {
+                  if (selectedTool) setToolDraft(toolToDraft(selectedTool));
+                  else setToolDraft(createBlankToolDraft());
+                }}
+                disabled={!hasToolDraftChanges || isSavingTool}
               >
-                {isSavingTool ? "Saving..." : "Save"}
+                Reset
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                className="rounded-lg"
+                onClick={() => onOpenChange(false)}
+              >
+                Close
               </Button>
             )}
+            {!isAskUserToolSelected &&
+              !isChecklistWriteToolSelected &&
+              !isLoadSkillToolSelected && (
+                <Button
+                  type="button"
+                  className="rounded-lg"
+                  onClick={saveCurrentToolDraft}
+                  disabled={!toolDraft || isSavingTool || !hasToolDraftChanges}
+                >
+                  {isSavingTool ? "Saving..." : "Save"}
+                </Button>
+              )}
           </div>
         </DialogFooter>
       </DialogContent>

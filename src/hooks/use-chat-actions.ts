@@ -17,6 +17,7 @@ import {
 import type {
   ChatMessage,
   ChatSession,
+  LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
 } from "@/lib/ai-chat/types";
@@ -26,8 +27,10 @@ export function useChatActions({
   activeChatId,
   activeProvider,
   availableTools,
+  availableSkills,
   chats,
   globallyEnabledToolNames,
+  globallyEnabledSkillNames,
   isSending,
   messageElementRefs,
   setActiveChatId,
@@ -48,8 +51,10 @@ export function useChatActions({
   activeChatId?: string;
   activeProvider: ProviderConfig;
   availableTools: LoadedToolInfo[];
+  availableSkills: LoadedSkillInfo[];
   chats: ChatSession[];
   globallyEnabledToolNames: Set<string>;
+  globallyEnabledSkillNames: Set<string>;
   isSending: boolean;
   messageElementRefs: MutableRefObject<Map<string, HTMLDivElement>>;
   setActiveChatId: Dispatch<SetStateAction<string | undefined>>;
@@ -222,6 +227,7 @@ export function useChatActions({
       title: "New chat",
       titleMode: "auto",
       messages: [],
+      activeSkillNames: [],
       updatedAt: now,
     }));
     showSuccess("Chat cleared.");
@@ -301,6 +307,47 @@ export function useChatActions({
     });
   }
 
+
+
+  function toggleActiveChatSkill(skillName: string) {
+    if (!activeChat) return;
+
+    const isGloballyEnabled = globallyEnabledSkillNames.has(skillName);
+
+    updateChat(activeChat.id, (chat) => {
+      const chatEnabled = new Set(chat.enabledSkillNames ?? []);
+      const chatDisabled = new Set(chat.disabledSkillNames ?? []);
+      const isCurrentlyEnabled =
+        !chatDisabled.has(skillName) &&
+        (isGloballyEnabled || chatEnabled.has(skillName));
+
+      if (isCurrentlyEnabled) {
+        chatEnabled.delete(skillName);
+
+        if (isGloballyEnabled) chatDisabled.add(skillName);
+        else chatDisabled.delete(skillName);
+      } else {
+        chatDisabled.delete(skillName);
+
+        if (isGloballyEnabled) chatEnabled.delete(skillName);
+        else chatEnabled.add(skillName);
+      }
+
+      const enabledSkillNames = availableSkills
+        .map((skill) => skill.name)
+        .filter((name) => chatEnabled.has(name));
+      const disabledSkillNames = availableSkills
+        .map((skill) => skill.name)
+        .filter((name) => chatDisabled.has(name));
+
+      return {
+        ...chat,
+        enabledSkillNames,
+        disabledSkillNames,
+      };
+    });
+  }
+
   function renameChat(chatId: string, title: string) {
     const nextTitle = normalizeManualChatTitle(title);
     if (!nextTitle) return;
@@ -333,6 +380,7 @@ export function useChatActions({
     clearCurrentChat,
     removeChat,
     toggleActiveChatTool,
+    toggleActiveChatSkill,
     renameChat,
     toggleChatPinned,
   };

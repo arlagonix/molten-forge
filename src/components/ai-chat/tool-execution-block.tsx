@@ -2,6 +2,7 @@ import { Check, ChevronDown, ChevronRight, Wrench, X } from "lucide-react";
 
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { Spinner } from "@/components/ui/spinner";
+import { LOAD_SKILL_TOOL_NAME } from "@/lib/ai-chat/builtin-tools";
 import { buildToolExecutionPreviewForCall } from "@/lib/ai-chat/tool-preview";
 import type {
   ChatToolCall,
@@ -24,7 +25,10 @@ function formatJsonLikeCodeBlock(value: string) {
   }
 }
 
-function renderJsonCodeBlock(value: string, className = "chat-markdown-compact") {
+function renderJsonCodeBlock(
+  value: string,
+  className = "chat-markdown-compact",
+) {
   const normalized = formatJsonLikeCodeBlock(value);
   return (
     <MarkdownMessage
@@ -74,6 +78,91 @@ function renderToolExecutionPreview(execution?: ToolExecutionPreview) {
       )}
     </>
   );
+}
+
+function getLoadSkillName(toolCall: ChatToolCall, toolResult?: ChatToolResult) {
+  if (toolCall.function.name !== LOAD_SKILL_TOOL_NAME) return "";
+  if (toolResult?.loadedSkillName) return toolResult.loadedSkillName;
+
+  try {
+    const parsedResult = toolResult?.content
+      ? (JSON.parse(toolResult.content) as { skillName?: unknown })
+      : undefined;
+    if (
+      typeof parsedResult?.skillName === "string" &&
+      parsedResult.skillName.trim()
+    ) {
+      return parsedResult.skillName.trim();
+    }
+  } catch {
+    // Fall back to the call arguments below.
+  }
+
+  try {
+    const parsedArgs = JSON.parse(toolCall.function.arguments || "{}") as {
+      skillName?: unknown;
+    };
+    return typeof parsedArgs.skillName === "string"
+      ? parsedArgs.skillName.trim()
+      : "";
+  } catch {
+    return "";
+  }
+}
+
+function getLoadSkillDetails(toolResult?: ChatToolResult) {
+  if (!toolResult || toolResult.toolName !== LOAD_SKILL_TOOL_NAME) {
+    return {
+      instructions: "",
+      recommendedToolNames: [] as string[],
+      compactOutput: toolResult?.content ?? "",
+    };
+  }
+
+  let parsedStatus: unknown;
+  let parsedSkillName: unknown;
+  let parsedInstructions: unknown;
+  let parsedRecommendedToolNames: unknown;
+
+  try {
+    const parsed = JSON.parse(toolResult.content || "{}") as Record<
+      string,
+      unknown
+    >;
+    parsedStatus = parsed.status;
+    parsedSkillName = parsed.skillName;
+    parsedInstructions = parsed.instructions;
+    parsedRecommendedToolNames = parsed.recommendedToolNames;
+  } catch {
+    // Fall back to the typed fields below.
+  }
+
+  const instructions =
+    toolResult.loadedSkillInstructions ??
+    (typeof parsedInstructions === "string" ? parsedInstructions : "");
+  const recommendedToolNames =
+    toolResult.loadedSkillRecommendedToolNames ??
+    (Array.isArray(parsedRecommendedToolNames)
+      ? parsedRecommendedToolNames.filter(
+          (toolName): toolName is string => typeof toolName === "string",
+        )
+      : []);
+  const compactOutput = JSON.stringify(
+    Object.fromEntries(
+      Object.entries({
+        ok: !toolResult.isError,
+        status: typeof parsedStatus === "string" ? parsedStatus : undefined,
+        skillName:
+          typeof parsedSkillName === "string"
+            ? parsedSkillName
+            : toolResult.loadedSkillName,
+      }).filter(([, value]) => value !== undefined),
+    ),
+    null,
+    2,
+  );
+
+  return { instructions, recommendedToolNames, compactOutput };
 }
 
 function formatToolDescriptionPreview(description?: string) {
@@ -169,6 +258,14 @@ export function ToolExecutionBlock({
     (candidate) => candidate.name === toolCall.function.name,
   );
   const toolDescription = formatToolDescriptionPreview(toolInfo?.description);
+  const loadedSkillName = getLoadSkillName(toolCall, toolResult);
+  const loadSkillDetails = getLoadSkillDetails(toolResult);
+  const isLoadSkillTool = toolCall.function.name === LOAD_SKILL_TOOL_NAME;
+  const showLoadSkillSummary =
+    isLoadSkillTool &&
+    loadedSkillName &&
+    effectiveStatus === "complete" &&
+    !toolResult?.isError;
   const showToolInput =
     hasMeaningfulToolInput(toolCall.function.arguments || "") &&
     (!executionPreview || executionPreview.usesStdin);
@@ -195,11 +292,18 @@ export function ToolExecutionBlock({
               <ChevronDown className="size-3.5 shrink-0" />
             )}
           </div>
-          {toolDescription && (
+          {showLoadSkillSummary ? (
+            <div className="mt-2 text-sm normal-case leading-5 tracking-normal text-muted-foreground/85">
+              Loaded skill{" "}
+              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">
+                {loadedSkillName}
+              </code>
+            </div>
+          ) : toolDescription ? (
             <div className="mt-2 text-sm normal-case leading-5 tracking-normal text-muted-foreground/85">
               {toolDescription}
             </div>
-          )}
+          ) : null}
         </button>
 
         {!isCollapsed && (
@@ -218,9 +322,39 @@ export function ToolExecutionBlock({
                 <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
                   Output
                 </div>
-                {renderJsonCodeBlock(toolResult.content)}
+                {renderJsonCodeBlock(
+                  isLoadSkillTool
+                    ? loadSkillDetails.compactOutput
+                    : toolResult.content,
+                )}
               </div>
             )}
+            {isLoadSkillTool && loadSkillDetails.instructions.trim() && (
+              <div className="grid gap-1.5">
+                <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                  Instructions
+                </div>
+                {renderCodeBlock(loadSkillDetails.instructions, "markdown")}
+              </div>
+            )}
+            {isLoadSkillTool &&
+              loadSkillDetails.recommendedToolNames.length > 0 && (
+                <div className="grid gap-1.5">
+                  <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                    Recommended tools
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {loadSkillDetails.recommendedToolNames.map((toolName) => (
+                      <code
+                        key={toolName}
+                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground"
+                      >
+                        {toolName}
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              )}
           </div>
         )}
       </div>

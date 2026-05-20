@@ -80,7 +80,11 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
   },
 
   saveCachedProviderModels(cacheKey: unknown, models: unknown) {
-    return ipcRenderer.invoke("storage:provider-models-cache:save", cacheKey, models);
+    return ipcRenderer.invoke(
+      "storage:provider-models-cache:save",
+      cacheKey,
+      models,
+    );
   },
 
   loadChats() {
@@ -105,6 +109,14 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
 
   saveToolsSettings(value: unknown) {
     return ipcRenderer.invoke("storage:tools-settings:save", value);
+  },
+
+  loadSkillsSettings() {
+    return ipcRenderer.invoke("storage:skills-settings:load");
+  },
+
+  saveSkillsSettings(value: unknown) {
+    return ipcRenderer.invoke("storage:skills-settings:save", value);
   },
 
   loadAppSettings() {
@@ -142,8 +154,35 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
   openToolsFolder() {
     return ipcRenderer.invoke("storage:tools:open-folder");
   },
-});
 
+  loadSkills() {
+    return ipcRenderer.invoke("storage:skills:load");
+  },
+
+  saveSkill(skill: unknown) {
+    return ipcRenderer.invoke("storage:skill:save", skill);
+  },
+
+  deleteSkill(skillId: unknown) {
+    return ipcRenderer.invoke("storage:skill:delete", skillId);
+  },
+
+  importSkills() {
+    return ipcRenderer.invoke("storage:skills:import");
+  },
+
+  exportSkill(skill: unknown) {
+    return ipcRenderer.invoke("storage:skill:export", skill);
+  },
+
+  exportSkills(skills: unknown) {
+    return ipcRenderer.invoke("storage:skills:export", skills);
+  },
+
+  openSkillsFolder() {
+    return ipcRenderer.invoke("storage:skills:open-folder");
+  },
+});
 
 contextBridge.exposeInMainWorld("chatForgeTools", {
   execute(request: unknown) {
@@ -154,7 +193,6 @@ contextBridge.exposeInMainWorld("chatForgeTools", {
     return ipcRenderer.invoke("tools:test", request);
   },
 });
-
 
 contextBridge.exposeInMainWorld("chatForgeFind", {
   findInPage(request: unknown) {

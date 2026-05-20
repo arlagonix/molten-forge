@@ -3,9 +3,13 @@ import { normalizeProviderForState, sortChatsByUpdatedAt } from "./chat-utils";
 import type {
   AppSettings,
   ChatSession,
+  LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
   ProvidersState,
+  SkillExportResult,
+  SkillImportResult,
+  SkillsSettings,
   ToolExportResult,
   ToolImportResult,
   ToolsSettings,
@@ -22,6 +26,7 @@ const SYSTEM_PROMPT_KEY = "system-prompt";
 const ACTIVE_CHAT_ID_KEY = "active-chat-id";
 const MODEL_CACHE_KEY_PREFIX = "provider-models:";
 const TOOLS_SETTINGS_KEY = "tools-settings";
+const SKILLS_SETTINGS_KEY = "skills-settings";
 const APP_SETTINGS_KEY = "app-settings";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -55,6 +60,8 @@ type ChatForgeStorageApi = {
   saveActiveChatId: (chatId: string) => Promise<void>;
   loadToolsSettings: () => Promise<ToolsSettings | undefined>;
   saveToolsSettings: (value: ToolsSettings) => Promise<void>;
+  loadSkillsSettings: () => Promise<SkillsSettings | undefined>;
+  saveSkillsSettings: (value: SkillsSettings) => Promise<void>;
   loadAppSettings: () => Promise<AppSettings | undefined>;
   saveAppSettings: (value: AppSettings) => Promise<void>;
   loadTools: () => Promise<LoadedToolInfo[]>;
@@ -64,8 +71,18 @@ type ChatForgeStorageApi = {
   exportTool: (tool: LoadedToolInfo) => Promise<ToolExportResult>;
   exportTools: (tools: LoadedToolInfo[]) => Promise<ToolExportResult>;
   openToolsFolder: () => Promise<void>;
+  loadSkills: () => Promise<LoadedSkillInfo[]>;
+  saveSkill: (skill: LoadedSkillInfo) => Promise<LoadedSkillInfo>;
+  deleteSkill: (skillId: string) => Promise<void>;
+  importSkills: () => Promise<SkillImportResult>;
+  exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
+  exportSkills: (skills: LoadedSkillInfo[]) => Promise<SkillExportResult>;
+  openSkillsFolder: () => Promise<void>;
   loadCachedProviderModels: (cacheKey: string) => Promise<string[]>;
-  saveCachedProviderModels: (cacheKey: string, models: string[]) => Promise<void>;
+  saveCachedProviderModels: (
+    cacheKey: string,
+    models: string[],
+  ) => Promise<void>;
   loadChats: () => Promise<ChatSession[]>;
   saveChat: (chat: ChatSession) => Promise<void>;
   deleteChat: (chatId: string) => Promise<void>;
@@ -114,7 +131,9 @@ function parseCustomHeaders(customHeaders?: string): Record<string, string> {
   return headers;
 }
 
-export function normalizeProvider(provider: Partial<ProviderConfig>): ProviderConfig {
+export function normalizeProvider(
+  provider: Partial<ProviderConfig>,
+): ProviderConfig {
   const legacyHeaders = parseCustomHeaders(provider.customHeaders);
 
   return normalizeProviderForState({
@@ -128,7 +147,9 @@ export function normalizeProvider(provider: Partial<ProviderConfig>): ProviderCo
 function normalizeProvidersState(value?: ProvidersState): ProvidersState {
   if (value?.providers?.length) {
     const providers = value.providers.map(normalizeProvider);
-    const activeProviderId = providers.some((provider) => provider.id === value.activeProviderId)
+    const activeProviderId = providers.some(
+      (provider) => provider.id === value.activeProviderId,
+    )
       ? value.activeProviderId
       : providers[0].id;
 
@@ -142,17 +163,35 @@ function normalizeProvidersState(value?: ProvidersState): ProvidersState {
   };
 }
 
-function normalizeToolsSettings(value: Partial<ToolsSettings> | undefined): ToolsSettings {
+function normalizeToolsSettings(
+  value: Partial<ToolsSettings> | undefined,
+): ToolsSettings {
   return {
     enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
     askUserEnabled:
       typeof value?.askUserEnabled === "boolean" ? value.askUserEnabled : true,
     checklistWriteEnabled:
-      typeof value?.checklistWriteEnabled === "boolean" ? value.checklistWriteEnabled : true,
+      typeof value?.checklistWriteEnabled === "boolean"
+        ? value.checklistWriteEnabled
+        : true,
+    loadSkillEnabled:
+      typeof value?.loadSkillEnabled === "boolean"
+        ? value.loadSkillEnabled
+        : true,
   };
 }
 
-export function normalizeAppSettings(value: Partial<AppSettings> | undefined): AppSettings {
+function normalizeSkillsSettings(
+  value: Partial<SkillsSettings> | undefined,
+): SkillsSettings {
+  return {
+    enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
+  };
+}
+
+export function normalizeAppSettings(
+  value: Partial<AppSettings> | undefined,
+): AppSettings {
   return {
     chatTitleGenerationMode:
       value?.chatTitleGenerationMode === "ai" ? "ai" : "local",
@@ -161,7 +200,8 @@ export function normalizeAppSettings(value: Partial<AppSettings> | undefined): A
 
 function getJsonStorageApi() {
   return typeof window !== "undefined"
-    ? (window as Window & { chatForgeStorage?: ChatForgeStorageApi }).chatForgeStorage
+    ? (window as Window & { chatForgeStorage?: ChatForgeStorageApi })
+        .chatForgeStorage
     : undefined;
 }
 
@@ -183,22 +223,26 @@ function openDatabase(): Promise<IDBDatabase> {
     };
 
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("Failed to open IndexedDB."));
+    request.onerror = () =>
+      reject(request.error ?? new Error("Failed to open IndexedDB."));
   });
 }
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed."));
+    request.onerror = () =>
+      reject(request.error ?? new Error("IndexedDB request failed."));
   });
 }
 
 function transactionDone(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed."));
-    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
+    transaction.onerror = () =>
+      reject(transaction.error ?? new Error("IndexedDB transaction failed."));
+    transaction.onabort = () =>
+      reject(transaction.error ?? new Error("IndexedDB transaction aborted."));
   });
 }
 
@@ -210,7 +254,9 @@ async function legacyGetSetting<T>(key: string, fallback: T): Promise<T> {
   try {
     const transaction = db.transaction(KV_STORE, "readonly");
     const store = transaction.objectStore(KV_STORE);
-    const record = await requestToPromise<KeyValueRecord<T> | undefined>(store.get(key));
+    const record = await requestToPromise<KeyValueRecord<T> | undefined>(
+      store.get(key),
+    );
     return record?.value ?? fallback;
   } finally {
     db.close();
@@ -224,7 +270,9 @@ async function legacySetSetting<T>(key: string, value: T): Promise<void> {
 
   try {
     const transaction = db.transaction(KV_STORE, "readwrite");
-    transaction.objectStore(KV_STORE).put({ key, value } satisfies KeyValueRecord<T>);
+    transaction
+      .objectStore(KV_STORE)
+      .put({ key, value } satisfies KeyValueRecord<T>);
     await transactionDone(transaction);
   } finally {
     db.close();
@@ -232,12 +280,20 @@ async function legacySetSetting<T>(key: string, value: T): Promise<void> {
 }
 
 async function legacyLoadProvider(): Promise<ProviderConfig> {
-  const provider = await legacyGetSetting<ProviderConfig | undefined>(PROVIDER_KEY, undefined);
-  return provider ? normalizeProvider(provider) : normalizeProvider(defaultProvider);
+  const provider = await legacyGetSetting<ProviderConfig | undefined>(
+    PROVIDER_KEY,
+    undefined,
+  );
+  return provider
+    ? normalizeProvider(provider)
+    : normalizeProvider(defaultProvider);
 }
 
 async function legacyLoadProvidersState(): Promise<ProvidersState> {
-  const providersState = await legacyGetSetting<ProvidersState | undefined>(PROVIDERS_STATE_KEY, undefined);
+  const providersState = await legacyGetSetting<ProvidersState | undefined>(
+    PROVIDERS_STATE_KEY,
+    undefined,
+  );
 
   if (providersState?.providers?.length) {
     return normalizeProvidersState(providersState);
@@ -317,9 +373,12 @@ function getHeadersCacheKey(headers?: Record<string, string>) {
     .join("\n");
 }
 
-function getProviderModelsCacheKey(provider: Pick<ProviderConfig, "baseUrl" | "headers" | "customHeaders">) {
+function getProviderModelsCacheKey(
+  provider: Pick<ProviderConfig, "baseUrl" | "headers" | "customHeaders">,
+) {
   const baseUrl = provider.baseUrl.trim().replace(/\/+$/, "");
-  const headers = provider.headers ?? parseCustomHeaders(provider.customHeaders);
+  const headers =
+    provider.headers ?? parseCustomHeaders(provider.customHeaders);
 
   return `${MODEL_CACHE_KEY_PREFIX}${baseUrl}|${getHeadersCacheKey(headers)}`;
 }
@@ -342,9 +401,18 @@ async function readIndexedDbSnapshot(): Promise<IndexedDbSnapshot> {
 
   return {
     providersState,
-    systemPrompt: await legacyGetSetting(SYSTEM_PROMPT_KEY, DEFAULT_SYSTEM_PROMPT),
-    activeChatId: await legacyGetSetting<string | undefined>(ACTIVE_CHAT_ID_KEY, undefined),
-    appSettings: await legacyGetSetting<AppSettings | undefined>(APP_SETTINGS_KEY, undefined),
+    systemPrompt: await legacyGetSetting(
+      SYSTEM_PROMPT_KEY,
+      DEFAULT_SYSTEM_PROMPT,
+    ),
+    activeChatId: await legacyGetSetting<string | undefined>(
+      ACTIVE_CHAT_ID_KEY,
+      undefined,
+    ),
+    appSettings: await legacyGetSetting<AppSettings | undefined>(
+      APP_SETTINGS_KEY,
+      undefined,
+    ),
     providerModelsCache: await collectLegacyModelCache(providersState),
     chats: await legacyLoadChats(),
   };
@@ -367,17 +435,28 @@ async function ensureJsonStorageReady() {
 
 export async function loadProvider(): Promise<ProviderConfig> {
   const providersState = await loadProvidersState();
-  return providersState.providers.find((provider) => provider.id === providersState.activeProviderId) ?? providersState.providers[0];
+  return (
+    providersState.providers.find(
+      (provider) => provider.id === providersState.activeProviderId,
+    ) ?? providersState.providers[0]
+  );
 }
 
 export async function saveProvider(provider: ProviderConfig): Promise<void> {
   const current = await loadProvidersState();
   const normalizedProvider = normalizeProvider(provider);
-  const providers = current.providers.some((item) => item.id === normalizedProvider.id)
-    ? current.providers.map((item) => (item.id === normalizedProvider.id ? normalizedProvider : item))
+  const providers = current.providers.some(
+    (item) => item.id === normalizedProvider.id,
+  )
+    ? current.providers.map((item) =>
+        item.id === normalizedProvider.id ? normalizedProvider : item,
+      )
     : [...current.providers, normalizedProvider];
 
-  await saveProvidersState({ providers, activeProviderId: normalizedProvider.id });
+  await saveProvidersState({
+    providers,
+    activeProviderId: normalizedProvider.id,
+  });
 }
 
 export async function loadProvidersState(): Promise<ProvidersState> {
@@ -451,7 +530,12 @@ export async function loadToolsSettings(): Promise<ToolsSettings> {
     return normalizeToolsSettings(await api.loadToolsSettings());
   }
 
-  return normalizeToolsSettings(await legacyGetSetting<ToolsSettings | undefined>(TOOLS_SETTINGS_KEY, undefined));
+  return normalizeToolsSettings(
+    await legacyGetSetting<ToolsSettings | undefined>(
+      TOOLS_SETTINGS_KEY,
+      undefined,
+    ),
+  );
 }
 
 export async function saveToolsSettings(value: ToolsSettings): Promise<void> {
@@ -466,6 +550,33 @@ export async function saveToolsSettings(value: ToolsSettings): Promise<void> {
   await legacySetSetting(TOOLS_SETTINGS_KEY, normalized);
 }
 
+export async function loadSkillsSettings(): Promise<SkillsSettings> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return normalizeSkillsSettings(await api.loadSkillsSettings());
+  }
+
+  return normalizeSkillsSettings(
+    await legacyGetSetting<SkillsSettings | undefined>(
+      SKILLS_SETTINGS_KEY,
+      undefined,
+    ),
+  );
+}
+
+export async function saveSkillsSettings(value: SkillsSettings): Promise<void> {
+  const normalized = normalizeSkillsSettings(value);
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.saveSkillsSettings(normalized);
+    return;
+  }
+
+  await legacySetSetting(SKILLS_SETTINGS_KEY, normalized);
+}
+
 export async function loadAppSettings(): Promise<AppSettings> {
   const api = await ensureJsonStorageReady();
 
@@ -473,7 +584,12 @@ export async function loadAppSettings(): Promise<AppSettings> {
     return normalizeAppSettings(await api.loadAppSettings());
   }
 
-  return normalizeAppSettings(await legacyGetSetting<AppSettings | undefined>(APP_SETTINGS_KEY, undefined));
+  return normalizeAppSettings(
+    await legacyGetSetting<AppSettings | undefined>(
+      APP_SETTINGS_KEY,
+      undefined,
+    ),
+  );
 }
 
 export async function saveAppSettings(value: AppSettings): Promise<void> {
@@ -487,7 +603,6 @@ export async function saveAppSettings(value: AppSettings): Promise<void> {
 
   await legacySetSetting(APP_SETTINGS_KEY, normalized);
 }
-
 
 export async function loadTools(): Promise<LoadedToolInfo[]> {
   const api = await ensureJsonStorageReady();
@@ -530,7 +645,9 @@ export async function importTools(): Promise<ToolImportResult> {
   throw new Error("Tool import requires the Electron app.");
 }
 
-export async function exportTool(tool: LoadedToolInfo): Promise<ToolExportResult> {
+export async function exportTool(
+  tool: LoadedToolInfo,
+): Promise<ToolExportResult> {
   const api = await ensureJsonStorageReady();
 
   if (api) {
@@ -540,7 +657,9 @@ export async function exportTool(tool: LoadedToolInfo): Promise<ToolExportResult
   throw new Error("Tool export requires the Electron app.");
 }
 
-export async function exportTools(tools: LoadedToolInfo[]): Promise<ToolExportResult> {
+export async function exportTools(
+  tools: LoadedToolInfo[],
+): Promise<ToolExportResult> {
   const api = await ensureJsonStorageReady();
 
   if (api) {
@@ -559,6 +678,84 @@ export async function openToolsFolder(): Promise<void> {
   }
 
   throw new Error("Opening the tools folder requires the Electron app.");
+}
+
+export async function loadSkills(): Promise<LoadedSkillInfo[]> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.loadSkills();
+  }
+
+  return [];
+}
+
+export async function saveSkill(
+  skill: LoadedSkillInfo,
+): Promise<LoadedSkillInfo> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.saveSkill(skill);
+  }
+
+  throw new Error("Skill storage requires the Electron app.");
+}
+
+export async function deleteSkill(skillId: string): Promise<void> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.deleteSkill(skillId);
+    return;
+  }
+
+  throw new Error("Skill storage requires the Electron app.");
+}
+
+export async function importSkills(): Promise<SkillImportResult> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.importSkills();
+  }
+
+  throw new Error("Skill import requires the Electron app.");
+}
+
+export async function exportSkill(
+  skill: LoadedSkillInfo,
+): Promise<SkillExportResult> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.exportSkill(skill);
+  }
+
+  throw new Error("Skill export requires the Electron app.");
+}
+
+export async function exportSkills(
+  skills: LoadedSkillInfo[],
+): Promise<SkillExportResult> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.exportSkills(skills);
+  }
+
+  throw new Error("Skill export requires the Electron app.");
+}
+
+export async function openSkillsFolder(): Promise<void> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.openSkillsFolder();
+    return;
+  }
+
+  throw new Error("Opening the skills folder requires the Electron app.");
 }
 
 export async function loadCachedProviderModels(

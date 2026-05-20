@@ -1,3 +1,5 @@
+import { BookOpen, Lock, Send, Square, Wrench } from "lucide-react";
+import type { FormEvent, ReactNode } from "react";
 import {
   forwardRef,
   memo,
@@ -9,13 +11,14 @@ import {
   useRef,
   useState,
 } from "react";
-import type { FormEvent, ReactNode } from "react";
-import { Lock, Send, Square, Wrench } from "lucide-react";
 
+import {
+  ContextUsageIndicator,
+  type ContextUsageInfo,
+} from "@/components/ai-chat/context-usage-indicator";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { ContextUsageIndicator, type ContextUsageInfo } from "@/components/ai-chat/context-usage-indicator";
 
 export type ToolMentionOption = {
   name: string;
@@ -23,32 +26,144 @@ export type ToolMentionOption = {
   isBuiltin?: boolean;
 };
 
-type ActiveToolMention = {
+type ActiveMention = {
+  type: "tool" | "skill";
   startIndex: number;
   endIndex: number;
   query: string;
 };
+
+type CaretMenuPosition = {
+  left: number;
+  top: number;
+  placement: "top" | "bottom";
+  maxHeight: number;
+};
+
+const CARET_MIRROR_PROPERTIES = [
+  "box-sizing",
+  "width",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "letter-spacing",
+  "text-transform",
+  "word-spacing",
+  "line-height",
+  "text-indent",
+  "padding-top",
+  "padding-right",
+  "padding-bottom",
+  "padding-left",
+  "border-top-width",
+  "border-right-width",
+  "border-bottom-width",
+  "border-left-width",
+  "white-space",
+  "overflow-wrap",
+  "word-break",
+  "tab-size",
+] as const;
+
+function getTextareaCaretMenuPosition(
+  textarea: HTMLTextAreaElement,
+  cursorIndex: number,
+): CaretMenuPosition {
+  const computedStyle = window.getComputedStyle(textarea);
+  const mirror = document.createElement("div");
+  const marker = document.createElement("span");
+
+  mirror.style.position = "fixed";
+  mirror.style.left = "-9999px";
+  mirror.style.top = "0";
+  mirror.style.visibility = "hidden";
+  mirror.style.pointerEvents = "none";
+  mirror.style.overflow = "hidden";
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.overflowWrap = "break-word";
+
+  for (const property of CARET_MIRROR_PROPERTIES) {
+    mirror.style.setProperty(
+      property,
+      computedStyle.getPropertyValue(property),
+    );
+  }
+
+  mirror.textContent = textarea.value.slice(0, cursorIndex);
+  marker.textContent =
+    textarea.value.slice(cursorIndex, cursorIndex + 1) || "\u200b";
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+
+  const textareaRect = textarea.getBoundingClientRect();
+  const mirrorRect = mirror.getBoundingClientRect();
+  const markerRect = marker.getBoundingClientRect();
+  const lineHeight = Number.parseFloat(computedStyle.lineHeight) || 24;
+
+  const left =
+    markerRect.left - mirrorRect.left - textarea.scrollLeft + textareaRect.left;
+  const lineTop =
+    markerRect.top - mirrorRect.top - textarea.scrollTop + textareaRect.top;
+  const lineBottom = lineTop + lineHeight;
+
+  document.body.removeChild(mirror);
+
+  const viewportGap = 12;
+  const menuGap = 6;
+  const preferredMaxHeight = 256;
+  const minUsableHeight = 180;
+  const availableBelow = Math.max(
+    0,
+    window.innerHeight - lineBottom - viewportGap,
+  );
+  const availableAbove = Math.max(0, lineTop - viewportGap);
+  const placement =
+    availableBelow < minUsableHeight && availableAbove > availableBelow
+      ? "top"
+      : "bottom";
+  const availableSpace = placement === "top" ? availableAbove : availableBelow;
+  const maxHeight = Math.max(48, Math.min(preferredMaxHeight, availableSpace));
+  const top = placement === "top" ? lineTop - menuGap : lineBottom;
+
+  const containerRect = textarea.offsetParent?.getBoundingClientRect();
+  if (!containerRect) {
+    return { left, top, placement, maxHeight };
+  }
+
+  return {
+    left: Math.max(
+      8,
+      Math.min(left - containerRect.left, textarea.clientWidth - 16),
+    ),
+    top: top - containerRect.top,
+    placement,
+    maxHeight,
+  };
+}
 
 export type ChatComposerHandle = {
   clear: () => void;
   focus: () => void;
 };
 
-function findActiveToolMention(
+function findActiveMention(
   content: string,
   cursorIndex: number,
-): ActiveToolMention | null {
+): ActiveMention | null {
   const prefix = content.slice(0, cursorIndex);
-  const match = /(^|\s)@tool:([A-Za-z0-9_-]*)$/.exec(prefix);
+  const match = /(^|\s)@(tool|skill):?([A-Za-z0-9_-]*)$/.exec(prefix);
 
   if (!match) return null;
 
   const fullMatch = match[0] ?? "";
   const leadingWhitespace = match[1] ?? "";
-  const query = match[2] ?? "";
+  const type = match[2] === "skill" ? "skill" : "tool";
+  const query = match[3] ?? "";
   const startIndex = cursorIndex - fullMatch.length + leadingWhitespace.length;
 
   return {
+    type,
     startIndex,
     endIndex: cursorIndex,
     query,
@@ -69,6 +184,7 @@ export const ChatComposer = memo(
       footerStart?: ReactNode;
       contextUsage?: ContextUsageInfo;
       toolMentionOptions?: ToolMentionOption[];
+      skillMentionOptions?: ToolMentionOption[];
     }
   >(function ChatComposer(
     {
@@ -82,67 +198,91 @@ export const ChatComposer = memo(
       footerStart,
       contextUsage,
       toolMentionOptions = [],
+      skillMentionOptions = [],
     },
     ref,
   ) {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-    const toolMentionMenuRef = useRef<HTMLDivElement | null>(null);
+    const mentionMenuRef = useRef<HTMLDivElement | null>(null);
     const [localDraft, setLocalDraft] = useState(draft);
-    const [activeToolMention, setActiveToolMention] =
-      useState<ActiveToolMention | null>(null);
-    const [selectedToolSuggestionIndex, setSelectedToolSuggestionIndex] =
+    const [activeMention, setActiveMention] = useState<ActiveMention | null>(
+      null,
+    );
+    const [mentionMenuPosition, setMentionMenuPosition] =
+      useState<CaretMenuPosition | null>(null);
+    const [selectedMentionSuggestionIndex, setSelectedMentionSuggestionIndex] =
       useState(0);
     const trimmedDraft = localDraft.trim();
     const canSend = !disabled && !isSending && trimmedDraft.length > 0;
 
-    const toolMentionSuggestions = useMemo(() => {
-      if (!activeToolMention || disabled || isSending) return [];
+    const mentionSuggestions = useMemo<ToolMentionOption[]>(() => {
+      if (!activeMention || disabled || isSending) return [];
 
-      const query = activeToolMention.query.trim().toLowerCase();
+      const options: ToolMentionOption[] =
+        activeMention.type === "skill"
+          ? skillMentionOptions
+          : toolMentionOptions;
+      const query = activeMention.query.trim().toLowerCase();
       const filteredOptions = query
-        ? toolMentionOptions.filter((tool) =>
-            `${tool.name} ${tool.description ?? ""}`
+        ? options.filter((option) =>
+            `${option.name} ${option.description ?? ""}`
               .toLowerCase()
               .includes(query),
           )
-        : toolMentionOptions;
+        : options;
 
-      return filteredOptions.slice(0, 8);
-    }, [activeToolMention, disabled, isSending, toolMentionOptions]);
+      return filteredOptions.slice(0, 12);
+    }, [
+      activeMention,
+      disabled,
+      isSending,
+      skillMentionOptions,
+      toolMentionOptions,
+    ]);
 
-    const isToolMentionMenuOpen =
-      Boolean(activeToolMention) && toolMentionSuggestions.length > 0;
+    const isMentionMenuOpen =
+      Boolean(activeMention) && mentionSuggestions.length > 0;
 
-    const updateActiveToolMention = useCallback(
+    const updateActiveMention = useCallback(
       (value: string, cursorIndex: number | null) => {
-        setActiveToolMention(
-          findActiveToolMention(value, cursorIndex ?? value.length),
+        const resolvedCursorIndex = cursorIndex ?? value.length;
+        const mention = findActiveMention(value, resolvedCursorIndex);
+        setActiveMention(mention);
+
+        const textarea = textareaRef.current;
+        if (!mention || !textarea) {
+          setMentionMenuPosition(null);
+          return;
+        }
+
+        setMentionMenuPosition(
+          getTextareaCaretMenuPosition(textarea, resolvedCursorIndex),
         );
       },
       [],
     );
 
-    const applyToolMentionSuggestion = useCallback(
-      (toolName: string) => {
-        if (!activeToolMention) return;
+    const applyMentionSuggestion = useCallback(
+      (name: string) => {
+        if (!activeMention) return;
 
-        const suffix = localDraft.slice(activeToolMention.endIndex);
+        const suffix = localDraft.slice(activeMention.endIndex);
         const shouldAddTrailingSpace =
           suffix.length === 0 || !/^\s/.test(suffix);
-        const replacement = `@tool:${toolName}${
+        const replacement = `@${activeMention.type}:${name}${
           shouldAddTrailingSpace ? " " : ""
         }`;
         const nextDraft = `${localDraft.slice(
           0,
-          activeToolMention.startIndex,
+          activeMention.startIndex,
         )}${replacement}${suffix}`;
-        const nextCursorIndex =
-          activeToolMention.startIndex + replacement.length;
+        const nextCursorIndex = activeMention.startIndex + replacement.length;
 
         setLocalDraft(nextDraft);
         onDraftChange(nextDraft);
-        setActiveToolMention(null);
-        setSelectedToolSuggestionIndex(0);
+        setActiveMention(null);
+        setMentionMenuPosition(null);
+        setSelectedMentionSuggestionIndex(0);
 
         window.requestAnimationFrame(() => {
           const textarea = textareaRef.current;
@@ -152,7 +292,7 @@ export const ChatComposer = memo(
           textarea.setSelectionRange(nextCursorIndex, nextCursorIndex);
         });
       },
-      [activeToolMention, localDraft, onDraftChange],
+      [activeMention, localDraft, onDraftChange],
     );
 
     const focusTextarea = useCallback(() => {
@@ -175,8 +315,9 @@ export const ChatComposer = memo(
         clear: () => {
           setLocalDraft("");
           onDraftChange("");
-          setActiveToolMention(null);
-          setSelectedToolSuggestionIndex(0);
+          setActiveMention(null);
+          setMentionMenuPosition(null);
+          setSelectedMentionSuggestionIndex(0);
         },
         focus: focusTextarea,
       }),
@@ -185,26 +326,27 @@ export const ChatComposer = memo(
 
     useEffect(() => {
       setLocalDraft(draft);
-      setActiveToolMention(null);
-      setSelectedToolSuggestionIndex(0);
+      setActiveMention(null);
+      setMentionMenuPosition(null);
+      setSelectedMentionSuggestionIndex(0);
     }, [draftKey, draft]);
 
     useEffect(() => {
-      setSelectedToolSuggestionIndex(0);
-    }, [activeToolMention?.query, toolMentionSuggestions.length]);
+      setSelectedMentionSuggestionIndex(0);
+    }, [activeMention?.query, mentionSuggestions.length]);
 
     useLayoutEffect(() => {
-      if (!isToolMentionMenuOpen) return;
+      if (!isMentionMenuOpen) return;
 
-      const selectedElement = toolMentionMenuRef.current?.querySelector(
-        `[data-tool-suggestion-index="${selectedToolSuggestionIndex}"]`,
+      const selectedElement = mentionMenuRef.current?.querySelector(
+        `[data-mention-suggestion-index="${selectedMentionSuggestionIndex}"]`,
       );
       selectedElement?.scrollIntoView({ block: "nearest" });
     }, [
-      activeToolMention?.query,
-      isToolMentionMenuOpen,
-      selectedToolSuggestionIndex,
-      toolMentionSuggestions.length,
+      activeMention?.query,
+      isMentionMenuOpen,
+      selectedMentionSuggestionIndex,
+      mentionSuggestions.length,
     ]);
 
     useEffect(() => {
@@ -232,8 +374,9 @@ export const ChatComposer = memo(
       if (wasSent) {
         setLocalDraft("");
         onDraftChange("");
-        setActiveToolMention(null);
-        setSelectedToolSuggestionIndex(0);
+        setActiveMention(null);
+        setMentionMenuPosition(null);
+        setSelectedMentionSuggestionIndex(0);
       }
     }
 
@@ -246,42 +389,54 @@ export const ChatComposer = memo(
         <div className="mx-auto w-full max-w-3xl border rounded-lg bg-card p-3 pt-0 shadow-sm">
           <div className="mx-auto grid w-full gap-2">
             <div className="relative">
-              {isToolMentionMenuOpen && (
+              {isMentionMenuOpen && mentionMenuPosition && (
                 <div
-                  ref={toolMentionMenuRef}
-                  className="absolute bottom-full left-1/2 z-20 mb-2 max-h-64 w-[min(48rem,calc(100vw-2rem))] -translate-x-1/2 overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
+                  ref={mentionMenuRef}
+                  className="absolute z-20 w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
+                  style={{
+                    left: mentionMenuPosition.left,
+                    top: mentionMenuPosition.top,
+                    maxHeight: mentionMenuPosition.maxHeight,
+                    transform:
+                      mentionMenuPosition.placement === "top"
+                        ? "translateY(calc(-100% - 0.35rem))"
+                        : "translateY(0.35rem)",
+                  }}
                 >
-                  {toolMentionSuggestions.map((tool, index) => {
-                    const isSelected = index === selectedToolSuggestionIndex;
+                  {mentionSuggestions.map((option, index) => {
+                    const isSelected = index === selectedMentionSuggestionIndex;
+                    const Icon =
+                      activeMention?.type === "skill" ? BookOpen : Wrench;
 
                     return (
                       <button
-                        key={tool.name}
+                        key={option.name}
                         type="button"
-                        data-tool-suggestion-index={index}
+                        data-mention-suggestion-index={index}
                         onMouseDown={(event) => {
                           event.preventDefault();
-                          applyToolMentionSuggestion(tool.name);
+                          applyMentionSuggestion(option.name);
                         }}
                         className={cn(
                           "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm",
                           isSelected && "bg-accent text-accent-foreground",
                         )}
-                        title={tool.description}
+                        title={option.description}
                       >
-                        <Wrench className="mt-0.5 size-3.5 shrink-0 opacity-70" />
+                        <Icon className="mt-0.5 size-3.5 shrink-0 opacity-70" />
                         <span className="min-w-0 flex-1">
                           <span className="flex min-w-0 items-center gap-1.5 font-medium">
                             <span className="min-w-0 truncate">
-                              {tool.name}
+                              {option.name}
                             </span>
-                            {tool.isBuiltin && (
-                              <Lock className="size-3 shrink-0 text-muted-foreground" />
-                            )}
+                            {activeMention?.type === "tool" &&
+                              option.isBuiltin && (
+                                <Lock className="size-3 shrink-0 text-muted-foreground" />
+                              )}
                           </span>
-                          {tool.description && (
-                            <span className="mt-0.5 line-clamp-1 text-muted-foreground">
-                              {tool.description}
+                          {option.description && (
+                            <span className="mt-0.5 line-clamp-2 text-muted-foreground">
+                              {option.description}
                             </span>
                           )}
                         </span>
@@ -298,19 +453,16 @@ export const ChatComposer = memo(
                   const nextDraft = event.target.value;
                   setLocalDraft(nextDraft);
                   onDraftChange(nextDraft);
-                  updateActiveToolMention(
-                    nextDraft,
-                    event.target.selectionStart,
-                  );
+                  updateActiveMention(nextDraft, event.target.selectionStart);
                 }}
                 onClick={(event) => {
-                  updateActiveToolMention(
+                  updateActiveMention(
                     event.currentTarget.value,
                     event.currentTarget.selectionStart,
                   );
                 }}
                 onSelect={(event) => {
-                  updateActiveToolMention(
+                  updateActiveMention(
                     event.currentTarget.value,
                     event.currentTarget.selectionStart,
                   );
@@ -331,44 +483,45 @@ export const ChatComposer = memo(
                     return;
                   }
 
-                  updateActiveToolMention(
+                  updateActiveMention(
                     event.currentTarget.value,
                     event.currentTarget.selectionStart,
                   );
                 }}
                 onKeyDown={(event) => {
-                  if (isToolMentionMenuOpen) {
+                  if (isMentionMenuOpen) {
                     if (event.key === "ArrowDown") {
                       event.preventDefault();
-                      setSelectedToolSuggestionIndex((index) =>
-                        Math.min(index + 1, toolMentionSuggestions.length - 1),
+                      setSelectedMentionSuggestionIndex((index) =>
+                        Math.min(index + 1, mentionSuggestions.length - 1),
                       );
                       return;
                     }
 
                     if (event.key === "ArrowUp") {
                       event.preventDefault();
-                      setSelectedToolSuggestionIndex((index) =>
+                      setSelectedMentionSuggestionIndex((index) =>
                         Math.max(index - 1, 0),
                       );
                       return;
                     }
 
                     if (event.key === "Enter" || event.key === "Tab") {
-                      const selectedTool =
-                        toolMentionSuggestions[selectedToolSuggestionIndex];
+                      const selectedMention =
+                        mentionSuggestions[selectedMentionSuggestionIndex];
 
-                      if (selectedTool) {
+                      if (selectedMention) {
                         event.preventDefault();
-                        applyToolMentionSuggestion(selectedTool.name);
+                        applyMentionSuggestion(selectedMention.name);
                         return;
                       }
                     }
 
                     if (event.key === "Escape") {
                       event.preventDefault();
-                      setActiveToolMention(null);
-                      setSelectedToolSuggestionIndex(0);
+                      setActiveMention(null);
+                      setMentionMenuPosition(null);
+                      setSelectedMentionSuggestionIndex(0);
                       return;
                     }
                   }

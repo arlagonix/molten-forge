@@ -4,7 +4,13 @@ import type {
   SetStateAction,
   WheelEvent as ReactWheelEvent,
 } from "react";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
 const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
@@ -314,13 +320,17 @@ export function useChatAutoscroll({
   );
 
   const handleAskUserLayoutChange = useCallback(() => {
-    if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+    if (
+      isActiveChatGenerating() &&
+      autoScrollEnabledRef.current &&
+      !isStickyScrollSuppressed()
+    ) {
       scheduleStickyScrollToBottom({ settleFrames: 2 });
       return;
     }
 
     syncChatScrollState();
-  }, []);
+  }, [activeChatId, generatingChatIds]);
 
   useLayoutEffect(() => {
     syncChatScrollableState();
@@ -345,11 +355,13 @@ export function useChatAutoscroll({
     if (!scrollElement) return;
 
     function handleResize() {
-      if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+      if (
+        isActiveChatGenerating() &&
+        autoScrollEnabledRef.current &&
+        !isStickyScrollSuppressed()
+      ) {
         scheduleStickyScrollToBottom({
-          settleFrames: isActiveChatGenerating()
-            ? STICKY_SCROLL_SETTLE_FRAMES
-            : 1,
+          settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
         });
         return;
       }

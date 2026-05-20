@@ -3,6 +3,7 @@ import { useRef } from "react";
 import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL_NAME,
+  LOAD_SKILL_TOOL_NAME,
   createAskUserToolResult,
   createChecklistWriteToolResult,
   parseAskUserRequestFromToolCall,
@@ -14,6 +15,7 @@ import type {
   AskUserResponse,
   ChatToolCall,
   ChatToolResult,
+  LoadedSkillInfo,
   LoadedToolInfo,
   ToolCommandResult,
   ToolExecutionStatus,
@@ -33,6 +35,10 @@ type PendingAskUserRequest = {
 export function useToolExecution({
   activeChatId,
   loadedTools,
+  availableSkillsByName,
+  modelSelectableSkillNames,
+  activeSkillNames,
+  onSkillActivated,
   executeExternalTool,
   abortChatGeneration,
   completeAssistantUserInputStep,
@@ -45,6 +51,10 @@ export function useToolExecution({
 }: {
   activeChatId?: string;
   loadedTools: LoadedToolInfo[];
+  availableSkillsByName: Map<string, LoadedSkillInfo>;
+  modelSelectableSkillNames: string[];
+  activeSkillNames: string[];
+  onSkillActivated: (skillName: string, chatId: string) => void;
   executeExternalTool: (
     toolName: string,
     args: unknown,
@@ -80,7 +90,9 @@ export function useToolExecution({
   labelError: (error: unknown) => string;
   askUserSettleFrames: number;
 }) {
-  const pendingAskUserRequestsRef = useRef<Record<string, PendingAskUserRequest>>({});
+  const pendingAskUserRequestsRef = useRef<
+    Record<string, PendingAskUserRequest>
+  >({});
 
   async function executeAskUserToolCall(
     toolCall: ChatToolCall,
@@ -124,7 +136,9 @@ export function useToolExecution({
           options.stepId,
           "cancelled",
         );
-        settleReject(new DOMException("Generation was cancelled.", "AbortError"));
+        settleReject(
+          new DOMException("Generation was cancelled.", "AbortError"),
+        );
       };
 
       pendingAskUserRequestsRef.current[toolCall.id] = {
@@ -161,6 +175,68 @@ export function useToolExecution({
     return createChecklistWriteToolResult(toolCall, request);
   }
 
+  async function executeLoadSkillToolCall(
+    toolCall: ChatToolCall,
+    chatId: string,
+    activeSkillNamesForRun: string[],
+  ): Promise<ChatToolResult> {
+    const argsText = toolCall.function.arguments.trim() || "{}";
+    const args = JSON.parse(argsText);
+
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      throw new Error("load_skill arguments must be a JSON object.");
+    }
+
+    const rawSkillName = (args as Record<string, unknown>).skillName;
+    const skillName =
+      typeof rawSkillName === "string" ? rawSkillName.trim() : "";
+    if (!skillName) throw new Error("load_skill requires skillName.");
+
+    const skill = availableSkillsByName.get(skillName);
+    if (!skill) throw new Error(`Skill not found: ${skillName}`);
+
+    if (
+      !modelSelectableSkillNames.includes(skillName) &&
+      !activeSkillNamesForRun.includes(skillName)
+    ) {
+      throw new Error(
+        `Skill is not available for model loading in this chat: ${skillName}`,
+      );
+    }
+
+    const resultPayload = {
+      ok: true,
+      status: activeSkillNamesForRun.includes(skillName)
+        ? "already_active"
+        : "loaded",
+      skillName,
+      instructions: skill.instructions,
+      recommendedToolNames: skill.recommendedToolNames ?? [],
+    };
+
+    if (activeSkillNamesForRun.includes(skillName)) {
+      return {
+        toolCallId: toolCall.id,
+        toolName: LOAD_SKILL_TOOL_NAME,
+        content: JSON.stringify(resultPayload, null, 2),
+        loadedSkillName: skillName,
+        loadedSkillInstructions: skill.instructions,
+        loadedSkillRecommendedToolNames: skill.recommendedToolNames ?? [],
+      };
+    }
+
+    onSkillActivated(skillName, chatId);
+
+    return {
+      toolCallId: toolCall.id,
+      toolName: LOAD_SKILL_TOOL_NAME,
+      content: JSON.stringify(resultPayload, null, 2),
+      loadedSkillName: skillName,
+      loadedSkillInstructions: skill.instructions,
+      loadedSkillRecommendedToolNames: skill.recommendedToolNames ?? [],
+    };
+  }
+
   async function executeToolCall(
     toolCall: ChatToolCall,
     options: {
@@ -169,6 +245,7 @@ export function useToolExecution({
       variantId: string;
       stepId: string;
       signal?: AbortSignal;
+      activeSkillNames?: string[];
     },
   ): Promise<ChatToolResult> {
     const toolName = toolCall.function.name;
@@ -181,6 +258,14 @@ export function useToolExecution({
 
       if (toolName === CHECKLIST_WRITE_TOOL_NAME) {
         return await executeChecklistWriteToolCall(toolCall);
+      }
+
+      if (toolName === LOAD_SKILL_TOOL_NAME) {
+        return await executeLoadSkillToolCall(
+          toolCall,
+          options.chatId,
+          options.activeSkillNames ?? activeSkillNames,
+        );
       }
 
       const argsText = toolCall.function.arguments.trim() || "{}";
@@ -243,7 +328,10 @@ export function useToolExecution({
     pendingRequest.resolve(toolResult);
 
     if (pendingRequest.chatId === activeChatId) {
-      scheduleStickyScrollToBottom({ force: true, settleFrames: askUserSettleFrames });
+      scheduleStickyScrollToBottom({
+        force: true,
+        settleFrames: askUserSettleFrames,
+      });
     }
   }
 
@@ -263,7 +351,9 @@ export function useToolExecution({
     );
 
     abortChatGeneration(pendingRequest.chatId);
-    pendingRequest.reject(new DOMException("Generation was cancelled.", "AbortError"));
+    pendingRequest.reject(
+      new DOMException("Generation was cancelled.", "AbortError"),
+    );
   }
 
   function canSubmitAskUserResponse(toolCallId: string) {

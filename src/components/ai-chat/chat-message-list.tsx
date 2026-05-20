@@ -13,6 +13,7 @@ import {
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { memo } from "react";
 
+import { type ToolMentionOption } from "@/components/ai-chat/chat-composer";
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { SmoothAssistantMessageContent } from "@/components/ai-chat/smooth-assistant-message";
 import {
@@ -45,7 +46,7 @@ import type {
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
-const TOOL_MENTION_PATTERN = /(^|\s)@tool:([A-Za-z0-9_-]+)(?=$|\s)/g;
+const USER_MENTION_PATTERN = /(^|\s)@(tool|skill):([A-Za-z0-9_-]+)(?=$|\s)/g;
 
 type VisibleAssistantProcessStep = ChatAssistantProcessStep & {
   sourceStepIds: string[];
@@ -77,6 +78,9 @@ type ChatMessageListProps = {
   visualStreamingMessageIds: string[];
   collapsedToolStepIds: Record<string, boolean>;
   toolDisplayKey: string;
+  skillDisplayKey: string;
+  toolMentionOptions: ToolMentionOption[];
+  skillMentionOptions: ToolMentionOption[];
   registerMessageElement: (
     messageId: string,
   ) => (element: HTMLDivElement | null) => void;
@@ -93,6 +97,7 @@ type ChatMessageListProps = {
     content: string,
   ) => void | Promise<void>;
   onRegenerateAssistantMessage: (messageId: string) => void | Promise<void>;
+  onContinueAssistantMessage: (messageId: string) => void | Promise<void>;
   onStartEditingUserMessage: (messageId: string) => void;
   onDeleteMessage: (messageId: string) => void;
   onCancelEditingUserMessage: () => void;
@@ -217,14 +222,15 @@ const UserMessageContent = memo(function UserMessageContent({
   content: string;
 }) {
   const parts: ReactNode[] = [];
-  const pattern = new RegExp(TOOL_MENTION_PATTERN);
+  const pattern = new RegExp(USER_MENTION_PATTERN);
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(content)) !== null) {
     const prefix = match[1] ?? "";
-    const toolName = match[2] ?? "";
-    const token = `@tool:${toolName}`;
+    const mentionType = match[2] === "skill" ? "skill" : "tool";
+    const mentionName = match[3] ?? "";
+    const token = `@${mentionType}:${mentionName}`;
     const tokenStartIndex = match.index + prefix.length;
 
     if (tokenStartIndex > lastIndex) {
@@ -235,7 +241,7 @@ const UserMessageContent = memo(function UserMessageContent({
       <span
         key={`${tokenStartIndex}-${token}`}
         className="inline-flex items-center rounded-md border border-primary-foreground/25 bg-primary-foreground/15 px-1.5 py-0.5 font-mono text-[0.875em] font-medium leading-5 text-primary-foreground"
-        title={`One-shot tool for this request: ${toolName}`}
+        title={`One-shot ${mentionType} for this request: ${mentionName}`}
       >
         {token}
       </span>,
@@ -346,6 +352,8 @@ const ChatMessageItem = memo(
     visualFlushRequests,
     visualStreamingMessageIds,
     collapsedToolStepIds,
+    toolMentionOptions,
+    skillMentionOptions,
     registerMessageElement,
     renderToolExecutionBlock,
     canSubmitAskUserResponse,
@@ -354,6 +362,7 @@ const ChatMessageItem = memo(
     onCopyLinkHref,
     onCopyMessageContent,
     onRegenerateAssistantMessage,
+    onContinueAssistantMessage,
     onStartEditingUserMessage,
     onDeleteMessage,
     onCancelEditingUserMessage,
@@ -610,6 +619,8 @@ const ChatMessageItem = memo(
           <UserMessageEditor
             initialContent={message.content}
             disabled={isSending}
+            toolMentionOptions={toolMentionOptions}
+            skillMentionOptions={skillMentionOptions}
             onCancel={onCancelEditingUserMessage}
             onSave={(nextContent) =>
               onSaveEditedUserMessage(message.id, nextContent)
@@ -711,20 +722,34 @@ const ChatMessageItem = memo(
                         : "Copy message"}
                   </button>
                   {message.role === "assistant" && (
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-                      disabled={isSending}
-                      onClick={() => {
-                        void onRegenerateAssistantMessage(message.id);
-                        onCloseMessageContextMenu();
-                      }}
-                    >
-                      <RefreshCcw className="size-4" />
-                      {status === "error"
-                        ? "Retry answer"
-                        : "Regenerate answer"}
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                        disabled={isSending}
+                        onClick={() => {
+                          void onRegenerateAssistantMessage(message.id);
+                          onCloseMessageContextMenu();
+                        }}
+                      >
+                        <RefreshCcw className="size-4" />
+                        {status === "error"
+                          ? "Retry answer"
+                          : "Regenerate answer"}
+                      </button>
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                        disabled={isSending || isMessageStreaming}
+                        onClick={() => {
+                          void onContinueAssistantMessage(message.id);
+                          onCloseMessageContextMenu();
+                        }}
+                      >
+                        <ChevronRight className="size-4" />
+                        Continue generating
+                      </button>
+                    </>
                   )}
                   {message.role === "user" && (
                     <button
@@ -932,6 +957,17 @@ const ChatMessageItem = memo(
                   type="button"
                   variant="ghost"
                   size="icon-sm"
+                  label="Continue generating"
+                  onClick={() => onContinueAssistantMessage(message.id)}
+                  disabled={isSending || isMessageStreaming}
+                >
+                  <ChevronRight className="size-3.5" />
+                </TooltipIconButton>
+
+                <TooltipIconButton
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   label={
                     copiedMessageId === message.id ? "Copied" : "Copy answer"
                   }
@@ -956,6 +992,7 @@ const ChatMessageItem = memo(
     if (previous.activeChatId !== next.activeChatId) return false;
     if (previous.isSending !== next.isSending) return false;
     if (previous.toolDisplayKey !== next.toolDisplayKey) return false;
+    if (previous.skillDisplayKey !== next.skillDisplayKey) return false;
 
     const messageId = previous.message.id;
     if (

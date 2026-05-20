@@ -9,13 +9,18 @@ import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL,
   CHECKLIST_WRITE_TOOL_NAME,
+  LOAD_SKILL_TOOL_NAME,
+  createLoadSkillTool,
   isValidToolName,
+  parseSkillMentionNames,
   parseToolMentionNames,
 } from "@/lib/ai-chat/builtin-tools";
 import type {
   ChatSession,
+  LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
+  SkillsSettings,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
 
@@ -40,7 +45,8 @@ export function validateProviderForGeneration(providerForRun: ProviderConfig) {
     return {
       ok: false as const,
       message: "Provider is disabled.",
-      description: "Enable the provider in provider settings or select another model.",
+      description:
+        "Enable the provider in provider settings or select another model.",
       shouldOpenSettings: true,
     };
   }
@@ -65,7 +71,8 @@ export function validateProviderForGeneration(providerForRun: ProviderConfig) {
     return {
       ok: false as const,
       message: "Model is disabled.",
-      description: "Enable the model in provider settings or select another model.",
+      description:
+        "Enable the model in provider settings or select another model.",
       shouldOpenSettings: true,
     };
   }
@@ -85,7 +92,8 @@ export function getGlobalEnabledTools({
         (tool) =>
           tool.enabled &&
           tool.name !== ASK_USER_TOOL_NAME &&
-          tool.name !== CHECKLIST_WRITE_TOOL_NAME,
+          tool.name !== CHECKLIST_WRITE_TOOL_NAME &&
+          tool.name !== LOAD_SKILL_TOOL_NAME,
       )
     : [];
 
@@ -162,4 +170,125 @@ export function filterEnabledToolNames(tools: LoadedToolInfo[]) {
   return tools
     .map((tool) => tool.name)
     .filter((toolName) => isValidToolName(toolName));
+}
+
+export function getGlobalEnabledSkills({
+  skillsSettings,
+  loadedSkills,
+}: {
+  skillsSettings: SkillsSettings;
+  loadedSkills: LoadedSkillInfo[];
+}) {
+  if (!skillsSettings.enabled) return [];
+
+  return loadedSkills.filter((skill) => skill.enabled);
+}
+
+export function getEnabledSkillsForChat({
+  chat,
+  globalEnabledSkills,
+  availableSkillsByName,
+}: {
+  chat: ChatSession;
+  globalEnabledSkills: LoadedSkillInfo[];
+  availableSkillsByName: Map<string, LoadedSkillInfo>;
+}) {
+  const byName = new Map<string, LoadedSkillInfo>();
+  const chatDisabledSkillNames = new Set(chat.disabledSkillNames ?? []);
+
+  for (const skill of globalEnabledSkills) {
+    if (chatDisabledSkillNames.has(skill.name)) continue;
+    if (!byName.has(skill.name)) byName.set(skill.name, skill);
+  }
+
+  for (const skillName of chat.enabledSkillNames ?? []) {
+    if (chatDisabledSkillNames.has(skillName)) continue;
+
+    const skill = availableSkillsByName.get(skillName);
+    if (skill && !byName.has(skill.name)) byName.set(skill.name, skill);
+  }
+
+  return [...byName.values()];
+}
+
+export function getToolsWithLoadSkillTool({
+  tools,
+  modelSelectableSkills,
+  activeSkillNames,
+  loadSkillEnabled,
+}: {
+  tools: LoadedToolInfo[];
+  modelSelectableSkills: LoadedSkillInfo[];
+  activeSkillNames: string[];
+  loadSkillEnabled: boolean;
+}) {
+  if (!loadSkillEnabled) return tools;
+
+  const activeSkillNameSet = new Set(activeSkillNames);
+  const unloadedSkills = modelSelectableSkills.filter(
+    (skill) => !activeSkillNameSet.has(skill.name),
+  );
+  const loadSkillTool = createLoadSkillTool(unloadedSkills);
+
+  return loadSkillTool ? [...tools, loadSkillTool] : tools;
+}
+
+export function validateSkillMentionsForRequest({
+  content,
+  availableSkillsByName,
+}: {
+  content: string;
+  availableSkillsByName: Map<string, LoadedSkillInfo>;
+}) {
+  const skillNames = parseSkillMentionNames(content);
+  const unknownSkillNames = skillNames.filter(
+    (skillName) => !availableSkillsByName.has(skillName),
+  );
+
+  if (unknownSkillNames.length > 0) {
+    return {
+      ok: false as const,
+      unknownSkillNames,
+      message:
+        unknownSkillNames.length === 1
+          ? `Skill not found: ${unknownSkillNames[0]}`
+          : `Skills not found: ${unknownSkillNames.join(", ")}`,
+    };
+  }
+
+  return { ok: true as const, skillNames };
+}
+
+export function buildSystemPromptWithActiveSkills({
+  systemPrompt,
+  activeSkillNames,
+  availableSkillsByName,
+}: {
+  systemPrompt: string;
+  activeSkillNames: string[];
+  availableSkillsByName: Map<string, LoadedSkillInfo>;
+}) {
+  const activeSkills = activeSkillNames
+    .map((skillName) => availableSkillsByName.get(skillName))
+    .filter((skill): skill is LoadedSkillInfo => Boolean(skill));
+
+  if (activeSkills.length === 0) return systemPrompt;
+
+  const skillBlocks = activeSkills.map((skill) => {
+    const recommendedTools = skill.recommendedToolNames.length
+      ? `\n\nRecommended tools for this skill:\n${skill.recommendedToolNames
+          .map((toolName) => `- ${toolName}`)
+          .join("\n")}`
+      : "";
+
+    return `<skill name="${skill.name}">\n${skill.instructions.trim()}${recommendedTools}\n</skill>`;
+  });
+
+  return [
+    systemPrompt.trim(),
+    "Active skills are persistent instructions loaded for this chat. Follow them when relevant.",
+    ...skillBlocks,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }

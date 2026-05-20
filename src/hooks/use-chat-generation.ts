@@ -11,8 +11,10 @@ import { generateTitleFromFirstExchange } from "@/lib/ai-chat/title-generation";
 import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL_NAME,
+  LOAD_SKILL_TOOL_NAME,
   parseAskUserRequestFromToolCall,
   parseChecklistWriteRequestFromToolCall,
+  parseSkillMentionNames,
 } from "@/lib/ai-chat/builtin-tools";
 import { streamProviderChat } from "@/lib/ai-chat/direct-provider-client";
 import type { StreamProviderChatResult } from "@/lib/ai-chat/direct-provider-client";
@@ -38,10 +40,15 @@ import {
   type ActiveProcessStepRef,
 } from "@/lib/ai-chat/generation-metadata";
 import {
+  buildSystemPromptWithActiveSkills,
+  getEnabledSkillsForChat,
   getEnabledToolsForChat,
+  getGlobalEnabledSkills,
   getGlobalEnabledTools,
+  getToolsWithLoadSkillTool,
   resolveProviderForChat,
   validateProviderForGeneration,
+  validateSkillMentionsForRequest,
   validateToolMentionsForRequest,
 } from "@/lib/ai-chat/request-builder";
 import type {
@@ -53,8 +60,10 @@ import type {
   ChatSession,
   ChatToolCall,
   ChatToolResult,
+  LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
+  SkillsSettings,
   ToolCommandResult,
   ToolExecutionStatus,
   ToolsSettings,
@@ -64,6 +73,89 @@ import { useToolExecution } from "@/hooks/use-tool-execution";
 
 const MAX_TOOL_ROUNDS = 20;
 
+function isNewlyLoadedSkillResult(
+  toolResult: ChatToolResult,
+): toolResult is ChatToolResult & { loadedSkillName: string } {
+  if (toolResult.toolName !== LOAD_SKILL_TOOL_NAME) return false;
+  if (toolResult.isError || !toolResult.loadedSkillName) return false;
+
+  try {
+    const parsed = JSON.parse(toolResult.content) as { status?: unknown };
+    return parsed.status === "loaded";
+  } catch {
+    return true;
+  }
+}
+
+function collectNewlyLoadedSkillNames(messages: ChatMessage[]) {
+  const skillNames = new Set<string>();
+
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+
+    for (const variant of message.variants) {
+      for (const toolResult of variant.toolResults ?? []) {
+        if (isNewlyLoadedSkillResult(toolResult)) {
+          skillNames.add(toolResult.loadedSkillName);
+        }
+      }
+    }
+  }
+
+  return skillNames;
+}
+
+function collectMentionedSkillNames(messages: ChatMessage[]) {
+  const skillNames = new Set<string>();
+
+  for (const message of messages) {
+    if (message.role !== "user") continue;
+    for (const skillName of parseSkillMentionNames(message.content)) {
+      skillNames.add(skillName);
+    }
+  }
+
+  return skillNames;
+}
+
+function pruneActiveSkillNamesForRegeneration({
+  activeSkillNames,
+  retainedMessages,
+  discardedMessages,
+  oneShotSkillNames,
+}: {
+  activeSkillNames: string[];
+  retainedMessages: ChatMessage[];
+  discardedMessages: ChatMessage[];
+  oneShotSkillNames: string[];
+}) {
+  const discardedLoadedSkillNames =
+    collectNewlyLoadedSkillNames(discardedMessages);
+
+  if (discardedLoadedSkillNames.size === 0) {
+    return [...new Set([...activeSkillNames, ...oneShotSkillNames])];
+  }
+
+  const retainedLoadedSkillNames =
+    collectNewlyLoadedSkillNames(retainedMessages);
+  const retainedMentionedSkillNames =
+    collectMentionedSkillNames(retainedMessages);
+  const oneShotSkillNameSet = new Set(oneShotSkillNames);
+
+  return [
+    ...new Set([
+      ...activeSkillNames.filter(
+        (skillName) =>
+          !discardedLoadedSkillNames.has(skillName) ||
+          retainedLoadedSkillNames.has(skillName) ||
+          retainedMentionedSkillNames.has(skillName) ||
+          oneShotSkillNameSet.has(skillName),
+      ),
+      ...oneShotSkillNames,
+    ]),
+  ];
+}
+
 export function useChatGeneration({
   activeChat,
   activeChatId,
@@ -72,9 +164,12 @@ export function useChatGeneration({
   chats,
   systemPrompt,
   toolsSettings,
+  skillsSettings,
   chatTitleGenerationMode,
   loadedTools,
   availableToolsByName,
+  loadedSkills,
+  availableSkillsByName,
   autoScrollEnabledRef,
   setEditingMessageId,
   setSettingsOpen,
@@ -98,9 +193,12 @@ export function useChatGeneration({
   chats: ChatSession[];
   systemPrompt: string;
   toolsSettings: ToolsSettings;
+  skillsSettings: SkillsSettings;
   chatTitleGenerationMode: ChatTitleGenerationMode;
   loadedTools: LoadedToolInfo[];
   availableToolsByName: Map<string, LoadedToolInfo>;
+  loadedSkills: LoadedSkillInfo[];
+  availableSkillsByName: Map<string, LoadedSkillInfo>;
   autoScrollEnabledRef: MutableRefObject<boolean>;
   setEditingMessageId: Dispatch<SetStateAction<string | null>>;
   setSettingsOpen: Dispatch<SetStateAction<boolean>>;
@@ -133,15 +231,24 @@ export function useChatGeneration({
   ) => Promise<ToolCommandResult>;
   showError: (message: string, description?: string) => void;
 }) {
-  const [, setStreamingAssistantByChatId] = useState<Record<string, string>>({});
+  const [, setStreamingAssistantByChatId] = useState<Record<string, string>>(
+    {},
+  );
   const generationRefs = useRef<Record<string, ActiveGeneration>>({});
   const streamBuffersRef = useRef<Record<string, StreamBuffer>>({});
-  const streamActiveProcessStepRefs = useRef<Record<string, ActiveProcessStepRef>>({});
+  const streamActiveProcessStepRefs = useRef<
+    Record<string, ActiveProcessStepRef>
+  >({});
   const streamFlushTimeoutRefs = useRef<Record<string, number>>({});
 
   const globalEnabledTools = useMemo(
     () => getGlobalEnabledTools({ toolsSettings, loadedTools }),
     [toolsSettings, loadedTools],
+  );
+
+  const globalEnabledSkills = useMemo(
+    () => getGlobalEnabledSkills({ skillsSettings, loadedSkills }),
+    [skillsSettings, loadedSkills],
   );
 
   function appendToAssistantVariant(
@@ -158,7 +265,10 @@ export function useChatGeneration({
         chatId,
         (currentMessages) =>
           currentMessages.map((message) => {
-            if (message.id !== assistantMessageId || message.role !== "assistant") {
+            if (
+              message.id !== assistantMessageId ||
+              message.role !== "assistant"
+            ) {
               return message;
             }
 
@@ -182,10 +292,21 @@ export function useChatGeneration({
     flushBufferedAssistantVariantBuffer({
       bufferKey,
       streamBuffersRef,
-      appendToAssistantVariant: (chatId, assistantMessageId, variantId, events) =>
-        appendToAssistantVariant(chatId, assistantMessageId, variantId, events, {
-          transition: false,
-        }),
+      appendToAssistantVariant: (
+        chatId,
+        assistantMessageId,
+        variantId,
+        events,
+      ) =>
+        appendToAssistantVariant(
+          chatId,
+          assistantMessageId,
+          variantId,
+          events,
+          {
+            transition: false,
+          },
+        ),
     });
   }
 
@@ -229,7 +350,10 @@ export function useChatGeneration({
       chatId,
       (currentMessages) =>
         currentMessages.map((message) => {
-          if (message.id !== assistantMessageId || message.role !== "assistant") {
+          if (
+            message.id !== assistantMessageId ||
+            message.role !== "assistant"
+          ) {
             return message;
           }
 
@@ -351,6 +475,23 @@ export function useChatGeneration({
   } = useToolExecution({
     activeChatId,
     loadedTools,
+    availableSkillsByName,
+    modelSelectableSkillNames: activeChat
+      ? getEnabledSkillsForChat({
+          chat: activeChat,
+          globalEnabledSkills,
+          availableSkillsByName,
+        }).map((skill) => skill.name)
+      : [],
+    activeSkillNames: activeChat?.activeSkillNames ?? [],
+    onSkillActivated: (skillName, chatId) => {
+      updateChat(chatId, (chat) => ({
+        ...chat,
+        activeSkillNames: [
+          ...new Set([...(chat.activeSkillNames ?? []), skillName]),
+        ],
+      }));
+    },
     executeExternalTool,
     abortChatGeneration,
     completeAssistantUserInputStep,
@@ -440,7 +581,10 @@ export function useChatGeneration({
   }
 
   function isChatGenerating(chatId: string) {
-    return Boolean(generationRefs.current[chatId]) || generatingChatIds.includes(chatId);
+    return (
+      Boolean(generationRefs.current[chatId]) ||
+      generatingChatIds.includes(chatId)
+    );
   }
 
   function validateProviderForRun(providerForRun: ProviderConfig) {
@@ -464,6 +608,20 @@ export function useChatGeneration({
     }
 
     return validation.toolNames;
+  }
+
+  function validateSkillMentions(content: string) {
+    const validation = validateSkillMentionsForRequest({
+      content,
+      availableSkillsByName,
+    });
+
+    if (!validation.ok) {
+      showError(validation.message);
+      return undefined;
+    }
+
+    return validation.skillNames;
   }
 
   function resolveProviderForActiveChat(chat: ChatSession) {
@@ -521,12 +679,44 @@ export function useChatGeneration({
     })();
   }
 
-  function getToolsForChat(chat: ChatSession, oneShotToolNames: string[] = []) {
-    return getEnabledToolsForChat({
+  function getToolsForChat(
+    chat: ChatSession,
+    oneShotToolNames: string[] = [],
+    activeSkillNames: string[] = chat.activeSkillNames ?? [],
+  ) {
+    const tools = getEnabledToolsForChat({
       chat,
       oneShotToolNames,
       globalEnabledTools,
       availableToolsByName,
+    });
+
+    return getToolsWithLoadSkillTool({
+      tools,
+      modelSelectableSkills: getEnabledSkillsForChat({
+        chat,
+        globalEnabledSkills,
+        availableSkillsByName,
+      }),
+      activeSkillNames,
+      loadSkillEnabled: toolsSettings.enabled && toolsSettings.loadSkillEnabled,
+    });
+  }
+
+  function getActiveSkillNamesForRun(
+    chat: ChatSession,
+    oneShotSkillNames: string[] = [],
+  ) {
+    return [
+      ...new Set([...(chat.activeSkillNames ?? []), ...oneShotSkillNames]),
+    ];
+  }
+
+  function composeSystemPrompt(activeSkillNames: string[]) {
+    return buildSystemPromptWithActiveSkills({
+      systemPrompt,
+      activeSkillNames,
+      availableSkillsByName,
     });
   }
 
@@ -535,7 +725,11 @@ export function useChatGeneration({
     if (!generation) return;
 
     flushBufferedAssistantVariant(
-      getStreamBufferKey(chatId, generation.assistantMessageId, generation.variantId),
+      getStreamBufferKey(
+        chatId,
+        generation.assistantMessageId,
+        generation.variantId,
+      ),
     );
     const chat = chats.find((item) => item.id === chatId);
     const visualFlushKeys = getVisualFlushKeysForGeneration({
@@ -574,6 +768,7 @@ export function useChatGeneration({
     responseStartedAtMs,
     providerForRun,
     toolsForRun,
+    activeSkillNamesForRun,
   }: {
     chatId: string;
     contextMessages: ChatMessage[];
@@ -583,6 +778,7 @@ export function useChatGeneration({
     responseStartedAtMs: number;
     providerForRun: ProviderConfig;
     toolsForRun: LoadedToolInfo[];
+    activeSkillNamesForRun: string[];
   }) {
     const controller = new AbortController();
     generationRefs.current[chatId] = {
@@ -604,47 +800,50 @@ export function useChatGeneration({
     let toolResultsForContext: ChatToolResult[] = [];
     let accumulatedContent = "";
     let accumulatedReasoning = "";
+    let currentActiveSkillNames = [...new Set(activeSkillNamesForRun)];
 
     const appendToolCallsToVariant = (toolCalls: ChatToolCall[]) => {
       toolCallsForContext = [...toolCallsForContext, ...toolCalls];
-      const toolSteps: ChatAssistantProcessStep[] = toolCalls.map((toolCall) => {
-        if (toolCall.function.name === ASK_USER_TOOL_NAME) {
-          try {
-            return {
-              id: createId(),
-              type: "user_input" as const,
-              status: "waiting" as const,
-              toolCall,
-              request: parseAskUserRequestFromToolCall(toolCall),
-            };
-          } catch {
-            // Keep invalid ask_user calls visible as failed tool executions once
-            // executeToolCall returns the validation error.
+      const toolSteps: ChatAssistantProcessStep[] = toolCalls.map(
+        (toolCall) => {
+          if (toolCall.function.name === ASK_USER_TOOL_NAME) {
+            try {
+              return {
+                id: createId(),
+                type: "user_input" as const,
+                status: "waiting" as const,
+                toolCall,
+                request: parseAskUserRequestFromToolCall(toolCall),
+              };
+            } catch {
+              // Keep invalid ask_user calls visible as failed tool executions once
+              // executeToolCall returns the validation error.
+            }
           }
-        }
 
-        if (toolCall.function.name === CHECKLIST_WRITE_TOOL_NAME) {
-          try {
-            return {
-              id: createId(),
-              type: "checklist" as const,
-              status: "pending" as const,
-              toolCall,
-              request: parseChecklistWriteRequestFromToolCall(toolCall),
-            };
-          } catch {
-            // Keep invalid checklist_write calls visible as failed tool executions once
-            // executeToolCall returns the validation error.
+          if (toolCall.function.name === CHECKLIST_WRITE_TOOL_NAME) {
+            try {
+              return {
+                id: createId(),
+                type: "checklist" as const,
+                status: "pending" as const,
+                toolCall,
+                request: parseChecklistWriteRequestFromToolCall(toolCall),
+              };
+            } catch {
+              // Keep invalid checklist_write calls visible as failed tool executions once
+              // executeToolCall returns the validation error.
+            }
           }
-        }
 
-        return {
-          id: createId(),
-          type: "tool_execution" as const,
-          status: "pending" as const,
-          toolCall,
-        };
-      });
+          return {
+            id: createId(),
+            type: "tool_execution" as const,
+            status: "pending" as const,
+            toolCall,
+          };
+        },
+      );
 
       updateAssistantVariant(
         chatId,
@@ -660,7 +859,8 @@ export function useChatGeneration({
 
       return new Map(
         toolCalls.map(
-          (toolCall, index) => [toolCall.id, toolSteps[index]?.id ?? toolCall.id] as const,
+          (toolCall, index) =>
+            [toolCall.id, toolSteps[index]?.id ?? toolCall.id] as const,
         ),
       );
     };
@@ -762,7 +962,7 @@ export function useChatGeneration({
 
         const streamResult = await streamProviderChat({
           provider: providerForRun,
-          systemPrompt,
+          systemPrompt: composeSystemPrompt(currentActiveSkillNames),
           messages: currentMessages,
           userMessage: currentUserMessage,
           signal: controller.signal,
@@ -775,11 +975,16 @@ export function useChatGeneration({
               variantId,
               bufferKey,
             );
-            appendBufferedAssistantVariant(chatId, assistantMessageId, variantId, {
-              type: "content",
-              delta,
-              assistantMessageStepId,
-            });
+            appendBufferedAssistantVariant(
+              chatId,
+              assistantMessageId,
+              variantId,
+              {
+                type: "content",
+                delta,
+                assistantMessageStepId,
+              },
+            );
 
             if (chatId === activeChatId) {
               scheduleStickyScrollToBottom();
@@ -805,11 +1010,16 @@ export function useChatGeneration({
               variantId,
               bufferKey,
             );
-            appendBufferedAssistantVariant(chatId, assistantMessageId, variantId, {
-              type: "reasoning",
-              delta,
-              reasoningStepId,
-            });
+            appendBufferedAssistantVariant(
+              chatId,
+              assistantMessageId,
+              variantId,
+              {
+                type: "reasoning",
+                delta,
+                reasoningStepId,
+              },
+            );
 
             if (chatId === activeChatId) {
               scheduleStickyScrollToBottom();
@@ -845,6 +1055,7 @@ export function useChatGeneration({
               variantId,
               stepId: toolStepIdsByToolCallId.get(toolCall.id) ?? toolCall.id,
               signal: controller.signal,
+              activeSkillNames: currentActiveSkillNames,
             });
 
             applyToolResultToVisibleStep(toolResult);
@@ -858,6 +1069,19 @@ export function useChatGeneration({
         );
         applyToolResultsToVariant(toolResults);
 
+        const loadedSkillNames = toolResults
+          .map((toolResult) =>
+            toolResult.toolName === LOAD_SKILL_TOOL_NAME && !toolResult.isError
+              ? toolResult.loadedSkillName
+              : undefined,
+          )
+          .filter((skillName): skillName is string => Boolean(skillName));
+        if (loadedSkillNames.length > 0) {
+          currentActiveSkillNames = [
+            ...new Set([...currentActiveSkillNames, ...loadedSkillNames]),
+          ];
+        }
+
         if (chatId === activeChatId) {
           scheduleStickyScrollToBottom({ force: true, settleFrames: 5 });
         }
@@ -868,17 +1092,13 @@ export function useChatGeneration({
 
       flushBufferedAssistantVariant(bufferKey);
 
-      updateAssistantVariant(
-        chatId,
-        assistantMessageId,
-        variantId,
-        (variant) =>
-          markAssistantVariantDone({
-            variant,
-            responseStartedAtMs,
-            provider: providerForRun,
-            streamResult: lastStreamResult ?? {},
-          }),
+      updateAssistantVariant(chatId, assistantMessageId, variantId, (variant) =>
+        markAssistantVariantDone({
+          variant,
+          responseStartedAtMs,
+          provider: providerForRun,
+          streamResult: lastStreamResult ?? {},
+        }),
       );
 
       maybeGenerateAutomaticAiTitle({
@@ -889,7 +1109,8 @@ export function useChatGeneration({
         providerForRun,
       });
     } catch (error) {
-      const wasAborted = error instanceof DOMException && error.name === "AbortError";
+      const wasAborted =
+        error instanceof DOMException && error.name === "AbortError";
 
       flushBufferedAssistantVariant(bufferKey);
 
@@ -948,7 +1169,18 @@ export function useChatGeneration({
     const oneShotToolNames = validateToolMentions(userMessage);
     if (!oneShotToolNames) return false;
 
-    const toolsForRun = getToolsForChat(activeChat, oneShotToolNames);
+    const oneShotSkillNames = validateSkillMentions(userMessage);
+    if (!oneShotSkillNames) return false;
+
+    const activeSkillNamesForRun = getActiveSkillNamesForRun(
+      activeChat,
+      oneShotSkillNames,
+    );
+    const toolsForRun = getToolsForChat(
+      activeChat,
+      oneShotToolNames,
+      activeSkillNamesForRun,
+    );
 
     const userChatMessage: ChatMessage = {
       id: createId(),
@@ -968,7 +1200,11 @@ export function useChatGeneration({
     });
 
     const contextMessages = activeChat.messages;
-    const nextMessages = [...activeChat.messages, userChatMessage, assistantMessage];
+    const nextMessages = [
+      ...activeChat.messages,
+      userChatMessage,
+      assistantMessage,
+    ];
 
     armStickyScrollToBottom();
     updateChat(activeChat.id, (chat) => ({
@@ -982,6 +1218,7 @@ export function useChatGeneration({
           ? "auto"
           : chat.titleMode,
       messages: nextMessages,
+      activeSkillNames: activeSkillNamesForRun,
       providerId: providerForRun.id,
       model: providerForRun.model,
       updatedAt: responseStartedAt,
@@ -996,6 +1233,7 @@ export function useChatGeneration({
       responseStartedAtMs,
       providerForRun,
       toolsForRun,
+      activeSkillNamesForRun,
     });
 
     return true;
@@ -1009,7 +1247,8 @@ export function useChatGeneration({
     if (!validateProviderForRun(providerForRun)) return;
 
     const assistantIndex = activeChat.messages.findIndex(
-      (message) => message.id === assistantMessageId && message.role === "assistant",
+      (message) =>
+        message.id === assistantMessageId && message.role === "assistant",
     );
     if (assistantIndex < 0) return;
 
@@ -1031,32 +1270,50 @@ export function useChatGeneration({
     const oneShotToolNames = validateToolMentions(userMessage);
     if (!oneShotToolNames) return;
 
-    const toolsForRun = getToolsForChat(activeChat, oneShotToolNames);
+    const oneShotSkillNames = validateSkillMentions(userMessage);
+    if (!oneShotSkillNames) return;
+
     const contextMessages = activeChat.messages.slice(0, userIndex);
+    const retainedMessages = activeChat.messages.slice(0, userIndex + 1);
+    const discardedMessages = activeChat.messages.slice(userIndex + 1);
+    const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
+      activeSkillNames: activeChat.activeSkillNames ?? [],
+      retainedMessages,
+      discardedMessages,
+      oneShotSkillNames,
+    });
+    const toolsForRun = getToolsForChat(
+      activeChat,
+      oneShotToolNames,
+      activeSkillNamesForRun,
+    );
     const variantId = createId();
     const responseStartedAtMs = performance.now();
     const responseStartedAt = new Date().toISOString();
 
     armStickyScrollToBottom();
 
-    updateActiveChatMessages(
-      (currentMessages) =>
-        currentMessages.slice(0, assistantIndex + 1).map((message) => {
-          if (message.id !== assistantMessageId || message.role !== "assistant") {
-            return message;
-          }
+    updateChat(activeChat.id, (chat) => ({
+      ...chat,
+      messages: chat.messages.slice(0, assistantIndex + 1).map((message) => {
+        if (message.id !== assistantMessageId || message.role !== "assistant") {
+          return message;
+        }
 
-          return {
-            ...message,
-            variants: [
-              ...message.variants,
-              createStreamingAssistantVariant({ variantId, responseStartedAt }),
-            ],
-            activeVariantIndex: message.variants.length,
-          };
-        }),
-      { touch: false },
-    );
+        return {
+          ...message,
+          variants: [
+            ...message.variants,
+            createStreamingAssistantVariant({ variantId, responseStartedAt }),
+          ],
+          activeVariantIndex: message.variants.length,
+        };
+      }),
+      activeSkillNames: activeSkillNamesForRun,
+      providerId: providerForRun.id,
+      model: providerForRun.model,
+      updatedAt: responseStartedAt,
+    }));
 
     armStickyScrollToBottom();
 
@@ -1069,6 +1326,86 @@ export function useChatGeneration({
       responseStartedAtMs,
       providerForRun,
       toolsForRun,
+      activeSkillNamesForRun,
+    });
+  }
+
+  async function continueAssistantMessage(assistantMessageId: string) {
+    if (!activeChat) return;
+    if (isChatGenerating(activeChat.id)) return;
+
+    const providerForRun = resolveProviderForActiveChat(activeChat);
+    if (!validateProviderForRun(providerForRun)) return;
+
+    const assistantIndex = activeChat.messages.findIndex(
+      (message) =>
+        message.id === assistantMessageId && message.role === "assistant",
+    );
+    const assistantMessageSource = activeChat.messages[assistantIndex];
+    if (
+      assistantIndex < 0 ||
+      !assistantMessageSource ||
+      assistantMessageSource.role !== "assistant"
+    ) {
+      showError("Could not find the assistant message to continue.");
+      return;
+    }
+
+    const activeVariant =
+      assistantMessageSource.variants[
+        assistantMessageSource.activeVariantIndex
+      ];
+    if (!activeVariant?.content.trim()) {
+      showError("Assistant message has no content to continue from.");
+      return;
+    }
+
+    const contextMessages = activeChat.messages.slice(0, assistantIndex + 1);
+    const discardedMessages = activeChat.messages.slice(assistantIndex + 1);
+    const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
+      activeSkillNames: activeChat.activeSkillNames ?? [],
+      retainedMessages: contextMessages,
+      discardedMessages,
+      oneShotSkillNames: [],
+    });
+    const toolsForRun = getToolsForChat(activeChat, [], activeSkillNamesForRun);
+    const userMessage =
+      "Continue generating from where the previous assistant message stopped. Do not repeat already generated content.";
+
+    const nextAssistantMessageId = createId();
+    const variantId = createId();
+    const responseStartedAtMs = performance.now();
+    const responseStartedAt = new Date().toISOString();
+    const assistantMessage = createStreamingAssistantMessage({
+      assistantMessageId: nextAssistantMessageId,
+      variantId,
+      responseStartedAt,
+    });
+
+    armStickyScrollToBottom();
+
+    updateChat(activeChat.id, (chat) => ({
+      ...chat,
+      messages: [
+        ...chat.messages.slice(0, assistantIndex + 1),
+        assistantMessage,
+      ],
+      activeSkillNames: activeSkillNamesForRun,
+      providerId: providerForRun.id,
+      model: providerForRun.model,
+      updatedAt: responseStartedAt,
+    }));
+
+    await runAssistantVariant({
+      chatId: activeChat.id,
+      contextMessages,
+      userMessage,
+      assistantMessageId: nextAssistantMessageId,
+      variantId,
+      responseStartedAtMs,
+      providerForRun,
+      toolsForRun,
+      activeSkillNamesForRun,
     });
   }
 
@@ -1091,7 +1428,8 @@ export function useChatGeneration({
     const oneShotToolNames = validateToolMentions(userMessage);
     if (!oneShotToolNames) return;
 
-    const toolsForRun = getToolsForChat(activeChat, oneShotToolNames);
+    const oneShotSkillNames = validateSkillMentions(userMessage);
+    if (!oneShotSkillNames) return;
 
     const userIndex = activeChat.messages.findIndex(
       (message) => message.id === messageId && message.role === "user",
@@ -1102,6 +1440,19 @@ export function useChatGeneration({
       showError("Could not find the message to edit.");
       return;
     }
+
+    const contextMessages = activeChat.messages.slice(0, userIndex);
+    const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
+      activeSkillNames: activeChat.activeSkillNames ?? [],
+      retainedMessages: contextMessages,
+      discardedMessages: activeChat.messages.slice(userIndex + 1),
+      oneShotSkillNames,
+    });
+    const toolsForRun = getToolsForChat(
+      activeChat,
+      oneShotToolNames,
+      activeSkillNamesForRun,
+    );
 
     const assistantMessageId = createId();
     const variantId = createId();
@@ -1116,8 +1467,11 @@ export function useChatGeneration({
       variantId,
       responseStartedAt,
     });
-    const contextMessages = activeChat.messages.slice(0, userIndex);
-    const nextMessages = [...contextMessages, editedUserMessage, assistantMessage];
+    const nextMessages = [
+      ...contextMessages,
+      editedUserMessage,
+      assistantMessage,
+    ];
 
     armStickyScrollToBottom();
     setEditingMessageId(null);
@@ -1129,10 +1483,9 @@ export function useChatGeneration({
           ? titleFromMessage(userMessage)
           : chat.title,
       titleMode:
-        userIndex === 0 && isAutoTitledChat(chat)
-          ? "auto"
-          : chat.titleMode,
+        userIndex === 0 && isAutoTitledChat(chat) ? "auto" : chat.titleMode,
       messages: nextMessages,
+      activeSkillNames: activeSkillNamesForRun,
       providerId: providerForRun.id,
       model: providerForRun.model,
       updatedAt: responseStartedAt,
@@ -1147,6 +1500,7 @@ export function useChatGeneration({
       responseStartedAtMs,
       providerForRun,
       toolsForRun,
+      activeSkillNamesForRun,
     });
   }
 
@@ -1162,6 +1516,7 @@ export function useChatGeneration({
   return {
     sendMessage,
     regenerateAssistantMessage,
+    continueAssistantMessage,
     submitEditedUserMessage,
     selectAssistantVariant,
     stopChatGeneration,

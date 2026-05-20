@@ -7,7 +7,9 @@ import type {
   ChatToolResult,
   ChecklistItem,
   ChecklistWriteRequest,
+  LoadedSkillInfo,
   LoadedToolInfo,
+  SkillsSettings,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
 
@@ -15,14 +17,21 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
   askUserEnabled: true,
   checklistWriteEnabled: true,
+  loadSkillEnabled: true,
+};
+
+export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
+  enabled: true,
 };
 
 export const ASK_USER_TOOL_NAME = "ask_user";
 export const CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
+export const LOAD_SKILL_TOOL_NAME = "load_skill";
 export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
 
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TOOL_MENTION_PATTERN = /(^|\s)@tool:([A-Za-z0-9_-]+)(?=$|\s)/g;
+const SKILL_MENTION_PATTERN = /(^|\s)@skill:([A-Za-z0-9_-]+)(?=$|\s)/g;
 const MAX_ASK_USER_QUESTIONS = 5;
 const MAX_ASK_USER_OPTIONS = 8;
 const MAX_ASK_USER_TITLE_LENGTH = 120;
@@ -161,13 +170,58 @@ export const CHECKLIST_WRITE_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
+export function createLoadSkillTool(
+  availableSkills: LoadedSkillInfo[],
+): LoadedToolInfo | null {
+  const selectableSkills = availableSkills
+    .filter((skill) => skill.name.trim() && skill.description.trim())
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  if (selectableSkills.length === 0) return null;
+
+  const skillList = selectableSkills
+    .map((skill) => `- ${skill.name}: ${skill.description}`)
+    .join("\n");
+
+  return {
+    id: "builtin-load-skill",
+    name: LOAD_SKILL_TOOL_NAME,
+    enabled: true,
+    description: [
+      "Load the full instructions for one relevant skill and activate it for this chat.",
+      "Use this when a skill would materially improve the answer. Do not load skills unnecessarily. Do not load a skill that is already active.",
+      "Available skills:",
+      skillList,
+    ].join("\n"),
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        skillName: {
+          type: "string",
+          description:
+            "Exact skill name to load from the available skills list.",
+          enum: selectableSkills.map((skill) => skill.name),
+        },
+      },
+      required: ["skillName"],
+    },
+    command: "",
+    args: [],
+    input: "none",
+    timeoutMs: 0,
+  };
+}
+
 export function isValidToolName(toolName: string) {
   return TOOL_NAME_PATTERN.test(toolName);
 }
 
 export function isBuiltInToolName(toolName: string) {
   return (
-    toolName === ASK_USER_TOOL_NAME || toolName === CHECKLIST_WRITE_TOOL_NAME
+    toolName === ASK_USER_TOOL_NAME ||
+    toolName === CHECKLIST_WRITE_TOOL_NAME ||
+    toolName === LOAD_SKILL_TOOL_NAME
   );
 }
 
@@ -183,10 +237,10 @@ export function compareToolsByDisplayOrder(
   return left.name.localeCompare(right.name);
 }
 
-export function parseToolMentionNames(content: string) {
+function parseMentionNames(content: string, sourcePattern: RegExp) {
   const names: string[] = [];
   const seen = new Set<string>();
-  const pattern = new RegExp(TOOL_MENTION_PATTERN);
+  const pattern = new RegExp(sourcePattern);
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(content)) !== null) {
@@ -198,6 +252,14 @@ export function parseToolMentionNames(content: string) {
   }
 
   return names;
+}
+
+export function parseToolMentionNames(content: string) {
+  return parseMentionNames(content, TOOL_MENTION_PATTERN);
+}
+
+export function parseSkillMentionNames(content: string) {
+  return parseMentionNames(content, SKILL_MENTION_PATTERN);
 }
 
 export function getAskUserQuestionType(
@@ -353,8 +415,7 @@ export function parseAskUserRequest(args: unknown): AskUserRequest {
 
         const optionSource = rawOption as Record<string, unknown>;
         const optionId =
-          readTrimmedString(optionSource, "id") ??
-          `option_${optionIndex + 1}`;
+          readTrimmedString(optionSource, "id") ?? `option_${optionIndex + 1}`;
         const label = readLimitedString(
           optionSource,
           "label",
@@ -430,7 +491,9 @@ export function parseAskUserRequestFromToolCall(toolCall: ChatToolCall) {
   );
 }
 
-export function parseChecklistWriteRequest(args: unknown): ChecklistWriteRequest {
+export function parseChecklistWriteRequest(
+  args: unknown,
+): ChecklistWriteRequest {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("checklist_write arguments must be a JSON object.");
   }

@@ -103,10 +103,26 @@ type ToolCommandResult = {
 
 type PublicToolDefinition = ToolDefinition;
 
+type SkillDefinition = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  description: string;
+  instructions: string;
+  recommendedToolNames: string[];
+};
+
+type PublicSkillDefinition = SkillDefinition;
+
 type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
   checklistWriteEnabled: boolean;
+  loadSkillEnabled: boolean;
+};
+
+type SkillsSettings = {
+  enabled: boolean;
 };
 
 type AppSettings = {
@@ -139,6 +155,27 @@ type ToolExportResult = {
   path?: string;
 };
 
+type SkillImportIssue = {
+  source: string;
+  skillName?: string;
+  message: string;
+};
+
+type SkillImportResult = {
+  cancelled: boolean;
+  imported: number;
+  updated: number;
+  skipped: SkillImportIssue[];
+  invalid: SkillImportIssue[];
+  renamed: SkillImportIssue[];
+};
+
+type SkillExportResult = {
+  cancelled: boolean;
+  exported: number;
+  path?: string;
+};
+
 const blockedUpstreamHeaders = new Set([
   "host",
   "connection",
@@ -154,6 +191,10 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
   askUserEnabled: true,
   checklistWriteEnabled: true,
+  loadSkillEnabled: true,
+};
+const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
+  enabled: true,
 };
 const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
@@ -361,7 +402,6 @@ function readFinishReason(data: unknown): string | undefined {
   return typeof finishReason === "string" ? finishReason : undefined;
 }
 
-
 function normalizeToolsSettings(value: unknown): ToolsSettings {
   if (!isPlainObject(value)) return DEFAULT_TOOLS_SETTINGS;
 
@@ -370,7 +410,21 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
     askUserEnabled:
       typeof value.askUserEnabled === "boolean" ? value.askUserEnabled : true,
     checklistWriteEnabled:
-      typeof value.checklistWriteEnabled === "boolean" ? value.checklistWriteEnabled : true,
+      typeof value.checklistWriteEnabled === "boolean"
+        ? value.checklistWriteEnabled
+        : true,
+    loadSkillEnabled:
+      typeof value.loadSkillEnabled === "boolean"
+        ? value.loadSkillEnabled
+        : true,
+  };
+}
+
+function normalizeSkillsSettings(value: unknown): SkillsSettings {
+  if (!isPlainObject(value)) return DEFAULT_SKILLS_SETTINGS;
+
+  return {
+    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
   };
 }
 
@@ -411,7 +465,9 @@ function normalizeNonNegativeInteger(value: unknown) {
 
 function normalizeToolDefinition(candidate: unknown): ToolDefinition {
   const source = isPlainObject(candidate) ? candidate : {};
-  const id = safeString(source.id).trim() || `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const id =
+    safeString(source.id).trim() ||
+    `tool-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const name = safeString(source.name).trim();
   const description = safeString(source.description).trim();
   const parameters = source.parameters;
@@ -424,19 +480,25 @@ function normalizeToolDefinition(candidate: unknown): ToolDefinition {
     name,
     enabled: typeof source.enabled === "boolean" ? source.enabled : true,
     description,
-    parameters: isPlainObject(parameters) ? parameters : { type: "object", properties: {}, required: [] },
+    parameters: isPlainObject(parameters)
+      ? parameters
+      : { type: "object", properties: {}, required: [] },
     command,
     args,
     cwd: cwd || undefined,
     input: normalizeToolInputMode(source.input),
     timeoutMs: normalizeTimeoutMs(source.timeoutMs),
-    maxConcurrentRuns: normalizeOptionalPositiveInteger(source.maxConcurrentRuns),
+    maxConcurrentRuns: normalizeOptionalPositiveInteger(
+      source.maxConcurrentRuns,
+    ),
     delayBetweenRunsMs: normalizeNonNegativeInteger(source.delayBetweenRunsMs),
   };
 }
 
 function getSchemaProperties(parameters: Record<string, unknown>) {
-  const properties = isPlainObject(parameters.properties) ? parameters.properties : {};
+  const properties = isPlainObject(parameters.properties)
+    ? parameters.properties
+    : {};
   return new Set(Object.keys(properties));
 }
 
@@ -460,11 +522,15 @@ function extractTemplatePlaceholders(args: string[]) {
 function validateToolDefinition(tool: ToolDefinition) {
   if (!tool.name) throw new Error("Tool name is required.");
   if (!TOOL_NAME_PATTERN.test(tool.name)) {
-    throw new Error("Tool name must use only letters, numbers, underscores, or hyphens.");
+    throw new Error(
+      "Tool name must use only letters, numbers, underscores, or hyphens.",
+    );
   }
   if (!tool.description) throw new Error("Tool description is required.");
   if (!isJsonSchemaObject(tool.parameters)) {
-    throw new Error('Tool parameters must be a JSON schema object with type: "object".');
+    throw new Error(
+      'Tool parameters must be a JSON schema object with type: "object".',
+    );
   }
   if (!tool.command.trim()) throw new Error("Command is required.");
 
@@ -473,16 +539,61 @@ function validateToolDefinition(tool: ToolDefinition) {
 
   for (const placeholder of extractTemplatePlaceholders(tool.args)) {
     if (!propertyNames.has(placeholder)) {
-      throw new Error(`Unknown argument placeholder: ${placeholder}. Add it to schema properties or update args.`);
+      throw new Error(
+        `Unknown argument placeholder: ${placeholder}. Add it to schema properties or update args.`,
+      );
     }
     if (!requiredFields.has(placeholder)) {
-      throw new Error(`Placeholder ${placeholder} is used in args, so it must be listed in schema.required for now.`);
+      throw new Error(
+        `Placeholder ${placeholder} is used in args, so it must be listed in schema.required for now.`,
+      );
     }
   }
 }
 
 function toPublicTool(tool: ToolDefinition): PublicToolDefinition {
   return tool;
+}
+
+function normalizeSkillDefinition(candidate: unknown): SkillDefinition {
+  const source = isPlainObject(candidate) ? candidate : {};
+  const id =
+    safeString(source.id).trim() ||
+    `skill-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const name = safeString(source.name).trim();
+  const description = safeString(source.description).trim();
+  const instructions = safeString(source.instructions).trim();
+
+  return {
+    id,
+    name,
+    enabled: typeof source.enabled === "boolean" ? source.enabled : true,
+    description,
+    instructions,
+    recommendedToolNames: safeStringArray(source.recommendedToolNames)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  };
+}
+
+function validateSkillDefinition(skill: SkillDefinition) {
+  if (!skill.name) throw new Error("Skill name is required.");
+  if (!TOOL_NAME_PATTERN.test(skill.name)) {
+    throw new Error(
+      "Skill name must use only letters, numbers, underscores, or hyphens.",
+    );
+  }
+  if (skill.name === "load_skill") {
+    throw new Error(
+      "load_skill is a built-in tool name and cannot be used by a skill.",
+    );
+  }
+  if (!skill.description) throw new Error("Skill description is required.");
+  if (!skill.instructions) throw new Error("Skill instructions are required.");
+}
+
+function toPublicSkill(skill: SkillDefinition): PublicSkillDefinition {
+  return skill;
 }
 
 function stringifyToolResult(result: unknown) {
@@ -495,7 +606,10 @@ function stringifyToolResult(result: unknown) {
   }
 }
 
-function buildModelToolResultContent(result: ToolCommandResult, timeoutMs: number) {
+function buildModelToolResultContent(
+  result: ToolCommandResult,
+  timeoutMs: number,
+) {
   if (result.timedOut) {
     return stringifyToolResult({
       error: true,
@@ -530,13 +644,21 @@ function buildModelToolResultContent(result: ToolCommandResult, timeoutMs: numbe
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout: () => void): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<T> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
   const timeout = new Promise<never>((_resolve, reject) => {
     timeoutId = setTimeout(() => {
       onTimeout();
-      reject(new Error(`Tool timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+      reject(
+        new Error(
+          `Tool timed out after ${Math.round(timeoutMs / 1000)} seconds.`,
+        ),
+      );
     }, timeoutMs);
   });
 
@@ -556,7 +678,8 @@ function getToolArgValue(args: unknown, key: string) {
 
 function stringifyCommandArgValue(value: unknown) {
   if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "number" || typeof value === "boolean")
+    return String(value);
   if (value === null || value === undefined) return "";
   return JSON.stringify(value);
 }
@@ -586,7 +709,8 @@ function buildToolExecutionPreview(
   modelArgs: unknown,
   commandArgs: string[],
 ): ToolExecutionPreview {
-  const stdin = tool.input === "json-stdin" ? JSON.stringify(modelArgs ?? {}) : undefined;
+  const stdin =
+    tool.input === "json-stdin" ? JSON.stringify(modelArgs ?? {}) : undefined;
 
   return {
     command: tool.command,
@@ -602,7 +726,10 @@ function buildToolExecutionPreview(
 
 type CommandExecutionResult = ToolCommandResult;
 
-async function runCommandTool(tool: ToolDefinition, modelArgs: unknown): Promise<CommandExecutionResult> {
+async function runCommandTool(
+  tool: ToolDefinition,
+  modelArgs: unknown,
+): Promise<CommandExecutionResult> {
   validateToolDefinition(tool);
   const commandArgs = materializeCommandArgs(tool.args, modelArgs);
   const execution = buildToolExecutionPreview(tool, modelArgs, commandArgs);
@@ -628,7 +755,14 @@ async function runCommandTool(tool: ToolDefinition, modelArgs: unknown): Promise
     const timeout = setTimeout(() => {
       timedOut = true;
       child.kill();
-      finish({ exitCode: null, stdout, stderr: stderr || `Timed out after ${Math.round(tool.timeoutMs / 1000)} seconds.`, timedOut: true });
+      finish({
+        exitCode: null,
+        stdout,
+        stderr:
+          stderr ||
+          `Timed out after ${Math.round(tool.timeoutMs / 1000)} seconds.`,
+        timedOut: true,
+      });
     }, tool.timeoutMs);
 
     child.stdout?.on("data", (chunk) => {
@@ -641,7 +775,12 @@ async function runCommandTool(tool: ToolDefinition, modelArgs: unknown): Promise
 
     child.on("error", (error) => {
       clearTimeout(timeout);
-      finish({ exitCode: null, stdout, stderr: stderr || error.message, timedOut });
+      finish({
+        exitCode: null,
+        stdout,
+        stderr: stderr || error.message,
+        timedOut,
+      });
     });
 
     child.on("close", (exitCode) => {
@@ -717,7 +856,9 @@ function readFinalToolCalls(data: unknown): ToolCall[] {
   if (!Array.isArray(choices)) return [];
   const message = choices[0]?.message;
   if (!message || typeof message !== "object") return [];
-  return normalizeToolCallFromChoice("tool_calls" in message ? message.tool_calls : undefined);
+  return normalizeToolCallFromChoice(
+    "tool_calls" in message ? message.tool_calls : undefined,
+  );
 }
 
 function mergeToolCallDelta(current: Map<number, ToolCall>, data: unknown) {
@@ -731,7 +872,8 @@ function mergeToolCallDelta(current: Map<number, ToolCall>, data: unknown) {
 
   for (const rawCall of toolCalls) {
     if (!isPlainObject(rawCall)) continue;
-    const index = typeof rawCall.index === "number" ? rawCall.index : current.size;
+    const index =
+      typeof rawCall.index === "number" ? rawCall.index : current.size;
     const existing = current.get(index) ?? {
       id: "",
       type: "function" as const,
@@ -742,12 +884,16 @@ function mergeToolCallDelta(current: Map<number, ToolCall>, data: unknown) {
     current.set(index, {
       ...existing,
       ...copyObjectFields(rawCall, ["function", "index"]),
-      id: typeof rawCall.id === "string" && rawCall.id ? rawCall.id : existing.id,
+      id:
+        typeof rawCall.id === "string" && rawCall.id ? rawCall.id : existing.id,
       type: "function",
       function: {
         ...existing.function,
         ...copyObjectFields(fn ?? {}, ["name", "arguments"]),
-        name: typeof fn?.name === "string" && fn.name ? fn.name : existing.function.name,
+        name:
+          typeof fn?.name === "string" && fn.name
+            ? fn.name
+            : existing.function.name,
         arguments: `${existing.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}`,
       },
     });
@@ -884,6 +1030,7 @@ function getStoragePaths() {
     chatsDir: path.join(root, "chats"),
     chatsIndex: path.join(root, "chats", "index.json"),
     toolsDir: path.join(root, "tools"),
+    skillsDir: path.join(root, "skills"),
     backupsDir: path.join(root, "backups"),
     attachmentsDir: path.join(root, "attachments"),
   };
@@ -1031,6 +1178,7 @@ async function ensureStorageDirectories() {
   await fs.mkdir(paths.chatsDir, { recursive: true });
   await fs.mkdir(paths.backupsDir, { recursive: true });
   await fs.mkdir(paths.toolsDir, { recursive: true });
+  await fs.mkdir(paths.skillsDir, { recursive: true });
   await fs.mkdir(paths.attachmentsDir, { recursive: true });
 }
 
@@ -1047,6 +1195,7 @@ async function initializeJsonStorageIfNeeded() {
     activeChatId: undefined,
     providerModelsCache: {},
     toolsSettings: DEFAULT_TOOLS_SETTINGS,
+    skillsSettings: DEFAULT_SKILLS_SETTINGS,
     appSettings: DEFAULT_APP_SETTINGS,
   });
   await writeJsonAtomic(getStoragePaths().providers, null);
@@ -1072,7 +1221,10 @@ function normalizeChatSummary(chat: unknown) {
     providerId:
       typeof chat.providerId === "string" ? chat.providerId : undefined,
     model: typeof chat.model === "string" ? chat.model : undefined,
-    titleMode: chat.titleMode === "auto" || chat.titleMode === "manual" ? chat.titleMode : undefined,
+    titleMode:
+      chat.titleMode === "auto" || chat.titleMode === "manual"
+        ? chat.titleMode
+        : undefined,
     isPinned: chat.isPinned === true,
   };
 }
@@ -1243,6 +1395,7 @@ async function migrateFromIndexedDbSnapshot(snapshot: StorageSnapshot) {
         ? snapshot.providerModelsCache
         : {},
       toolsSettings: DEFAULT_TOOLS_SETTINGS,
+      skillsSettings: DEFAULT_SKILLS_SETTINGS,
       appSettings: normalizeAppSettings(snapshot.appSettings),
     };
 
@@ -1275,7 +1428,6 @@ async function migrateFromIndexedDbSnapshot(snapshot: StorageSnapshot) {
   return { migrated: true };
 }
 
-
 type ToolFileRecord = {
   tool: ToolDefinition;
   filePath: string;
@@ -1283,17 +1435,25 @@ type ToolFileRecord = {
 };
 
 function legacyToolFilePath(toolId: string) {
-  return path.join(getStoragePaths().toolsDir, `${sanitizeFileNamePart(toolId)}.json`);
+  return path.join(
+    getStoragePaths().toolsDir,
+    `${sanitizeFileNamePart(toolId)}.json`,
+  );
 }
 
 function readableToolFilePath(tool: Pick<ToolDefinition, "id" | "name">) {
   const fileNameBase = tool.name || tool.id || "tool";
-  return path.join(getStoragePaths().toolsDir, `${sanitizeFileNamePart(fileNameBase)}.json`);
+  return path.join(
+    getStoragePaths().toolsDir,
+    `${sanitizeFileNamePart(fileNameBase)}.json`,
+  );
 }
 
 async function readToolFileRecords() {
   await fs.mkdir(getStoragePaths().toolsDir, { recursive: true });
-  const entries = await fs.readdir(getStoragePaths().toolsDir, { withFileTypes: true });
+  const entries = await fs.readdir(getStoragePaths().toolsDir, {
+    withFileTypes: true,
+  });
   const records: ToolFileRecord[] = [];
 
   for (const entry of entries) {
@@ -1318,7 +1478,9 @@ async function migrateReadableToolFileNames(records: ToolFileRecord[]) {
   const usedFileNames = new Set(records.map((record) => record.fileName));
 
   for (const record of records) {
-    const preferredBase = sanitizeFileNamePart(record.tool.name || record.tool.id || "tool");
+    const preferredBase = sanitizeFileNamePart(
+      record.tool.name || record.tool.id || "tool",
+    );
     const preferredFileName = `${preferredBase}.json`;
 
     if (record.fileName === preferredFileName) continue;
@@ -1331,7 +1493,10 @@ async function migrateReadableToolFileNames(records: ToolFileRecord[]) {
       index += 1;
     }
 
-    const nextFilePath = path.join(getStoragePaths().toolsDir, candidateFileName);
+    const nextFilePath = path.join(
+      getStoragePaths().toolsDir,
+      candidateFileName,
+    );
 
     try {
       await fs.rename(record.filePath, nextFilePath);
@@ -1340,13 +1505,18 @@ async function migrateReadableToolFileNames(records: ToolFileRecord[]) {
       record.filePath = nextFilePath;
       record.fileName = candidateFileName;
     } catch (error) {
-      console.error(`Failed to rename tool manifest ${record.fileName}:`, error);
+      console.error(
+        `Failed to rename tool manifest ${record.fileName}:`,
+        error,
+      );
     }
   }
 }
 
 async function deleteToolFilesById(toolId: string, exceptFilePath?: string) {
-  const normalizedExcept = exceptFilePath ? path.resolve(exceptFilePath) : undefined;
+  const normalizedExcept = exceptFilePath
+    ? path.resolve(exceptFilePath)
+    : undefined;
   const records = await readToolFileRecords();
   const candidates = new Set<string>();
 
@@ -1357,12 +1527,16 @@ async function deleteToolFilesById(toolId: string, exceptFilePath?: string) {
   candidates.add(legacyToolFilePath(toolId));
 
   for (const filePath of candidates) {
-    if (normalizedExcept && path.resolve(filePath) === normalizedExcept) continue;
+    if (normalizedExcept && path.resolve(filePath) === normalizedExcept)
+      continue;
 
     try {
       await fs.unlink(filePath);
     } catch (error) {
-      const code = typeof error === "object" && error && "code" in error ? (error as { code?: string }).code : undefined;
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
       if (code !== "ENOENT") throw error;
     }
   }
@@ -1385,8 +1559,11 @@ async function saveJsonTool(value: unknown) {
   await queueStorageWrite(async () => {
     await initializeJsonStorageIfNeeded();
     const existingTools = await loadJsonTools();
-    const duplicate = existingTools.find((candidate) => candidate.id !== tool.id && candidate.name === tool.name);
-    if (duplicate) throw new Error(`Another tool already uses the name: ${tool.name}`);
+    const duplicate = existingTools.find(
+      (candidate) => candidate.id !== tool.id && candidate.name === tool.name,
+    );
+    if (duplicate)
+      throw new Error(`Another tool already uses the name: ${tool.name}`);
 
     const targetPath = readableToolFilePath(tool);
     await writeJsonAtomic(targetPath, tool);
@@ -1449,7 +1626,10 @@ function areToolDefinitionsEquivalent(
   left: PublicToolDefinition,
   right: ToolDefinition,
 ) {
-  return JSON.stringify({ ...left, id: undefined }) === JSON.stringify({ ...right, id: undefined });
+  return (
+    JSON.stringify({ ...left, id: undefined }) ===
+    JSON.stringify({ ...right, id: undefined })
+  );
 }
 
 async function importJsonToolsFromFiles(): Promise<ToolImportResult> {
@@ -1458,7 +1638,9 @@ async function importJsonToolsFromFiles(): Promise<ToolImportResult> {
 
   const openOptions = {
     title: "Import tools",
-    properties: ["openFile", "multiSelections"] as Array<"openFile" | "multiSelections">,
+    properties: ["openFile", "multiSelections"] as Array<
+      "openFile" | "multiSelections"
+    >,
     filters: [{ name: "JSON files", extensions: ["json"] }],
   };
   const result = win
@@ -1492,7 +1674,9 @@ async function importJsonToolsFromFiles(): Promise<ToolImportResult> {
 
     const existingTools = await loadJsonTools();
     const existingById = new Map(existingTools.map((tool) => [tool.id, tool]));
-    const existingByName = new Map(existingTools.map((tool) => [tool.name, tool]));
+    const existingByName = new Map(
+      existingTools.map((tool) => [tool.name, tool]),
+    );
 
     for (const { source, tool } of parsedTools) {
       const sameIdTool = existingById.get(tool.id);
@@ -1593,13 +1777,17 @@ async function exportJsonToolToFile(value: unknown): Promise<ToolExportResult> {
   return { cancelled: false, exported: 1, path: filePath };
 }
 
-async function exportJsonToolsToFolder(value: unknown): Promise<ToolExportResult> {
+async function exportJsonToolsToFolder(
+  value: unknown,
+): Promise<ToolExportResult> {
   const tools = normalizeExportTools(value);
   if (tools.length === 0) throw new Error("No tools to export.");
 
   const openOptions = {
     title: "Export tools to folder",
-    properties: ["openDirectory", "createDirectory"] as Array<"openDirectory" | "createDirectory">,
+    properties: ["openDirectory", "createDirectory"] as Array<
+      "openDirectory" | "createDirectory"
+    >,
   };
   const result = win
     ? await dialog.showOpenDialog(win, openOptions)
@@ -1626,6 +1814,380 @@ async function openJsonToolsFolder() {
   await fs.mkdir(getStoragePaths().toolsDir, { recursive: true });
 
   const error = await shell.openPath(getStoragePaths().toolsDir);
+  if (error) throw new Error(error);
+}
+
+type SkillFileRecord = {
+  skill: SkillDefinition;
+  filePath: string;
+  fileName: string;
+};
+
+function legacySkillFilePath(skillId: string) {
+  return path.join(
+    getStoragePaths().skillsDir,
+    `${sanitizeFileNamePart(skillId)}.json`,
+  );
+}
+
+function readableSkillFilePath(skill: Pick<SkillDefinition, "id" | "name">) {
+  const fileNameBase = skill.name || skill.id || "skill";
+  return path.join(
+    getStoragePaths().skillsDir,
+    `${sanitizeFileNamePart(fileNameBase)}.json`,
+  );
+}
+
+async function readSkillFileRecords() {
+  await fs.mkdir(getStoragePaths().skillsDir, { recursive: true });
+  const entries = await fs.readdir(getStoragePaths().skillsDir, {
+    withFileTypes: true,
+  });
+  const records: SkillFileRecord[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+
+    const filePath = path.join(getStoragePaths().skillsDir, entry.name);
+    const raw = await readJsonFile<unknown>(filePath, undefined);
+    const skill = normalizeSkillDefinition(raw);
+
+    try {
+      validateSkillDefinition(skill);
+      records.push({ skill, filePath, fileName: entry.name });
+    } catch (error) {
+      console.error(`Invalid skill manifest ${entry.name}:`, error);
+    }
+  }
+
+  return records;
+}
+
+async function migrateReadableSkillFileNames(records: SkillFileRecord[]) {
+  const usedFileNames = new Set(records.map((record) => record.fileName));
+
+  for (const record of records) {
+    const preferredBase = sanitizeFileNamePart(
+      record.skill.name || record.skill.id || "skill",
+    );
+    const preferredFileName = `${preferredBase}.json`;
+
+    if (record.fileName === preferredFileName) continue;
+
+    let candidateFileName = preferredFileName;
+    let index = 1;
+
+    while (usedFileNames.has(candidateFileName)) {
+      candidateFileName = `${preferredBase} (${index}).json`;
+      index += 1;
+    }
+
+    const nextFilePath = path.join(
+      getStoragePaths().skillsDir,
+      candidateFileName,
+    );
+
+    try {
+      await fs.rename(record.filePath, nextFilePath);
+      usedFileNames.delete(record.fileName);
+      usedFileNames.add(candidateFileName);
+      record.filePath = nextFilePath;
+      record.fileName = candidateFileName;
+    } catch (error) {
+      console.error(
+        `Failed to rename skill manifest ${record.fileName}:`,
+        error,
+      );
+    }
+  }
+}
+
+async function deleteSkillFilesById(skillId: string, exceptFilePath?: string) {
+  const normalizedExcept = exceptFilePath
+    ? path.resolve(exceptFilePath)
+    : undefined;
+  const records = await readSkillFileRecords();
+  const candidates = new Set<string>();
+
+  for (const record of records) {
+    if (record.skill.id === skillId) candidates.add(record.filePath);
+  }
+
+  candidates.add(legacySkillFilePath(skillId));
+
+  for (const filePath of candidates) {
+    if (normalizedExcept && path.resolve(filePath) === normalizedExcept)
+      continue;
+
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code !== "ENOENT") throw error;
+    }
+  }
+}
+
+async function loadJsonSkills() {
+  await initializeJsonStorageIfNeeded();
+  const records = await readSkillFileRecords();
+  await migrateReadableSkillFileNames(records);
+
+  const skills = records.map((record) => record.skill);
+  skills.sort((left, right) => left.name.localeCompare(right.name));
+  return skills.map(toPublicSkill);
+}
+
+async function saveJsonSkill(value: unknown) {
+  const skill = normalizeSkillDefinition(value);
+  validateSkillDefinition(skill);
+
+  await queueStorageWrite(async () => {
+    await initializeJsonStorageIfNeeded();
+    const existingSkills = await loadJsonSkills();
+    const duplicate = existingSkills.find(
+      (candidate) => candidate.id !== skill.id && candidate.name === skill.name,
+    );
+    if (duplicate)
+      throw new Error(`Another skill already uses the name: ${skill.name}`);
+
+    const targetPath = readableSkillFilePath(skill);
+    await writeJsonAtomic(targetPath, skill);
+    await deleteSkillFilesById(skill.id, targetPath);
+  });
+
+  return skill;
+}
+
+async function deleteJsonSkill(skillId: unknown) {
+  const id = safeString(skillId).trim();
+  if (!id) return;
+
+  await queueStorageWrite(async () => {
+    await initializeJsonStorageIfNeeded();
+    await deleteSkillFilesById(id);
+  });
+}
+
+function createEmptySkillImportResult(cancelled: boolean): SkillImportResult {
+  return {
+    cancelled,
+    imported: 0,
+    updated: 0,
+    skipped: [],
+    invalid: [],
+    renamed: [],
+  };
+}
+
+function createUniqueImportedSkillName(
+  baseName: string,
+  existingByName: Map<string, PublicSkillDefinition>,
+) {
+  let index = 1;
+  let candidate = `${baseName}_${index}`;
+
+  while (existingByName.has(candidate)) {
+    index += 1;
+    candidate = `${baseName}_${index}`;
+  }
+
+  return candidate;
+}
+
+function areSkillDefinitionsEquivalent(
+  left: PublicSkillDefinition,
+  right: SkillDefinition,
+) {
+  return (
+    JSON.stringify({ ...left, id: undefined }) ===
+    JSON.stringify({ ...right, id: undefined })
+  );
+}
+
+async function importJsonSkillsFromFiles(): Promise<SkillImportResult> {
+  await initializeJsonStorageIfNeeded();
+  await fs.mkdir(getStoragePaths().skillsDir, { recursive: true });
+
+  const openOptions = {
+    title: "Import skills",
+    properties: ["openFile", "multiSelections"] as Array<
+      "openFile" | "multiSelections"
+    >,
+    filters: [{ name: "JSON files", extensions: ["json"] }],
+  };
+  const result = win
+    ? await dialog.showOpenDialog(win, openOptions)
+    : await dialog.showOpenDialog(openOptions);
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return createEmptySkillImportResult(true);
+  }
+
+  const importResult = createEmptySkillImportResult(false);
+  const parsedSkills: Array<{ source: string; skill: SkillDefinition }> = [];
+
+  for (const filePath of result.filePaths) {
+    const source = path.basename(filePath);
+    try {
+      const raw = JSON.parse(await fs.readFile(filePath, "utf8"));
+      const skill = normalizeSkillDefinition(raw);
+      validateSkillDefinition(skill);
+      parsedSkills.push({ source, skill });
+    } catch (error) {
+      importResult.invalid.push({ source, message: getErrorMessage(error) });
+    }
+  }
+
+  if (parsedSkills.length === 0) return importResult;
+
+  await queueStorageWrite(async () => {
+    await initializeJsonStorageIfNeeded();
+    await fs.mkdir(getStoragePaths().skillsDir, { recursive: true });
+
+    const existingSkills = await loadJsonSkills();
+    const existingById = new Map(
+      existingSkills.map((skill) => [skill.id, skill]),
+    );
+    const existingByName = new Map(
+      existingSkills.map((skill) => [skill.name, skill]),
+    );
+
+    for (const { source, skill } of parsedSkills) {
+      const sameIdSkill = existingById.get(skill.id);
+      const sameNameSkill = existingByName.get(skill.name);
+      let skillToSave = skill;
+
+      if (sameNameSkill && sameNameSkill.id !== skill.id) {
+        if (areSkillDefinitionsEquivalent(sameNameSkill, skill)) {
+          importResult.skipped.push({
+            source,
+            skillName: skill.name,
+            message: `A matching skill already exists: ${skill.name}`,
+          });
+          continue;
+        }
+
+        const renamedSkill = {
+          ...skill,
+          name: createUniqueImportedSkillName(skill.name, existingByName),
+        };
+        skillToSave = renamedSkill;
+        importResult.renamed.push({
+          source,
+          skillName: renamedSkill.name,
+          message: `Renamed ${skill.name} to ${renamedSkill.name} because the original name already exists with different settings.`,
+        });
+      }
+
+      const targetPath = readableSkillFilePath(skillToSave);
+      await writeJsonAtomic(targetPath, skillToSave);
+      await deleteSkillFilesById(skillToSave.id, targetPath);
+
+      if (sameIdSkill) {
+        importResult.updated += 1;
+        existingByName.delete(sameIdSkill.name);
+      } else {
+        importResult.imported += 1;
+      }
+
+      existingById.set(skillToSave.id, skillToSave);
+      existingByName.set(skillToSave.name, skillToSave);
+    }
+  });
+
+  return importResult;
+}
+
+function skillExportFileName(skill: SkillDefinition, usedNames: Set<string>) {
+  const base = sanitizeFileNamePart(skill.name || skill.id || "skill");
+  let candidate = `${base}.json`;
+  let index = 1;
+
+  while (usedNames.has(candidate)) {
+    candidate = `${base} (${index}).json`;
+    index += 1;
+  }
+
+  usedNames.add(candidate);
+  return candidate;
+}
+
+function normalizeExportSkills(value: unknown): SkillDefinition[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => {
+    const skill = normalizeSkillDefinition(item);
+    validateSkillDefinition(skill);
+    return skill;
+  });
+}
+
+async function exportJsonSkillToFile(
+  value: unknown,
+): Promise<SkillExportResult> {
+  const skills = normalizeExportSkills(value);
+  const skill = skills[0];
+  if (!skill) throw new Error("No skill to export.");
+
+  const saveOptions = {
+    title: "Export skill",
+    defaultPath: `${sanitizeFileNamePart(skill.name || skill.id || "skill")}.json`,
+    filters: [{ name: "JSON files", extensions: ["json"] }],
+  };
+  const result = win
+    ? await dialog.showSaveDialog(win, saveOptions)
+    : await dialog.showSaveDialog(saveOptions);
+
+  if (result.canceled || !result.filePath) {
+    return { cancelled: true, exported: 0 };
+  }
+
+  const filePath = ensureJsonExtension(result.filePath);
+  await writeJsonAtomic(filePath, skill);
+
+  return { cancelled: false, exported: 1, path: filePath };
+}
+
+async function exportJsonSkillsToFolder(
+  value: unknown,
+): Promise<SkillExportResult> {
+  const skills = normalizeExportSkills(value);
+  if (skills.length === 0) throw new Error("No skills to export.");
+
+  const openOptions = {
+    title: "Export skills to folder",
+    properties: ["openDirectory", "createDirectory"] as Array<
+      "openDirectory" | "createDirectory"
+    >,
+  };
+  const result = win
+    ? await dialog.showOpenDialog(win, openOptions)
+    : await dialog.showOpenDialog(openOptions);
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { cancelled: true, exported: 0 };
+  }
+
+  const folderPath = result.filePaths[0];
+  await fs.mkdir(folderPath, { recursive: true });
+
+  const usedNames = new Set<string>();
+  for (const skill of skills) {
+    const fileName = skillExportFileName(skill, usedNames);
+    await writeJsonAtomic(path.join(folderPath, fileName), skill);
+  }
+
+  return { cancelled: false, exported: skills.length, path: folderPath };
+}
+
+async function openJsonSkillsFolder() {
+  await initializeJsonStorageIfNeeded();
+  await fs.mkdir(getStoragePaths().skillsDir, { recursive: true });
+
+  const error = await shell.openPath(getStoragePaths().skillsDir);
   if (error) throw new Error(error);
 }
 
@@ -1737,9 +2299,27 @@ ipcMain.handle("storage:tools-settings:load", async () => {
   return normalizeToolsSettings(settings.toolsSettings);
 });
 
-ipcMain.handle("storage:tools-settings:save", async (_event, value: unknown) => {
-  await writeSettingsPatch({ toolsSettings: normalizeToolsSettings(value) });
+ipcMain.handle(
+  "storage:tools-settings:save",
+  async (_event, value: unknown) => {
+    await writeSettingsPatch({ toolsSettings: normalizeToolsSettings(value) });
+  },
+);
+
+ipcMain.handle("storage:skills-settings:load", async () => {
+  await initializeJsonStorageIfNeeded();
+  const settings = await readSettingsFile();
+  return normalizeSkillsSettings(settings.skillsSettings);
 });
+
+ipcMain.handle(
+  "storage:skills-settings:save",
+  async (_event, value: unknown) => {
+    await writeSettingsPatch({
+      skillsSettings: normalizeSkillsSettings(value),
+    });
+  },
+);
 
 ipcMain.handle("storage:app-settings:load", async () => {
   await initializeJsonStorageIfNeeded();
@@ -1753,17 +2333,51 @@ ipcMain.handle("storage:app-settings:save", async (_event, value: unknown) => {
 
 ipcMain.handle("storage:tools:load", async () => loadJsonTools());
 
-ipcMain.handle("storage:tool:save", async (_event, value: unknown) => saveJsonTool(value));
+ipcMain.handle("storage:tool:save", async (_event, value: unknown) =>
+  saveJsonTool(value),
+);
 
-ipcMain.handle("storage:tool:delete", async (_event, toolId: unknown) => deleteJsonTool(toolId));
+ipcMain.handle("storage:tool:delete", async (_event, toolId: unknown) =>
+  deleteJsonTool(toolId),
+);
 
 ipcMain.handle("storage:tools:import", async () => importJsonToolsFromFiles());
 
-ipcMain.handle("storage:tool:export", async (_event, tool: unknown) => exportJsonToolToFile(tool));
+ipcMain.handle("storage:tool:export", async (_event, tool: unknown) =>
+  exportJsonToolToFile(tool),
+);
 
-ipcMain.handle("storage:tools:export", async (_event, tools: unknown) => exportJsonToolsToFolder(tools));
+ipcMain.handle("storage:tools:export", async (_event, tools: unknown) =>
+  exportJsonToolsToFolder(tools),
+);
 
 ipcMain.handle("storage:tools:open-folder", async () => openJsonToolsFolder());
+
+ipcMain.handle("storage:skills:load", async () => loadJsonSkills());
+
+ipcMain.handle("storage:skill:save", async (_event, value: unknown) =>
+  saveJsonSkill(value),
+);
+
+ipcMain.handle("storage:skill:delete", async (_event, skillId: unknown) =>
+  deleteJsonSkill(skillId),
+);
+
+ipcMain.handle("storage:skills:import", async () =>
+  importJsonSkillsFromFiles(),
+);
+
+ipcMain.handle("storage:skill:export", async (_event, skill: unknown) =>
+  exportJsonSkillToFile(skill),
+);
+
+ipcMain.handle("storage:skills:export", async (_event, skills: unknown) =>
+  exportJsonSkillsToFolder(skills),
+);
+
+ipcMain.handle("storage:skills:open-folder", async () =>
+  openJsonSkillsFolder(),
+);
 
 ipcMain.handle("tools:execute", async (_event, request: unknown) => {
   const value = isPlainObject(request) ? request : {};
@@ -2010,7 +2624,9 @@ ipcMain.handle(
         finishReason,
         content: finalContent,
         reasoning: finalReasoning,
-        toolCalls: [...streamedToolCalls.values()].filter((toolCall) => toolCall.id && toolCall.function.name),
+        toolCalls: [...streamedToolCalls.values()].filter(
+          (toolCall) => toolCall.id && toolCall.function.name,
+        ),
       };
     } catch (error) {
       if (controller.signal.aborted) {

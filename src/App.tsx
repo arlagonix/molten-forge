@@ -16,6 +16,7 @@ import { ToolExecutionBlock } from "@/components/ai-chat/tool-execution-block";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { SystemPromptDialog } from "@/components/dialogs/system-prompt-dialog";
 import { ProviderSettingsDialog } from "@/components/provider-settings-dialog";
+import { SkillsDialog } from "@/components/skills-dialog";
 import { ToolsDialog } from "@/components/tools-dialog";
 import { Button } from "@/components/ui/button";
 import { useChatActions } from "@/hooks/use-chat-actions";
@@ -28,6 +29,7 @@ import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL,
   CHECKLIST_WRITE_TOOL_NAME,
+  DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
   compareToolsByDisplayOrder,
   isBuiltInToolName,
@@ -57,12 +59,15 @@ import {
   loadChats,
   loadProvidersState,
   loadSystemPrompt,
+  loadSkills,
+  loadSkillsSettings,
   loadTools,
   loadToolsSettings,
   saveActiveChatId,
   saveAppSettings,
   saveChat,
   saveProvidersState,
+  saveSkillsSettings,
   saveSystemPrompt,
   saveToolsSettings,
 } from "@/lib/ai-chat/storage";
@@ -73,9 +78,11 @@ import type {
   ChatSession,
   ChatToolCall,
   ChatToolResult,
+  LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
   ProvidersState,
+  SkillsSettings,
   ToolExecutionStatus,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
@@ -153,10 +160,14 @@ export default function Home() {
   const [toolsSettings, setToolsSettings] = useState<ToolsSettings>(
     DEFAULT_TOOLS_SETTINGS,
   );
+  const [skillsSettings, setSkillsSettings] = useState<SkillsSettings>(
+    DEFAULT_SKILLS_SETTINGS,
+  );
   const [appSettings, setAppSettings] = useState<AppSettings>({
     chatTitleGenerationMode: "local",
   });
   const [loadedTools, setLoadedTools] = useState<LoadedToolInfo[]>([]);
+  const [loadedSkills, setLoadedSkills] = useState<LoadedSkillInfo[]>([]);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
   const [initialComposerDrafts] = useState<Record<string, string>>(() =>
@@ -185,8 +196,11 @@ export default function Home() {
   const [sidebarModelSearchValue, setSidebarModelSearchValue] = useState("");
   const [isChatToolPickerOpen, setIsChatToolPickerOpen] = useState(false);
   const [chatToolSearchValue, setChatToolSearchValue] = useState("");
+  const [isChatSkillPickerOpen, setIsChatSkillPickerOpen] = useState(false);
+  const [chatSkillSearchValue, setChatSkillSearchValue] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -514,6 +528,76 @@ export default function Home() {
     [availableTools],
   );
 
+  const availableSkills = useMemo(() => {
+    const byName = new Map<string, LoadedSkillInfo>();
+
+    for (const skill of loadedSkills) {
+      if (!isValidToolName(skill.name) || byName.has(skill.name)) continue;
+      byName.set(skill.name, skill);
+    }
+
+    return [...byName.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }, [loadedSkills]);
+
+  const availableSkillsByName = useMemo(() => {
+    return new Map(
+      availableSkills.map((skill) => [skill.name, skill] as const),
+    );
+  }, [availableSkills]);
+
+  const globallyEnabledSkillNames = useMemo(() => {
+    if (!skillsSettings.enabled) return new Set<string>();
+
+    return new Set(
+      availableSkills
+        .filter((skill) => skill.enabled)
+        .map((skill) => skill.name),
+    );
+  }, [availableSkills, skillsSettings.enabled]);
+
+  const activeChatEnabledSkillNames = useMemo(() => {
+    if (!activeChat) return [];
+
+    const chatEnabled = new Set(activeChat.enabledSkillNames ?? []);
+    const chatDisabled = new Set(activeChat.disabledSkillNames ?? []);
+
+    return availableSkills
+      .map((skill) => skill.name)
+      .filter(
+        (skillName) =>
+          !chatDisabled.has(skillName) &&
+          (globallyEnabledSkillNames.has(skillName) ||
+            chatEnabled.has(skillName)),
+      );
+  }, [
+    activeChat?.disabledSkillNames,
+    activeChat?.enabledSkillNames,
+    activeChat?.id,
+    availableSkills,
+    globallyEnabledSkillNames,
+  ]);
+
+  const visibleChatSkills = useMemo(() => {
+    const search = chatSkillSearchValue.trim().toLowerCase();
+
+    if (!search) return availableSkills;
+
+    return availableSkills.filter((skill) =>
+      `${skill.name} ${skill.description}`.toLowerCase().includes(search),
+    );
+  }, [availableSkills, chatSkillSearchValue]);
+
+  const skillMentionOptions = useMemo(
+    () =>
+      availableSkills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+      })),
+    [availableSkills],
+  );
+
   const {
     chatScrollRef,
     chatContentRef,
@@ -553,16 +637,20 @@ export default function Home() {
           loadedChats,
           loadedActiveChatId,
           loadedToolsSettings,
+          loadedSkillsSettings,
           loadedAppSettings,
           loadedToolManifests,
+          loadedSkillManifests,
         ] = await Promise.all([
           loadProvidersState(),
           loadSystemPrompt(),
           loadChats(),
           loadActiveChatId(),
           loadToolsSettings(),
+          loadSkillsSettings(),
           loadAppSettings(),
           loadTools(),
+          loadSkills(),
         ]);
 
         if (cancelled) return;
@@ -614,8 +702,10 @@ export default function Home() {
         });
         setSystemPrompt(loadedSystemPrompt);
         setToolsSettings(loadedToolsSettings);
+        setSkillsSettings(loadedSkillsSettings);
         setAppSettings(loadedAppSettings);
         setLoadedTools(loadedToolManifests);
+        setLoadedSkills(loadedSkillManifests);
         savedChatSnapshotsRef.current = Object.fromEntries(
           nextChats.map((chat) => [chat.id, JSON.stringify(chat)]),
         );
@@ -705,6 +795,13 @@ export default function Home() {
       console.error("Failed to save tools settings:", error),
     );
   }, [toolsSettings]);
+
+  useEffect(() => {
+    if (!didHydrateRef.current) return;
+    saveSkillsSettings(skillsSettings).catch((error) =>
+      console.error("Failed to save skills settings:", error),
+    );
+  }, [skillsSettings]);
 
   useEffect(() => {
     if (!didHydrateRef.current) return;
@@ -892,6 +989,7 @@ export default function Home() {
   const {
     sendMessage,
     regenerateAssistantMessage,
+    continueAssistantMessage,
     submitEditedUserMessage,
     selectAssistantVariant,
     stopChatGeneration,
@@ -907,9 +1005,12 @@ export default function Home() {
     chats,
     systemPrompt,
     toolsSettings,
+    skillsSettings,
     chatTitleGenerationMode: appSettings.chatTitleGenerationMode,
     loadedTools,
     availableToolsByName,
+    loadedSkills,
+    availableSkillsByName,
     autoScrollEnabledRef,
     generatingChatIds,
     setGeneratingChatIds,
@@ -1072,6 +1173,7 @@ export default function Home() {
     clearCurrentChat,
     removeChat,
     toggleActiveChatTool,
+    toggleActiveChatSkill,
     renameChat,
     toggleChatPinned,
   } = useChatActions({
@@ -1079,8 +1181,10 @@ export default function Home() {
     activeChatId,
     activeProvider,
     availableTools,
+    availableSkills,
     chats,
     globallyEnabledToolNames,
+    globallyEnabledSkillNames,
     isSending,
     messageElementRefs,
     setActiveChatId,
@@ -1175,6 +1279,13 @@ export default function Home() {
         .join("\n"),
     [loadedTools],
   );
+  const skillDisplayKey = useMemo(
+    () =>
+      availableSkills
+        .map((skill) => `${skill.name}:${skill.description ?? ""}`)
+        .join("\n"),
+    [availableSkills],
+  );
   const stableRegisterMessageElement = useStableCallback(
     registerMessageElement,
   );
@@ -1192,6 +1303,9 @@ export default function Home() {
   const stableCopyMessageContent = useStableCallback(copyMessageContent);
   const stableRegenerateAssistantMessage = useStableCallback(
     regenerateAssistantMessage,
+  );
+  const stableContinueAssistantMessage = useStableCallback(
+    continueAssistantMessage,
   );
   const stableStartEditingUserMessage = useStableCallback(
     startEditingUserMessage,
@@ -1252,6 +1366,7 @@ export default function Home() {
         onCreateNewChat={createNewChat}
         onOpenProviders={() => setSettingsOpen(true)}
         onOpenTools={() => setToolsOpen(true)}
+        onOpenSkills={() => setSkillsOpen(true)}
         onOpenSystemPrompt={() => setSystemPromptOpen(true)}
         onToggleAiTitleGeneration={(checked) =>
           setAppSettings((currentSettings) => ({
@@ -1311,6 +1426,9 @@ export default function Home() {
                   visualStreamingMessageIds={visualStreamingMessageIds}
                   collapsedToolStepIds={collapsedToolStepIds}
                   toolDisplayKey={toolDisplayKey}
+                  skillDisplayKey={skillDisplayKey}
+                  toolMentionOptions={toolMentionOptions}
+                  skillMentionOptions={skillMentionOptions}
                   registerMessageElement={stableRegisterMessageElement}
                   renderToolExecutionBlock={stableRenderToolExecutionBlock}
                   canSubmitAskUserResponse={stableCanSubmitAskUserResponse}
@@ -1321,6 +1439,7 @@ export default function Home() {
                   onRegenerateAssistantMessage={
                     stableRegenerateAssistantMessage
                   }
+                  onContinueAssistantMessage={stableContinueAssistantMessage}
                   onStartEditingUserMessage={stableStartEditingUserMessage}
                   onDeleteMessage={stableDeleteMessage}
                   onCancelEditingUserMessage={stableCancelEditingUserMessage}
@@ -1400,9 +1519,18 @@ export default function Home() {
               toolSearchValue={chatToolSearchValue}
               onToolSearchValueChange={setChatToolSearchValue}
               onToggleTool={toggleActiveChatTool}
+              visibleChatSkills={visibleChatSkills}
+              selectedSkillNames={activeChatEnabledSkillNames}
+              activeSkillNames={activeChat?.activeSkillNames ?? []}
+              isSkillPickerOpen={isChatSkillPickerOpen}
+              onSkillPickerOpenChange={setIsChatSkillPickerOpen}
+              skillSearchValue={chatSkillSearchValue}
+              onSkillSearchValueChange={setChatSkillSearchValue}
+              onToggleSkill={toggleActiveChatSkill}
             />
           }
           toolMentionOptions={toolMentionOptions}
+          skillMentionOptions={skillMentionOptions}
         />
       </section>
 
@@ -1418,6 +1546,18 @@ export default function Home() {
         onDeleteProvider={handleDeleteProvider}
         onSave={handleSaveSettingsChanges}
         showSuccess={stableShowSuccess}
+      />
+
+      <SkillsDialog
+        open={skillsOpen}
+        onOpenChange={setSkillsOpen}
+        skillsSettings={skillsSettings}
+        onSkillsSettingsChange={setSkillsSettings}
+        loadedSkills={loadedSkills}
+        onLoadedSkillsChange={setLoadedSkills}
+        availableTools={availableTools}
+        showSuccess={stableShowSuccess}
+        showError={stableShowError}
       />
 
       <ToolsDialog
