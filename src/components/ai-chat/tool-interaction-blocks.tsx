@@ -11,7 +11,6 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { memo, useEffect, useLayoutEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import type {
@@ -246,16 +245,7 @@ export const AskUserBlock = memo(function AskUserBlock({
     handleSubmit();
   }
 
-  function handleSingleLineAnswerKeyDown(
-    event: ReactKeyboardEvent<HTMLInputElement>,
-  ) {
-    if (event.key !== "Enter" || event.shiftKey) return;
-
-    event.preventDefault();
-    advanceOrSubmitActiveQuestion();
-  }
-
-  function handleMultilineAnswerKeyDown(
+  function handleTextareaAnswerKeyDown(
     event: ReactKeyboardEvent<HTMLTextAreaElement>,
   ) {
     if (event.key !== "Enter" || (!event.ctrlKey && !event.metaKey)) return;
@@ -299,29 +289,15 @@ export const AskUserBlock = memo(function AskUserBlock({
       }));
     };
 
-    if (question.input?.multiline) {
-      return (
-        <Textarea
-          value={value}
-          disabled={readOnly || !canSubmit}
-          readOnly={readOnly}
-          maxLength={MAX_ASK_USER_CUSTOM_ANSWER_LENGTH}
-          onChange={(event) => updateAnswer(event.target.value)}
-          onKeyDown={handleMultilineAnswerKeyDown}
-          className="min-h-24 rounded-lg text-sm"
-        />
-      );
-    }
-
     return (
-      <Input
+      <Textarea
         value={value}
         disabled={readOnly || !canSubmit}
         readOnly={readOnly}
         maxLength={MAX_ASK_USER_CUSTOM_ANSWER_LENGTH}
         onChange={(event) => updateAnswer(event.target.value)}
-        onKeyDown={handleSingleLineAnswerKeyDown}
-        className="h-8 rounded-lg text-sm"
+        onKeyDown={handleTextareaAnswerKeyDown}
+        className="min-h-24 rounded-lg text-sm"
       />
     );
   }
@@ -507,7 +483,7 @@ export const AskUserBlock = memo(function AskUserBlock({
           </span>
         </span>
         {!readOnly && (
-          <Input
+          <Textarea
             id={customInputId}
             value={customAnswer}
             onClick={(event) => event.stopPropagation()}
@@ -578,9 +554,9 @@ export const AskUserBlock = memo(function AskUserBlock({
             maxLength={MAX_ASK_USER_CUSTOM_ANSWER_LENGTH}
             onKeyDown={(event) => {
               event.stopPropagation();
-              handleSingleLineAnswerKeyDown(event);
+              handleTextareaAnswerKeyDown(event);
             }}
-            className="h-8 rounded-lg text-sm"
+            className="min-h-20 rounded-lg text-sm"
           />
         )}
       </div>

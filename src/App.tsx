@@ -213,6 +213,9 @@ export default function Home() {
   const [collapsedToolStepIds, setCollapsedToolStepIds] = useState<
     Record<string, boolean>
   >({});
+  const [collapsedThinkingStepIds, setCollapsedThinkingStepIds] = useState<
+    Record<string, boolean>
+  >({});
   const { messageContextMenu, captureMessageContext, closeMessageContextMenu } =
     useMessageContextMenu();
   const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
@@ -909,6 +912,13 @@ export default function Home() {
     }));
   }
 
+  function toggleThinkingCollapsed(stepId: string, nextCollapsed: boolean) {
+    setCollapsedThinkingStepIds((current) => ({
+      ...current,
+      [stepId]: nextCollapsed,
+    }));
+  }
+
   function renderToolExecutionBlock({
     id,
     toolCall,
@@ -1325,6 +1335,9 @@ export default function Home() {
   const stableToggleToolExecutionCollapsed = useStableCallback(
     toggleToolExecutionCollapsed,
   );
+  const stableToggleThinkingCollapsed = useStableCallback(
+    toggleThinkingCollapsed,
+  );
   const stableSubmitAskUserResponse = useStableCallback(submitAskUserResponse);
   const stableCancelAskUserRequest = useStableCallback(cancelAskUserRequest);
   const stableHandleAskUserLayoutChange = useStableCallback(
@@ -1426,6 +1439,7 @@ export default function Home() {
                   visualFlushRequests={visualFlushRequests}
                   visualStreamingMessageIds={visualStreamingMessageIds}
                   collapsedToolStepIds={collapsedToolStepIds}
+                  collapsedThinkingStepIds={collapsedThinkingStepIds}
                   toolDisplayKey={toolDisplayKey}
                   skillDisplayKey={skillDisplayKey}
                   toolMentionOptions={toolMentionOptions}
@@ -1450,6 +1464,7 @@ export default function Home() {
                   onToggleToolExecutionCollapsed={
                     stableToggleToolExecutionCollapsed
                   }
+                  onToggleThinkingCollapsed={stableToggleThinkingCollapsed}
                   onSubmitAskUserResponse={stableSubmitAskUserResponse}
                   onCancelAskUserRequest={stableCancelAskUserRequest}
                   onAskUserLayoutChange={stableHandleAskUserLayoutChange}

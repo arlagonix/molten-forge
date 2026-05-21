@@ -82,15 +82,6 @@ export const ASK_USER_TOOL: LoadedToolInfo = {
             },
             question: { type: "string" },
             description: { type: "string" },
-            input: {
-              type: "object",
-              additionalProperties: false,
-              description:
-                "Only for text questions. Set multiline to true for longer free-form answers.",
-              properties: {
-                multiline: { type: "boolean" },
-              },
-            },
             options: {
               type: "array",
               description:
@@ -313,18 +304,6 @@ function readAskUserQuestionType(
   return "single_choice";
 }
 
-function readAskUserInputConfig(source: Record<string, unknown>) {
-  const rawInput = source.input;
-  if (!rawInput || typeof rawInput !== "object" || Array.isArray(rawInput)) {
-    return undefined;
-  }
-
-  const inputSource = rawInput as Record<string, unknown>;
-  return {
-    multiline: inputSource.multiline === true,
-  };
-}
-
 export function parseAskUserRequest(args: unknown): AskUserRequest {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     throw new Error("ask_user arguments must be a JSON object.");
@@ -464,7 +443,6 @@ export function parseAskUserRequest(args: unknown): AskUserRequest {
         `ask_user question ${id} description`,
       ),
       options,
-      input: readAskUserInputConfig(questionSource),
     };
   });
 

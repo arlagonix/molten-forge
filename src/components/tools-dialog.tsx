@@ -97,12 +97,6 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
           },
           question: { type: "string" },
           description: { type: "string" },
-          input: {
-            type: "object",
-            properties: {
-              multiline: { type: "boolean" },
-            },
-          },
           options: {
             type: "array",
             description:

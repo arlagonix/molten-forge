@@ -9,14 +9,17 @@ import {
   Pin,
   PinOff,
   Plus,
+  Search,
   Settings,
   Sparkles,
   Sun,
   Trash2,
   Wrench,
+  X,
   BookOpen,
 } from "lucide-react";
-import { memo, useState } from "react";
+import type { UIEvent as ReactUIEvent } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -30,6 +33,9 @@ import {
 import { Input } from "@/components/ui/input";
 import type { ChatSession, ChatTitleGenerationMode } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
+
+const CHAT_LIST_BATCH_SIZE = 40;
+const CHAT_LIST_SCROLL_THRESHOLD_PX = 96;
 
 type ChatSidebarGroup = {
   label: string;
@@ -91,6 +97,83 @@ export const ChatSidebar = memo(function ChatSidebar({
 }: ChatSidebarProps) {
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
+  const [visibleChatLimit, setVisibleChatLimit] = useState(
+    CHAT_LIST_BATCH_SIZE,
+  );
+  const normalizedChatSearchQuery = chatSearchQuery.trim().toLocaleLowerCase();
+
+  const filteredChatList = useMemo(() => {
+    const matchesSearch = (chat: ChatSession) =>
+      !normalizedChatSearchQuery ||
+      chat.title.toLocaleLowerCase().includes(normalizedChatSearchQuery);
+
+    const filteredPinnedChats = pinnedChats.filter(matchesSearch);
+    const filteredGroupedChats = groupedChats
+      .map((group) => ({
+        ...group,
+        chats: group.chats.filter(matchesSearch),
+      }))
+      .filter((group) => group.chats.length > 0);
+    const filteredChats = [
+      ...filteredPinnedChats,
+      ...filteredGroupedChats.flatMap((group) => group.chats),
+    ];
+    const activeChatIndex = activeChatId
+      ? filteredChats.findIndex((chat) => chat.id === activeChatId)
+      : -1;
+    const effectiveVisibleChatLimit = Math.max(
+      visibleChatLimit,
+      activeChatIndex >= 0 ? activeChatIndex + 1 : 0,
+    );
+    let remainingChats = effectiveVisibleChatLimit;
+    const visiblePinnedChats = filteredPinnedChats.slice(0, remainingChats);
+    remainingChats = Math.max(0, remainingChats - visiblePinnedChats.length);
+    const visibleGroupedChats = filteredGroupedChats
+      .map((group) => {
+        const visibleChats = group.chats.slice(0, remainingChats);
+        remainingChats = Math.max(0, remainingChats - visibleChats.length);
+        return { ...group, chats: visibleChats };
+      })
+      .filter((group) => group.chats.length > 0);
+
+    return {
+      filteredChatCount: filteredChats.length,
+      visibleChatCount:
+        visiblePinnedChats.length +
+        visibleGroupedChats.reduce(
+          (total, group) => total + group.chats.length,
+          0,
+        ),
+      visiblePinnedChats,
+      visibleGroupedChats,
+    };
+  }, [
+    activeChatId,
+    groupedChats,
+    normalizedChatSearchQuery,
+    pinnedChats,
+    visibleChatLimit,
+  ]);
+
+  const hasMoreChats =
+    filteredChatList.visibleChatCount < filteredChatList.filteredChatCount;
+
+  useEffect(() => {
+    setVisibleChatLimit(CHAT_LIST_BATCH_SIZE);
+  }, [normalizedChatSearchQuery]);
+
+  function handleChatListScroll(event: ReactUIEvent<HTMLDivElement>) {
+    if (!hasMoreChats) return;
+
+    const element = event.currentTarget;
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+
+    if (distanceFromBottom <= CHAT_LIST_SCROLL_THRESHOLD_PX) {
+      setVisibleChatLimit((current) => current + CHAT_LIST_BATCH_SIZE);
+    }
+  }
 
   function startRenamingChat(chat: ChatSession) {
     setRenamingChatId(chat.id);
@@ -151,15 +234,20 @@ export const ChatSidebar = memo(function ChatSidebar({
             System prompt
           </DropdownMenuItem>
           <DropdownMenuItem
-            onSelect={() =>
-              onToggleAiTitleGeneration(chatTitleGenerationMode !== "ai")
-            }
+            className="text-foreground"
+            onSelect={(event) => {
+              event.preventDefault();
+              onToggleAiTitleGeneration(chatTitleGenerationMode !== "ai");
+            }}
           >
             <Checkbox
               checked={chatTitleGenerationMode === "ai"}
-              aria-hidden="true"
-              tabIndex={-1}
-              className="pointer-events-none"
+              onCheckedChange={(checked) =>
+                onToggleAiTitleGeneration(checked === true)
+              }
+              onClick={(event) => event.stopPropagation()}
+              onPointerDown={(event) => event.stopPropagation()}
+              className="cursor-pointer border-foreground/55 bg-background opacity-100 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:!text-primary-foreground"
             />
             Generate title
           </DropdownMenuItem>
@@ -339,7 +427,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           isCollapsed ? "flex md:hidden" : "flex",
         )}
       >
-        <div className="border-b py-3 pl-3 pr-2">
+        <div className="grid gap-2 border-b py-3 pl-3 pr-2">
           <div className="flex items-center justify-between gap-2">
             <Button
               type="button"
@@ -363,16 +451,51 @@ export const ChatSidebar = memo(function ChatSidebar({
 
             {renderAppOptionsMenu("shrink-0 rounded-lg")}
           </div>
+
+          <div className="border-t pt-2 pr-1">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={chatSearchQuery}
+                onChange={(event) => setChatSearchQuery(event.target.value)}
+                placeholder="Search chats"
+                className="h-8 rounded-lg pl-7 pr-8 text-sm"
+              />
+              {chatSearchQuery ? (
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => setChatSearchQuery("")}
+                  title="Clear search"
+                >
+                  <X className="size-3.5" />
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-2 chat-scrollbar">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto p-2 chat-scrollbar"
+          onScroll={handleChatListScroll}
+        >
           <div className="grid gap-3">
-            {pinnedChats.length > 0
-              ? renderChatSection("PINNED", pinnedChats)
+            {filteredChatList.visiblePinnedChats.length > 0
+              ? renderChatSection("PINNED", filteredChatList.visiblePinnedChats)
               : null}
-            {groupedChats.map((group) =>
+            {filteredChatList.visibleGroupedChats.map((group) =>
               renderChatSection(group.label, group.chats),
             )}
+            {filteredChatList.filteredChatCount === 0 ? (
+              <div className="px-2 py-6 text-center text-sm leading-5 text-muted-foreground">
+                No chats found.
+              </div>
+            ) : null}
+            {hasMoreChats ? (
+              <div className="px-2 pb-1 text-center text-sm leading-5 text-muted-foreground">
+                Scroll to load more chats
+              </div>
+            ) : null}
           </div>
         </div>
 

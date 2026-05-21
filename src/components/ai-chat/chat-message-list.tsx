@@ -2,6 +2,7 @@ import { Spinner as RadixSpinner } from "@radix-ui/themes";
 import {
   Brain,
   Check,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -11,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { memo } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 import { type ToolMentionOption } from "@/components/ai-chat/chat-composer";
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
@@ -28,6 +29,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Tooltip,
   TooltipContent,
@@ -47,6 +49,10 @@ import type {
 import { cn } from "@/lib/utils";
 
 const USER_MENTION_PATTERN = /(^|\s)@(tool|skill):([A-Za-z0-9_-]+)(?=$|\s)/g;
+const THINKING_SUMMARY_POLL_INTERVAL_MS = 2000;
+const THINKING_SUMMARY_TYPE_INTERVAL_MS = 16;
+const THINKING_SUMMARY_TYPE_TARGET_DURATION_MS = 1000;
+const THINKING_SENTENCE_PATTERN = /[^.!?。！？]+[.!?。！？]+(?:["'”’)}\]]+)?/gu;
 
 type VisibleAssistantProcessStep = ChatAssistantProcessStep & {
   sourceStepIds: string[];
@@ -77,6 +83,7 @@ type ChatMessageListProps = {
   visualFlushRequests: Record<string, number>;
   visualStreamingMessageIds: string[];
   collapsedToolStepIds: Record<string, boolean>;
+  collapsedThinkingStepIds: Record<string, boolean>;
   toolDisplayKey: string;
   skillDisplayKey: string;
   toolMentionOptions: ToolMentionOption[];
@@ -114,6 +121,7 @@ type ChatMessageListProps = {
     stepId: string,
     nextCollapsed: boolean,
   ) => void;
+  onToggleThinkingCollapsed: (stepId: string, nextCollapsed: boolean) => void;
   onSubmitAskUserResponse: (
     toolCall: ChatToolCall,
     request: AskUserRequest,
@@ -182,6 +190,306 @@ function renderJsonCodeBlock(
       className={className}
       content={`~~~json\n${normalized}\n~~~`}
     />
+  );
+}
+
+function cleanThinkingSummaryCandidate(value: string) {
+  return value
+    .replace(/```+/g, "")
+    .replace(/~~~+/g, "")
+    .replace(/^\s*(?:[-*•]+|\d+[.)]|#+)\s*/u, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function truncateThinkingSummary(value: string) {
+  if (value.length <= 140) return value;
+
+  const slice = value.slice(0, 141);
+  const boundary = Math.max(
+    slice.lastIndexOf(" "),
+    slice.lastIndexOf(","),
+    slice.lastIndexOf(";"),
+    slice.lastIndexOf(":"),
+  );
+
+  if (boundary >= 80) return `${slice.slice(0, boundary).trim()}…`;
+
+  return `${value.slice(0, 140).trim()}…`;
+}
+
+function getMeaningfulThinkingLines(content: string) {
+  return content
+    .split(/\r?\n+/)
+    .map(cleanThinkingSummaryCandidate)
+    .filter((line) => line.length >= 3 && !/^[`*_\-\s]+$/.test(line));
+}
+
+function getLatestCompletedThinkingSentence(lines: string[]) {
+  const completedSentences: string[] = [];
+
+  for (const line of lines) {
+    const matches = line.match(THINKING_SENTENCE_PATTERN) ?? [];
+
+    for (const match of matches) {
+      const sentence = cleanThinkingSummaryCandidate(match);
+      if (sentence.length >= 8) {
+        completedSentences.push(sentence);
+      }
+    }
+  }
+
+  return completedSentences[completedSentences.length - 1] ?? "";
+}
+
+function getLatestThinkingFragment(lines: string[]) {
+  const latestLine = lines[lines.length - 1] ?? "";
+  if (!latestLine) return "";
+
+  const sentenceParts = latestLine
+    .split(/(?<=[.!?。！？])\s+/u)
+    .map(cleanThinkingSummaryCandidate)
+    .filter((part) => part.length >= 8);
+
+  return sentenceParts[sentenceParts.length - 1] ?? latestLine;
+}
+
+function getCurrentThinkingSummary(
+  content: string,
+  { allowIncomplete }: { allowIncomplete: boolean },
+) {
+  const lines = getMeaningfulThinkingLines(content);
+  if (lines.length === 0) return "";
+
+  const completedSentence = getLatestCompletedThinkingSentence(lines);
+
+  if (allowIncomplete) {
+    const latestFragment = getLatestThinkingFragment(lines);
+    return truncateThinkingSummary(latestFragment || completedSentence);
+  }
+
+  return completedSentence ? truncateThinkingSummary(completedSentence) : "";
+}
+
+type ThinkingBlockProps = {
+  id: string;
+  content: string;
+  isStreaming: boolean;
+  isCollapsed: boolean;
+  flushVersion: number;
+  forceInstant?: boolean;
+  onToggleCollapsed: () => void;
+  onVisualProgress: () => void;
+  onVisualStreamingChange: (isStreaming: boolean) => void;
+};
+
+function ThinkingBlock({
+  id,
+  content,
+  isStreaming,
+  isCollapsed,
+  flushVersion,
+  forceInstant = false,
+  onToggleCollapsed,
+  onVisualProgress,
+  onVisualStreamingChange,
+}: ThinkingBlockProps) {
+  const summary = getCurrentThinkingSummary(content, {
+    allowIncomplete: !isStreaming,
+  });
+  const [displayedSummary, setDisplayedSummary] = useState(
+    isStreaming ? "" : summary,
+  );
+  const latestSummaryRef = useRef(summary);
+  const visibleSummaryRef = useRef(isStreaming ? "" : summary);
+  const typingTargetRef = useRef("");
+  const isTypingSummaryRef = useRef(false);
+  const typingTimeoutRef = useRef<number | null>(null);
+
+  const clearTypingTimeout = useCallback(() => {
+    if (typingTimeoutRef.current === null) return;
+    window.clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = null;
+  }, []);
+
+  const setDisplayedSummaryValue = useCallback((nextSummary: string) => {
+    setDisplayedSummary(nextSummary);
+  }, []);
+
+  const stopTypingSummary = useCallback(() => {
+    clearTypingTimeout();
+    isTypingSummaryRef.current = false;
+    typingTargetRef.current = "";
+  }, [clearTypingTimeout]);
+
+  const typeSummary = useCallback(
+    (nextSummary: string) => {
+      if (!nextSummary) return;
+      if (nextSummary === visibleSummaryRef.current) return;
+      if (nextSummary === typingTargetRef.current) return;
+      if (isTypingSummaryRef.current) return;
+
+      clearTypingTimeout();
+      isTypingSummaryRef.current = true;
+      typingTargetRef.current = nextSummary;
+
+      let visibleLength = 0;
+      const charsPerTick = Math.max(
+        2,
+        Math.ceil(
+          nextSummary.length /
+            (THINKING_SUMMARY_TYPE_TARGET_DURATION_MS /
+              THINKING_SUMMARY_TYPE_INTERVAL_MS),
+        ),
+      );
+
+      const tick = () => {
+        visibleLength = Math.min(
+          nextSummary.length,
+          visibleLength + charsPerTick,
+        );
+        setDisplayedSummaryValue(nextSummary.slice(0, visibleLength));
+
+        if (visibleLength < nextSummary.length) {
+          typingTimeoutRef.current = window.setTimeout(
+            tick,
+            THINKING_SUMMARY_TYPE_INTERVAL_MS,
+          );
+          return;
+        }
+
+        typingTimeoutRef.current = null;
+        isTypingSummaryRef.current = false;
+        typingTargetRef.current = "";
+        visibleSummaryRef.current = nextSummary;
+      };
+
+      setDisplayedSummaryValue("");
+      tick();
+    },
+    [clearTypingTimeout, setDisplayedSummaryValue],
+  );
+
+  useEffect(() => {
+    return clearTypingTimeout;
+  }, [clearTypingTimeout]);
+
+  useEffect(() => {
+    latestSummaryRef.current = summary;
+
+    if (forceInstant) {
+      stopTypingSummary();
+      visibleSummaryRef.current = summary;
+      setDisplayedSummaryValue(summary);
+      return;
+    }
+
+    if (!isStreaming) {
+      if (!summary) {
+        stopTypingSummary();
+        visibleSummaryRef.current = "";
+        setDisplayedSummaryValue("");
+        return;
+      }
+
+      if (summary === visibleSummaryRef.current) return;
+      if (summary === typingTargetRef.current) return;
+
+      if (isTypingSummaryRef.current) {
+        stopTypingSummary();
+      }
+
+      typeSummary(summary);
+      return;
+    }
+
+    if (summary && !visibleSummaryRef.current && !typingTargetRef.current) {
+      typeSummary(summary);
+    }
+  }, [
+    forceInstant,
+    isStreaming,
+    setDisplayedSummaryValue,
+    stopTypingSummary,
+    summary,
+    typeSummary,
+  ]);
+
+  useEffect(() => {
+    if (!isStreaming) return;
+
+    const publishLatestCompletedSummary = () => {
+      const nextSummary = latestSummaryRef.current;
+      if (!nextSummary) return;
+      if (nextSummary === visibleSummaryRef.current) return;
+      if (nextSummary === typingTargetRef.current) return;
+      if (isTypingSummaryRef.current) return;
+      typeSummary(nextSummary);
+    };
+
+    const intervalId = window.setInterval(
+      publishLatestCompletedSummary,
+      THINKING_SUMMARY_POLL_INTERVAL_MS,
+    );
+
+    return () => window.clearInterval(intervalId);
+  }, [isStreaming, typeSummary]);
+
+  return (
+    <article className="flex min-w-0 max-w-full justify-start">
+      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+        <button
+          type="button"
+          className="w-full rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onToggleCollapsed}
+          aria-expanded={!isCollapsed}
+          aria-controls={`${id}-thinking-content`}
+        >
+          <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2">
+              {isStreaming ? (
+                <Spinner className="size-3.5 shrink-0" />
+              ) : (
+                <Brain className="size-3.5 shrink-0" />
+              )}
+              <span className="truncate">Thinking</span>
+            </div>
+            {isCollapsed ? (
+              <ChevronRight className="size-3.5 shrink-0" />
+            ) : (
+              <ChevronDown className="size-3.5 shrink-0" />
+            )}
+          </div>
+        </button>
+
+        {isCollapsed ? (
+          displayedSummary ? (
+            <div
+              id={`${id}-thinking-content`}
+              className="mt-2 h-5 min-w-0 overflow-hidden text-sm leading-5 text-muted-foreground"
+            >
+              <span className="block truncate">{displayedSummary}</span>
+            </div>
+          ) : null
+        ) : (
+          <div
+            id={`${id}-thinking-content`}
+            className="mt-2 min-w-0 overflow-visible text-sm leading-5"
+          >
+            <SmoothAssistantMessageContent
+              content={content}
+              className="chat-markdown-compact shrink-0"
+              isApiStreaming={isStreaming}
+              skipSyntaxHighlight={isStreaming}
+              flushVersion={flushVersion}
+              forceInstant={forceInstant}
+              onVisualProgress={onVisualProgress}
+              onVisualStreamingChange={onVisualStreamingChange}
+            />
+          </div>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -299,6 +607,25 @@ function getRelevantCollapsedKeys(message: ChatMessage) {
   return [...keys];
 }
 
+function getRelevantThinkingCollapsedKeys(message: ChatMessage) {
+  if (message.role !== "assistant") return [];
+
+  const activeVariant = getActiveVariant(message);
+  const processSteps = activeVariant?.processSteps ?? [];
+  const visibleProcessSteps = getVisibleAssistantProcessSteps(processSteps);
+  const keys = new Set<string>();
+
+  for (const step of visibleProcessSteps) {
+    if (step.type === "thinking") keys.add(step.id);
+  }
+
+  if (keys.size === 0 && activeVariant?.reasoning?.trim()) {
+    keys.add(`${message.id}:reasoning`);
+  }
+
+  return [...keys];
+}
+
 function hasVisualStreamingForMessage(
   visualStreamingMessageIds: string[],
   messageId: string,
@@ -352,6 +679,7 @@ const ChatMessageItem = memo(
     visualFlushRequests,
     visualStreamingMessageIds,
     collapsedToolStepIds,
+    collapsedThinkingStepIds,
     toolMentionOptions,
     skillMentionOptions,
     registerMessageElement,
@@ -370,6 +698,7 @@ const ChatMessageItem = memo(
     onSubmitEditedUserMessage,
     onSelectAssistantVariant,
     onToggleToolExecutionCollapsed,
+    onToggleThinkingCollapsed,
     onSubmitAskUserResponse,
     onCancelAskUserRequest,
     onAskUserLayoutChange,
@@ -432,37 +761,37 @@ const ChatMessageItem = memo(
                 const isThinkingStreaming =
                   status === "streaming" && isLatestProcessStep;
 
+                const isCollapsed = collapsedThinkingStepIds[step.id] ?? true;
+
                 return (
-                  <article
+                  <ThinkingBlock
                     key={step.id}
-                    className="flex min-w-0 max-w-full justify-start"
-                  >
-                    <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-dashed bg-muted/40 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
-                      <div className="mb-2 flex items-center gap-2 text-sm font-medium uppercase tracking-wide">
-                        <Brain className="size-3.5" />
-                        Thinking{isThinkingStreaming ? "..." : ""}
-                      </div>
-                      <div className="min-w-0 overflow-visible text-sm leading-5">
-                        <SmoothAssistantMessageContent
-                          content={step.content}
-                          className="chat-markdown-compact shrink-0"
-                          isApiStreaming={isThinkingStreaming}
-                          skipSyntaxHighlight={isThinkingStreaming}
-                          flushVersion={stepFlushVersion}
-                          forceInstant={!isThinkingStreaming}
-                          onVisualProgress={() =>
-                            onAssistantVisualProgress(activeChatId)
-                          }
-                          onVisualStreamingChange={(isStreaming) =>
-                            onAssistantVisualStreamingChange(
-                              `${message.id}:${step.id}`,
-                              isStreaming,
-                            )
-                          }
-                        />
-                      </div>
-                    </div>
-                  </article>
+                    id={step.id}
+                    content={step.content}
+                    isStreaming={isThinkingStreaming}
+                    isCollapsed={isCollapsed}
+                    flushVersion={stepFlushVersion}
+                    forceInstant={!isThinkingStreaming}
+                    onToggleCollapsed={() => {
+                      const nextCollapsed = !isCollapsed;
+                      if (nextCollapsed) {
+                        onAssistantVisualStreamingChange(
+                          `${message.id}:${step.id}`,
+                          false,
+                        );
+                      }
+                      onToggleThinkingCollapsed(step.id, nextCollapsed);
+                    }}
+                    onVisualProgress={() =>
+                      onAssistantVisualProgress(activeChatId)
+                    }
+                    onVisualStreamingChange={(isStreaming) =>
+                      onAssistantVisualStreamingChange(
+                        `${message.id}:${step.id}`,
+                        isStreaming,
+                      )
+                    }
+                  />
                 );
               }
 
@@ -562,35 +891,40 @@ const ChatMessageItem = memo(
 
         {message.role === "assistant" &&
           !hasVisibleProcessSteps &&
-          reasoning.trim() && (
-            <article className="flex min-w-0 max-w-full justify-start">
-              <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-dashed bg-muted/40 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
-                <div className="mb-2 flex items-center gap-2 text-sm font-medium uppercase tracking-wide">
-                  <Brain className="size-3.5" />
-                  Thinking{isMessageStreaming ? "..." : ""}
-                </div>
-                <div className="min-w-0 overflow-visible text-sm leading-5">
-                  <SmoothAssistantMessageContent
-                    content={reasoning}
-                    className="chat-markdown-compact shrink-0"
-                    isApiStreaming={status === "streaming" && !content}
-                    skipSyntaxHighlight={status === "streaming" && !content}
-                    flushVersion={visualFlushRequests[message.id] ?? 0}
-                    forceInstant={Boolean(content)}
-                    onVisualProgress={() =>
-                      onAssistantVisualProgress(activeChatId)
-                    }
-                    onVisualStreamingChange={(isStreaming) =>
-                      onAssistantVisualStreamingChange(
-                        `${message.id}:reasoning`,
-                        isStreaming,
-                      )
-                    }
-                  />
-                </div>
-              </div>
-            </article>
-          )}
+          reasoning.trim() &&
+          (() => {
+            const reasoningStepId = `${message.id}:reasoning`;
+            const isCollapsed =
+              collapsedThinkingStepIds[reasoningStepId] ?? true;
+
+            return (
+              <ThinkingBlock
+                id={reasoningStepId}
+                content={reasoning}
+                isStreaming={status === "streaming" && !content}
+                isCollapsed={isCollapsed}
+                flushVersion={visualFlushRequests[message.id] ?? 0}
+                forceInstant={Boolean(content)}
+                onToggleCollapsed={() => {
+                  const nextCollapsed = !isCollapsed;
+                  if (nextCollapsed) {
+                    onAssistantVisualStreamingChange(
+                      `${message.id}:reasoning`,
+                      false,
+                    );
+                  }
+                  onToggleThinkingCollapsed(reasoningStepId, nextCollapsed);
+                }}
+                onVisualProgress={() => onAssistantVisualProgress(activeChatId)}
+                onVisualStreamingChange={(isStreaming) =>
+                  onAssistantVisualStreamingChange(
+                    `${message.id}:reasoning`,
+                    isStreaming,
+                  )
+                }
+              />
+            );
+          })()}
 
         {message.role === "assistant" &&
           !hasVisibleProcessSteps &&
@@ -1043,6 +1377,19 @@ const ChatMessageItem = memo(
         collapsedKeys,
         previous.collapsedToolStepIds,
         next.collapsedToolStepIds,
+      )
+    ) {
+      return false;
+    }
+
+    const thinkingCollapsedKeys = getRelevantThinkingCollapsedKeys(
+      previous.message,
+    );
+    if (
+      !areRecordValuesEqual(
+        thinkingCollapsedKeys,
+        previous.collapsedThinkingStepIds,
+        next.collapsedThinkingStepIds,
       )
     ) {
       return false;

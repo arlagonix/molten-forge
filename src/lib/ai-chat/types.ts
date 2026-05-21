@@ -117,9 +117,6 @@ export type AskUserQuestion = {
   question: string;
   description?: string;
   options: AskUserOption[];
-  input?: {
-    multiline?: boolean;
-  };
 };
 
 export type AskUserRequest = {
