@@ -1,6 +1,15 @@
 "use client";
 
-import { Check, Clipboard, Download, WrapText } from "lucide-react";
+import {
+  Check,
+  Clipboard,
+  Code2,
+  Download,
+  Eye,
+  Maximize2,
+  Minimize2,
+  WrapText,
+} from "lucide-react";
 import React, { isValidElement, ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
@@ -12,7 +21,14 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import type { PluggableList } from "unified";
 
+import {
+  CodeBlockDisplayMode,
+  CodeBlockPreviewDialog,
+  CodeBlockSourceView,
+  RenderablePreview,
+} from "@/components/ai-chat/code-block-preview-dialog";
 import { Button } from "@/components/ui/button";
+import { isRenderableCodeBlock } from "@/lib/ai-chat/renderable-code-blocks";
 import { cn } from "@/lib/utils";
 
 type MarkdownMessageProps = {
@@ -101,6 +117,8 @@ const LANGUAGE_LABELS: Record<string, string> = {
   dockerfile: "dockerfile",
   go: "go",
   html: "html",
+  mermaid: "mermaid",
+  mmd: "mermaid",
   java: "java",
   javascript: "javascript",
   js: "javascript",
@@ -146,6 +164,8 @@ const LANGUAGE_EXTENSIONS: Record<string, string> = {
   dockerfile: "Dockerfile",
   go: "go",
   html: "html",
+  mermaid: "mmd",
+  mmd: "mmd",
   java: "java",
   javascript: "js",
   js: "js",
@@ -252,6 +272,164 @@ function languageFromNode(node: ReactNode): string | undefined {
   return languageFromNode(props.children);
 }
 
+type CodeBlockFrameProps = {
+  children: ReactNode;
+  className?: string;
+  copied: boolean;
+  canPreview: boolean;
+  displayLanguage: string;
+  displayMode: CodeBlockDisplayMode;
+  isFullscreen?: boolean;
+  language?: string;
+  payload: string;
+  suggestedFilename: string;
+  wrapped: boolean;
+  onCopyCode: () => void;
+  onDownloadCode: () => void;
+  onFullscreenClick: () => void;
+  onToggleDisplayMode: () => void;
+  onToggleWrapped: () => void;
+};
+
+function CodeBlockFrame({
+  children,
+  className,
+  copied,
+  canPreview,
+  displayLanguage,
+  displayMode,
+  isFullscreen = false,
+  language,
+  payload,
+  suggestedFilename,
+  wrapped,
+  onCopyCode,
+  onDownloadCode,
+  onFullscreenClick,
+  onToggleDisplayMode,
+  onToggleWrapped,
+}: CodeBlockFrameProps) {
+  return (
+    <div
+      className={cn(
+        "chat-code-block",
+        isFullscreen && "chat-code-block-fullscreen",
+        className,
+      )}
+    >
+      <div className="chat-code-header">
+        <span className="chat-code-language" title={displayLanguage}>
+          {displayLanguage}
+        </span>
+
+        <div className="chat-code-toolbar-actions" aria-label="Code block actions">
+          {canPreview ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="icon-sm"
+              className="chat-code-action"
+              onClick={onToggleDisplayMode}
+              title={displayMode === "preview" ? "Show code" : "Show preview"}
+              aria-label={
+                displayMode === "preview" ? "Show code" : "Show preview"
+              }
+            >
+              {displayMode === "preview" ? (
+                <Code2 className="size-3.5" />
+              ) : (
+                <Eye className="size-3.5" />
+              )}
+            </Button>
+          ) : null}
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            className="chat-code-action"
+            onClick={onFullscreenClick}
+            title={isFullscreen ? "Close fullscreen" : "Open fullscreen"}
+            aria-label={isFullscreen ? "Close fullscreen" : "Open fullscreen"}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="size-3.5" />
+            ) : (
+              <Maximize2 className="size-3.5" />
+            )}
+          </Button>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            className={cn(
+              "chat-code-action",
+              wrapped && "chat-code-action-active",
+            )}
+            onClick={onToggleWrapped}
+            title={wrapped ? "Disable line wrap" : "Enable line wrap"}
+            aria-label={wrapped ? "Disable line wrap" : "Enable line wrap"}
+            aria-pressed={wrapped}
+          >
+            <WrapText className="size-3.5" />
+          </Button>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            className="chat-code-action"
+            onClick={onCopyCode}
+            title={copied ? "Copied" : "Copy code"}
+            aria-label={copied ? "Copied" : "Copy code"}
+          >
+            {copied ? (
+              <Check className="size-3.5" />
+            ) : (
+              <Clipboard className="size-3.5" />
+            )}
+          </Button>
+
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon-sm"
+            className="chat-code-action"
+            onClick={onDownloadCode}
+            title={`Download ${suggestedFilename}`}
+            aria-label={`Download ${suggestedFilename}`}
+          >
+            <Download className="size-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {displayMode === "preview" && canPreview ? (
+        <div
+          className={cn(
+            "chat-code-preview",
+            isFullscreen && "chat-code-preview-fullscreen",
+          )}
+        >
+          <RenderablePreview
+            source={payload}
+            language={language}
+            className={isFullscreen ? "h-full min-h-0" : undefined}
+          />
+        </div>
+      ) : (
+        <CodeBlockSourceView
+          wrapped={wrapped}
+          className={isFullscreen ? "min-h-0 flex-1 overflow-auto" : undefined}
+        >
+          {children}
+        </CodeBlockSourceView>
+      )}
+    </div>
+  );
+}
+
 function CodeBlock({
   children,
   className,
@@ -261,11 +439,14 @@ function CodeBlock({
 }) {
   const [copied, setCopied] = React.useState(false);
   const [wrapped, setWrapped] = React.useState(true);
+  const [displayMode, setDisplayMode] = React.useState<CodeBlockDisplayMode>("code");
+  const [fullscreenOpen, setFullscreenOpen] = React.useState(false);
   const code = React.Children.toArray(children).map(textFromNode).join("");
   const language = languageFromNode(children);
   const displayLanguage = normalizeCodeLanguage(language);
   const payload = codePayload(code);
   const suggestedFilename = filenameForLanguage(language);
+  const canPreview = isRenderableCodeBlock(language);
 
   async function copyCode() {
     if (!payload) return;
@@ -294,76 +475,59 @@ function CodeBlock({
     URL.revokeObjectURL(url);
   }
 
+  function toggleDisplayMode() {
+    setDisplayMode((mode) => (mode === "preview" ? "code" : "preview"));
+  }
+
+  function toggleWrapped() {
+    setWrapped((value) => !value);
+  }
+
   return (
-    <div className={cn("chat-code-block", className)}>
-      <div className="chat-code-header">
-        <span className="chat-code-language" title={displayLanguage}>
-          {displayLanguage}
-        </span>
-
-        <div className="chat-code-toolbar-actions" aria-label="Code block actions">
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon-sm"
-            className={cn(
-              "chat-code-action",
-              wrapped && "chat-code-action-active",
-            )}
-            onClick={() => setWrapped((value) => !value)}
-            title={wrapped ? "Disable line wrap" : "Enable line wrap"}
-            aria-label={wrapped ? "Disable line wrap" : "Enable line wrap"}
-            aria-pressed={wrapped}
-          >
-            <WrapText className="size-3.5" />
-          </Button>
-
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon-sm"
-            className="chat-code-action"
-            onClick={copyCode}
-            title={copied ? "Copied" : "Copy code"}
-            aria-label={copied ? "Copied" : "Copy code"}
-          >
-            {copied ? (
-              <Check className="size-3.5" />
-            ) : (
-              <Clipboard className="size-3.5" />
-            )}
-          </Button>
-
-          <Button
-            type="button"
-            variant="secondary"
-            size="icon-sm"
-            className="chat-code-action"
-            onClick={downloadCode}
-            title={`Download ${suggestedFilename}`}
-            aria-label={`Download ${suggestedFilename}`}
-          >
-            <Download className="size-3.5" />
-          </Button>
-        </div>
-      </div>
-
-      <div
-        className={cn(
-          "chat-code-scroll",
-          wrapped ? "chat-code-scroll-wrap" : "chat-code-scroll-nowrap",
-        )}
+    <>
+      <CodeBlockFrame
+        className={className}
+        copied={copied}
+        canPreview={canPreview}
+        displayLanguage={displayLanguage}
+        displayMode={displayMode}
+        language={language}
+        payload={payload}
+        suggestedFilename={suggestedFilename}
+        wrapped={wrapped}
+        onCopyCode={copyCode}
+        onDownloadCode={downloadCode}
+        onFullscreenClick={() => setFullscreenOpen(true)}
+        onToggleDisplayMode={toggleDisplayMode}
+        onToggleWrapped={toggleWrapped}
       >
-        <pre
-          className={cn(
-            "chat-code-pre",
-            wrapped ? "chat-code-pre-wrap" : "chat-code-pre-nowrap",
-          )}
+        {children}
+      </CodeBlockFrame>
+
+      <CodeBlockPreviewDialog
+        open={fullscreenOpen}
+        onOpenChange={setFullscreenOpen}
+      >
+        <CodeBlockFrame
+          copied={copied}
+          canPreview={canPreview}
+          displayLanguage={displayLanguage}
+          displayMode={displayMode}
+          isFullscreen
+          language={language}
+          payload={payload}
+          suggestedFilename={suggestedFilename}
+          wrapped={wrapped}
+          onCopyCode={copyCode}
+          onDownloadCode={downloadCode}
+          onFullscreenClick={() => setFullscreenOpen(false)}
+          onToggleDisplayMode={toggleDisplayMode}
+          onToggleWrapped={toggleWrapped}
         >
           {children}
-        </pre>
-      </div>
-    </div>
+        </CodeBlockFrame>
+      </CodeBlockPreviewDialog>
+    </>
   );
 }
 

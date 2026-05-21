@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   FolderOpen,
+  Maximize2,
   MoreHorizontal,
   Plus,
   RefreshCcw,
@@ -191,6 +192,7 @@ export const SkillsDialog = memo(function SkillsDialog({
   );
   const [skillDraft, setSkillDraft] = useState<SkillDraft | null>(null);
   const [recommendedToolSearch, setRecommendedToolSearch] = useState("");
+  const [instructionsEditorOpen, setInstructionsEditorOpen] = useState(false);
 
   const selectedSkill = useMemo(
     () =>
@@ -410,7 +412,8 @@ export const SkillsDialog = memo(function SkillsDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
         <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
           <DialogTitle>Skills</DialogTitle>
@@ -699,7 +702,19 @@ export const SkillsDialog = memo(function SkillsDialog({
                     </div>
 
                     <div className="grid gap-2">
-                      <Label htmlFor="skill-instructions">Instructions</Label>
+                      <div className="flex items-center justify-between gap-2">
+                        <Label htmlFor="skill-instructions">Instructions</Label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 rounded-lg px-2 text-sm"
+                          onClick={() => setInstructionsEditorOpen(true)}
+                        >
+                          <Maximize2 className="size-4" />
+                          Open editor
+                        </Button>
+                      </div>
                       <Textarea
                         id="skill-instructions"
                         value={skillDraft.instructions}
@@ -891,6 +906,42 @@ export const SkillsDialog = memo(function SkillsDialog({
           </div>
         </div>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+
+      {skillDraft ? (
+        <Dialog
+          open={instructionsEditorOpen}
+          onOpenChange={setInstructionsEditorOpen}
+        >
+          <DialogContent className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col gap-4 p-5 sm:max-w-6xl">
+            <DialogHeader className="pr-8">
+              <DialogTitle>Edit instructions</DialogTitle>
+              <DialogDescription>
+                Edit the selected skill instructions in a larger focused editor.
+              </DialogDescription>
+            </DialogHeader>
+
+            <Textarea
+              value={skillDraft.instructions}
+              onChange={(event) =>
+                updateSkillDraft({ instructions: event.target.value })
+              }
+              placeholder="Write the reusable instructions for this skill..."
+              className="min-h-0 flex-1 resize-none rounded-lg font-mono text-sm leading-6"
+            />
+
+            <DialogFooter>
+              <Button
+                type="button"
+                className="rounded-lg"
+                onClick={() => setInstructionsEditorOpen(false)}
+              >
+                Done
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
+    </>
   );
 });

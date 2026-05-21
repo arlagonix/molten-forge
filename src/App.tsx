@@ -58,9 +58,9 @@ import {
   loadAppSettings,
   loadChats,
   loadProvidersState,
-  loadSystemPrompt,
   loadSkills,
   loadSkillsSettings,
+  loadSystemPrompt,
   loadTools,
   loadToolsSettings,
   saveActiveChatId,
@@ -922,6 +922,7 @@ export default function Home() {
   }) {
     return (
       <ToolExecutionBlock
+        key={id}
         id={id}
         toolCall={toolCall}
         toolResult={toolResult}

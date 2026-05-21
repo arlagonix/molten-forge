@@ -604,4 +604,75 @@
   .chat-markdown i {
     font-style: oblique 8deg;
   }
+
+
+  .chat-markdown .chat-code-block-fullscreen {
+    @apply m-0 flex h-full min-h-0 flex-col overflow-hidden rounded-lg;
+  }
+
+  .chat-markdown .chat-code-block-fullscreen .chat-code-header {
+    position: static;
+    top: auto;
+    @apply shrink-0;
+  }
+
+  .chat-markdown .chat-code-block-fullscreen .chat-code-scroll {
+    @apply min-h-0 flex-1 overflow-auto;
+  }
+
+  .chat-markdown .chat-code-preview {
+    @apply min-h-36 w-full overflow-auto bg-background/40 p-3;
+  }
+
+  .chat-markdown .chat-code-preview-fullscreen {
+    @apply min-h-0 flex-1 overflow-auto;
+  }
+
+  .chat-code-preview-fullscreen .chat-code-preview-loading,
+  .chat-code-fullscreen-preview .chat-code-preview-loading,
+  .chat-markdown .chat-code-preview-loading {
+    @apply flex min-h-36 items-center justify-center rounded-md border border-dashed border-border bg-muted/40 px-4 py-8 text-sm text-muted-foreground;
+  }
+
+  .chat-code-preview-fullscreen .chat-code-preview-error,
+  .chat-code-fullscreen-preview .chat-code-preview-error,
+  .chat-markdown .chat-code-preview-error {
+    @apply whitespace-pre-wrap rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive;
+  }
+
+  .chat-code-preview-fullscreen .chat-code-mermaid-preview,
+  .chat-code-fullscreen-preview .chat-code-mermaid-preview,
+  .chat-markdown .chat-code-mermaid-preview {
+    @apply flex min-h-36 w-full items-center justify-center overflow-auto rounded-md bg-background p-3;
+  }
+
+  .chat-code-preview-fullscreen .chat-code-mermaid-preview svg,
+  .chat-code-fullscreen-preview .chat-code-mermaid-preview svg,
+  .chat-markdown .chat-code-mermaid-preview svg {
+    max-width: 100%;
+    height: auto;
+  }
+
+  .chat-code-preview-fullscreen .chat-code-html-preview,
+  .chat-code-fullscreen-preview .chat-code-html-preview,
+  .chat-markdown .chat-code-html-preview {
+    @apply h-full min-h-72 min-w-0 overflow-auto rounded-md border border-border bg-background;
+  }
+
+  .chat-code-preview-fullscreen .chat-code-html-preview,
+  .chat-code-fullscreen-preview .chat-code-html-preview {
+    @apply min-h-0 rounded-none border-0;
+  }
+
+  .chat-code-preview-fullscreen .chat-code-html-preview-frame,
+  .chat-code-fullscreen-preview .chat-code-html-preview-frame,
+  .chat-markdown .chat-code-html-preview-frame {
+    @apply block h-full min-h-72 w-full min-w-[720px] border-0 bg-background;
+  }
+
+  .chat-code-preview-fullscreen .chat-code-html-preview-frame,
+  .chat-code-fullscreen-preview .chat-code-html-preview-frame {
+    @apply min-h-[480px];
+  }
+
 }
