@@ -414,498 +414,506 @@ export const SkillsDialog = memo(function SkillsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
-        <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
-          <DialogTitle>Skills</DialogTitle>
-          <DialogDescription>
-            Define reusable instruction packages, enable or disable them
-            globally, and attach recommended tools.
-          </DialogDescription>
-        </DialogHeader>
+        <DialogContent className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
+          <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
+            <DialogTitle>Skills</DialogTitle>
+            <DialogDescription>
+              Define reusable instruction packages, enable or disable them
+              globally, and attach recommended tools.
+            </DialogDescription>
+          </DialogHeader>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                Skills
-              </Label>
-              <span className="text-sm text-muted-foreground">
-                {enabledSkillsCount}/{loadedSkills.length} enabled
-              </span>
-            </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
+            <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  Skills
+                </Label>
+                <span className="text-sm text-muted-foreground">
+                  {enabledSkillsCount}/{loadedSkills.length} enabled
+                </span>
+              </div>
 
-            <div
-              role="button"
-              tabIndex={0}
-              className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() =>
-                onSkillsSettingsChange((current) => ({
-                  ...current,
-                  enabled: !current.enabled,
-                }))
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
+              <div
+                role="button"
+                tabIndex={0}
+                className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() =>
                   onSkillsSettingsChange((current) => ({
                     ...current,
                     enabled: !current.enabled,
-                  }));
-                }
-              }}
-            >
-              <span className="min-w-0">
-                <span className="block font-medium">
-                  Enable skills globally
-                </span>
-                <span className="block select-none text-sm leading-5 text-muted-foreground">
-                  Disabled globally hides skills from model auto-loading by
-                  default.
-                </span>
-              </span>
-              <Switch
-                checked={skillsSettings.enabled}
-                onClick={(event) => event.stopPropagation()}
-                onCheckedChange={(checked) =>
-                  onSkillsSettingsChange((current) => ({
-                    ...current,
-                    enabled: checked,
                   }))
                 }
-                className="shrink-0 cursor-pointer"
-              />
-            </div>
-
-            <div className="mb-3 flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="flex-1 rounded-lg"
-                onClick={() => {
-                  const draft = createBlankSkillDraft();
-                  setSelectedSkillName(null);
-                  setSkillDraft(draft);
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSkillsSettingsChange((current) => ({
+                      ...current,
+                      enabled: !current.enabled,
+                    }));
+                  }
                 }}
               >
-                <Plus className="size-4" />
-                Add skill
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="rounded-lg"
-                    title="Skill actions"
-                  >
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-60">
-                  <DropdownMenuItem
-                    disabled={isLoadingSkills}
-                    onSelect={() => void importSkillFiles()}
-                  >
-                    <Download className="size-4" />
-                    Import skills...
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => void exportAllSkills()}>
-                    <Upload className="size-4" />
-                    Export all skills...
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onSelect={() => void openSkillStorageFolder()}
-                  >
-                    <FolderOpen className="size-4" />
-                    Open skills folder
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    disabled={isLoadingSkills}
-                    onSelect={() => void refreshSkills(true)}
-                  >
-                    <RefreshCcw
-                      className={cn(
-                        "size-4",
-                        isLoadingSkills && "animate-spin",
-                      )}
-                    />
-                    Reload from app storage
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                <span className="min-w-0">
+                  <span className="block font-medium">
+                    Enable skills globally
+                  </span>
+                  <span className="block select-none text-sm leading-5 text-muted-foreground">
+                    Disabled globally hides skills from model auto-loading by
+                    default.
+                  </span>
+                </span>
+                <Switch
+                  checked={skillsSettings.enabled}
+                  onClick={(event) => event.stopPropagation()}
+                  onCheckedChange={(checked) =>
+                    onSkillsSettingsChange((current) => ({
+                      ...current,
+                      enabled: checked,
+                    }))
+                  }
+                  className="shrink-0 cursor-pointer"
+                />
+              </div>
 
-            <div className="grid gap-1.5">
-              {loadedSkills.map((skill) => (
-                <div
-                  key={skill.id}
-                  role="button"
-                  tabIndex={0}
-                  className={cn(
-                    "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                    selectedSkill?.id === skill.id
-                      ? "border-primary/30 bg-accent text-accent-foreground"
-                      : "border-transparent hover:border-border hover:bg-muted/60",
-                  )}
-                  onClick={() => setSelectedSkillName(skill.name)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedSkillName(skill.name);
-                    }
+              <div className="mb-3 flex gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="flex-1 rounded-lg"
+                  onClick={() => {
+                    const draft = createBlankSkillDraft();
+                    setSelectedSkillName(null);
+                    setSkillDraft(draft);
                   }}
                 >
-                  <BookOpen className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-base leading-6">
-                      {skill.name}
-                    </div>
-                  </div>
-                  <Switch
-                    checked={skill.enabled}
-                    onClick={(event) => event.stopPropagation()}
-                    onCheckedChange={async (checked) => {
-                      const updated = { ...skill, enabled: checked };
-                      try {
-                        const saved = await saveSkill(updated);
-                        onLoadedSkillsChange((current) =>
-                          current.map((item) =>
-                            item.id === saved.id ? saved : item,
-                          ),
-                        );
-                        if (skillDraft?.id === saved.id)
-                          setSkillDraft(skillToDraft(saved));
-                      } catch (error) {
-                        showError(
-                          "Failed to update skill",
-                          labelForError(error),
-                        );
+                  <Plus className="size-4" />
+                  Add skill
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="rounded-lg"
+                      title="Skill actions"
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-60">
+                    <DropdownMenuItem
+                      disabled={isLoadingSkills}
+                      onSelect={() => void importSkillFiles()}
+                    >
+                      <Download className="size-4" />
+                      Import skills...
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => void exportAllSkills()}>
+                      <Upload className="size-4" />
+                      Export all skills...
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => void openSkillStorageFolder()}
+                    >
+                      <FolderOpen className="size-4" />
+                      Open skills folder
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={isLoadingSkills}
+                      onSelect={() => void refreshSkills(true)}
+                    >
+                      <RefreshCcw
+                        className={cn(
+                          "size-4",
+                          isLoadingSkills && "animate-spin",
+                        )}
+                      />
+                      Reload from app storage
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+
+              <div className="grid gap-1.5">
+                {loadedSkills.map((skill) => (
+                  <div
+                    key={skill.id}
+                    role="button"
+                    tabIndex={0}
+                    className={cn(
+                      "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      selectedSkill?.id === skill.id
+                        ? "border-primary/30 bg-accent text-accent-foreground"
+                        : "border-transparent hover:border-border hover:bg-muted/60",
+                    )}
+                    onClick={() => setSelectedSkillName(skill.name)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedSkillName(skill.name);
                       }
                     }}
-                    className="mt-0.5 shrink-0 cursor-pointer"
-                    title={
-                      skill.enabled
-                        ? "Disable skill globally"
-                        : "Enable skill globally"
-                    }
-                  />
-                </div>
-              ))}
-
-              {loadedSkills.length === 0 && (
-                <div className="rounded-lg border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
-                  No skills configured.
-                </div>
-              )}
-            </div>
-
-            {skillLoadErrors.length > 0 && (
-              <div className="mt-4 grid gap-2">
-                <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Skill file issues
-                </Label>
-                {skillLoadErrors.map((error) => (
-                  <div
-                    key={`${error.source}:${error.message}`}
-                    className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-sm leading-5"
                   >
-                    <div
-                      className="truncate font-medium text-destructive"
-                      title={error.source}
-                    >
-                      {error.source}
+                    <BookOpen className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-base leading-6">
+                        {skill.name}
+                      </div>
                     </div>
-                    <div className="text-muted-foreground">{error.message}</div>
+                    <Switch
+                      checked={skill.enabled}
+                      onClick={(event) => event.stopPropagation()}
+                      onCheckedChange={async (checked) => {
+                        const updated = { ...skill, enabled: checked };
+                        try {
+                          const saved = await saveSkill(updated);
+                          onLoadedSkillsChange((current) =>
+                            current.map((item) =>
+                              item.id === saved.id ? saved : item,
+                            ),
+                          );
+                          if (skillDraft?.id === saved.id)
+                            setSkillDraft(skillToDraft(saved));
+                        } catch (error) {
+                          showError(
+                            "Failed to update skill",
+                            labelForError(error),
+                          );
+                        }
+                      }}
+                      className="mt-0.5 shrink-0 cursor-pointer"
+                      title={
+                        skill.enabled
+                          ? "Disable skill globally"
+                          : "Enable skill globally"
+                      }
+                    />
                   </div>
                 ))}
-              </div>
-            )}
-          </aside>
 
-          <div className="min-h-0 flex flex-col overflow-hidden">
-            {skillDraft ? (
-              <>
-                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
-                  <div className="flex w-full items-center justify-between gap-4">
-                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                      {selectedSkill ? "Edit skill" : "New skill"}
-                    </Label>
-                    {selectedSkill && skillDraft && (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
+                {loadedSkills.length === 0 && (
+                  <div className="rounded-lg border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
+                    No skills configured.
+                  </div>
+                )}
+              </div>
+
+              {skillLoadErrors.length > 0 && (
+                <div className="mt-4 grid gap-2">
+                  <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                    Skill file issues
+                  </Label>
+                  {skillLoadErrors.map((error) => (
+                    <div
+                      key={`${error.source}:${error.message}`}
+                      className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-sm leading-5"
+                    >
+                      <div
+                        className="truncate font-medium text-destructive"
+                        title={error.source}
+                      >
+                        {error.source}
+                      </div>
+                      <div className="text-muted-foreground">
+                        {error.message}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </aside>
+
+            <div className="min-h-0 flex flex-col overflow-hidden">
+              {skillDraft ? (
+                <>
+                  <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
+                    <div className="flex w-full items-center justify-between gap-4">
+                      <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                        {selectedSkill ? "Edit skill" : "New skill"}
+                      </Label>
+                      {selectedSkill && skillDraft && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="rounded-lg"
+                              title="Skill options"
+                            >
+                              <MoreHorizontal className="size-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem
+                              onSelect={() => void cloneCurrentSkill()}
+                            >
+                              <Copy className="size-4" />
+                              Clone
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onSelect={() => void exportCurrentSkill()}
+                            >
+                              <Upload className="size-4" />
+                              Export
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onSelect={() => void deleteCurrentSkill()}
+                            >
+                              <Trash2 className="size-4" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                    <div className="grid gap-5 pb-1">
+                      <div className="grid gap-2">
+                        <Label htmlFor="skill-name">Name</Label>
+                        <Input
+                          id="skill-name"
+                          value={skillDraft.name}
+                          onChange={(event) =>
+                            updateSkillDraft({ name: event.target.value })
+                          }
+                          placeholder="release-notes"
+                          className="rounded-lg"
+                        />
+                      </div>
+
+                      <div className="grid gap-2">
+                        <Label htmlFor="skill-description">Description</Label>
+                        <Textarea
+                          id="skill-description"
+                          value={skillDraft.description}
+                          onChange={(event) =>
+                            updateSkillDraft({
+                              description: event.target.value,
+                            })
+                          }
+                          placeholder="Use when generating concise user-facing release notes from version diffs."
+                          className="min-h-24 rounded-lg leading-6"
+                        />
+                      </div>
+
+                      <div className="grid gap-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <Label htmlFor="skill-instructions">
+                            Instructions
+                          </Label>
                           <Button
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="rounded-lg"
-                            title="Skill options"
+                            className="h-8 rounded-lg px-2 text-sm"
+                            onClick={() => setInstructionsEditorOpen(true)}
                           >
-                            <MoreHorizontal className="size-4" />
+                            <Maximize2 className="size-4" />
+                            Open editor
                           </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-44">
-                          <DropdownMenuItem
-                            onSelect={() => void cloneCurrentSkill()}
-                          >
-                            <Copy className="size-4" />
-                            Clone
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() => void exportCurrentSkill()}
-                          >
-                            <Upload className="size-4" />
-                            Export
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onSelect={() => void deleteCurrentSkill()}
-                          >
-                            <Trash2 className="size-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    )}
-                  </div>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
-                  <div className="grid gap-5 pb-1">
-                    <div className="grid gap-2">
-                      <Label htmlFor="skill-name">Name</Label>
-                      <Input
-                        id="skill-name"
-                        value={skillDraft.name}
-                        onChange={(event) =>
-                          updateSkillDraft({ name: event.target.value })
-                        }
-                        placeholder="release-notes"
-                        className="rounded-lg"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="skill-description">Description</Label>
-                      <Textarea
-                        id="skill-description"
-                        value={skillDraft.description}
-                        onChange={(event) =>
-                          updateSkillDraft({ description: event.target.value })
-                        }
-                        placeholder="Use when generating concise user-facing release notes from version diffs."
-                        className="min-h-24 rounded-lg leading-6"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <Label htmlFor="skill-instructions">Instructions</Label>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 rounded-lg px-2 text-sm"
-                          onClick={() => setInstructionsEditorOpen(true)}
-                        >
-                          <Maximize2 className="size-4" />
-                          Open editor
-                        </Button>
-                      </div>
-                      <Textarea
-                        id="skill-instructions"
-                        value={skillDraft.instructions}
-                        onChange={(event) =>
-                          updateSkillDraft({ instructions: event.target.value })
-                        }
-                        placeholder="Write the reusable instructions for this skill..."
-                        className="min-h-72 rounded-lg font-mono text-sm leading-6"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label>Recommended tools</Label>
-                      <Popover
-                        onOpenChange={(nextOpen) => {
-                          if (!nextOpen) setRecommendedToolSearch("");
-                        }}
-                      >
-                        <PopoverTrigger asChild>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            role="combobox"
-                            className="w-full justify-between rounded-lg px-3 text-left font-normal"
-                            disabled={availableTools.length === 0}
-                          >
-                            <span
-                              className={cn(
-                                "min-w-0 truncate",
-                                skillDraft.recommendedToolNames.length === 0 &&
-                                  "text-muted-foreground",
-                              )}
-                            >
-                              {skillDraft.recommendedToolNames.length > 0
-                                ? `${skillDraft.recommendedToolNames.length} recommended tool${skillDraft.recommendedToolNames.length === 1 ? "" : "s"}`
-                                : availableTools.length > 0
-                                  ? "Select recommended tools"
-                                  : "No tools are available"}
-                            </span>
-                            <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent
-                          align="start"
-                          className="w-[min(var(--radix-popover-trigger-width),32rem)] rounded-lg p-0"
-                        >
-                          <div className="grid max-h-[24rem] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-                            <div className="border-b p-2">
-                              <Input
-                                value={recommendedToolSearch}
-                                onChange={(event) =>
-                                  setRecommendedToolSearch(event.target.value)
-                                }
-                                placeholder="Search tools..."
-                                className="h-9 rounded-lg"
-                              />
-                            </div>
-                            <div className="min-h-0 overflow-y-auto p-1">
-                              {visibleRecommendedTools.length > 0 ? (
-                                visibleRecommendedTools.map((tool) => {
-                                  const checked =
-                                    skillDraft.recommendedToolNames.includes(
-                                      tool.name,
-                                    );
-
-                                  return (
-                                    <div
-                                      key={tool.name}
-                                      role="button"
-                                      tabIndex={0}
-                                      className="flex w-full min-w-0 cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                      onClick={() =>
-                                        toggleRecommendedTool(tool.name)
-                                      }
-                                      onKeyDown={(event) => {
-                                        if (
-                                          event.key === "Enter" ||
-                                          event.key === " "
-                                        ) {
-                                          event.preventDefault();
-                                          toggleRecommendedTool(tool.name);
-                                        }
-                                      }}
-                                      title={tool.description}
-                                    >
-                                      <Checkbox
-                                        checked={checked}
-                                        tabIndex={-1}
-                                        className="mt-1 shrink-0 pointer-events-none"
-                                      />
-                                      <span className="min-w-0 flex-1">
-                                        <span className="block truncate font-medium">
-                                          {tool.name}
-                                        </span>
-                                        {tool.description && (
-                                          <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                                            {tool.description}
-                                          </span>
-                                        )}
-                                      </span>
-                                    </div>
-                                  );
-                                })
-                              ) : (
-                                <div className="px-3 py-6 text-center text-base text-muted-foreground">
-                                  No tools found.
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-
-                      {skillDraft.recommendedToolNames.length > 0 && (
-                        <div className="grid max-h-56 gap-1 overflow-y-auto rounded-lg border bg-muted/10 p-2">
-                          {skillDraft.recommendedToolNames.map((toolName) => {
-                            const tool = recommendedToolsByName.get(toolName);
-
-                            return (
-                              <div
-                                key={toolName}
-                                className="flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted/70"
-                                title={tool?.description}
-                              >
-                                <Checkbox
-                                  checked
-                                  onCheckedChange={() =>
-                                    toggleRecommendedTool(toolName)
-                                  }
-                                  className="mt-1 shrink-0"
-                                />
-                                <span className="min-w-0 flex-1">
-                                  <span className="block truncate font-medium">
-                                    {toolName}
-                                  </span>
-                                  {tool?.description && (
-                                    <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                                      {tool.description}
-                                    </span>
-                                  )}
-                                </span>
-                              </div>
-                            );
-                          })}
                         </div>
-                      )}
+                        <Textarea
+                          id="skill-instructions"
+                          value={skillDraft.instructions}
+                          onChange={(event) =>
+                            updateSkillDraft({
+                              instructions: event.target.value,
+                            })
+                          }
+                          placeholder="Write the reusable instructions for this skill..."
+                          className="min-h-72 rounded-lg text-sm leading-6"
+                        />
+                      </div>
+
+                      <div className="grid gap-2">
+                        <Label>Recommended tools</Label>
+                        <Popover
+                          onOpenChange={(nextOpen) => {
+                            if (!nextOpen) setRecommendedToolSearch("");
+                          }}
+                        >
+                          <PopoverTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              role="combobox"
+                              className="w-full justify-between rounded-lg px-3 text-left font-normal"
+                              disabled={availableTools.length === 0}
+                            >
+                              <span
+                                className={cn(
+                                  "min-w-0 truncate",
+                                  skillDraft.recommendedToolNames.length ===
+                                    0 && "text-muted-foreground",
+                                )}
+                              >
+                                {skillDraft.recommendedToolNames.length > 0
+                                  ? `${skillDraft.recommendedToolNames.length} recommended tool${skillDraft.recommendedToolNames.length === 1 ? "" : "s"}`
+                                  : availableTools.length > 0
+                                    ? "Select recommended tools"
+                                    : "No tools are available"}
+                              </span>
+                              <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent
+                            align="start"
+                            className="w-[min(var(--radix-popover-trigger-width),32rem)] rounded-lg p-0"
+                          >
+                            <div className="grid max-h-[24rem] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+                              <div className="border-b p-2">
+                                <Input
+                                  value={recommendedToolSearch}
+                                  onChange={(event) =>
+                                    setRecommendedToolSearch(event.target.value)
+                                  }
+                                  placeholder="Search tools..."
+                                  className="h-9 rounded-lg"
+                                />
+                              </div>
+                              <div className="min-h-0 overflow-y-auto p-1">
+                                {visibleRecommendedTools.length > 0 ? (
+                                  visibleRecommendedTools.map((tool) => {
+                                    const checked =
+                                      skillDraft.recommendedToolNames.includes(
+                                        tool.name,
+                                      );
+
+                                    return (
+                                      <div
+                                        key={tool.name}
+                                        role="button"
+                                        tabIndex={0}
+                                        className="flex w-full min-w-0 cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        onClick={() =>
+                                          toggleRecommendedTool(tool.name)
+                                        }
+                                        onKeyDown={(event) => {
+                                          if (
+                                            event.key === "Enter" ||
+                                            event.key === " "
+                                          ) {
+                                            event.preventDefault();
+                                            toggleRecommendedTool(tool.name);
+                                          }
+                                        }}
+                                        title={tool.description}
+                                      >
+                                        <Checkbox
+                                          checked={checked}
+                                          tabIndex={-1}
+                                          className="mt-1 shrink-0 pointer-events-none"
+                                        />
+                                        <span className="min-w-0 flex-1">
+                                          <span className="block truncate font-medium">
+                                            {tool.name}
+                                          </span>
+                                          {tool.description && (
+                                            <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                                              {tool.description}
+                                            </span>
+                                          )}
+                                        </span>
+                                      </div>
+                                    );
+                                  })
+                                ) : (
+                                  <div className="px-3 py-6 text-center text-base text-muted-foreground">
+                                    No tools found.
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
+
+                        {skillDraft.recommendedToolNames.length > 0 && (
+                          <div className="grid max-h-56 gap-1 overflow-y-auto rounded-lg border bg-muted/10 p-2">
+                            {skillDraft.recommendedToolNames.map((toolName) => {
+                              const tool = recommendedToolsByName.get(toolName);
+
+                              return (
+                                <div
+                                  key={toolName}
+                                  className="flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted/70"
+                                  title={tool?.description}
+                                >
+                                  <Checkbox
+                                    checked
+                                    onCheckedChange={() =>
+                                      toggleRecommendedTool(toolName)
+                                    }
+                                    className="mt-1 shrink-0"
+                                  />
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate font-medium">
+                                      {toolName}
+                                    </span>
+                                    {tool?.description && (
+                                      <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                                        {tool.description}
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <DialogFooter className="shrink-0 border-t bg-background px-5 py-4">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-lg"
-                    onClick={() => {
-                      if (selectedSkill)
-                        setSkillDraft(skillToDraft(selectedSkill));
-                      else setSkillDraft(createBlankSkillDraft());
-                    }}
-                    disabled={!hasSkillDraftChanges || isSavingSkill}
-                  >
-                    Reset
-                  </Button>
-                  <Button
-                    type="button"
-                    className="rounded-lg"
-                    onClick={() => void saveCurrentSkillDraft()}
-                    disabled={!hasSkillDraftChanges || isSavingSkill}
-                  >
-                    {isSavingSkill ? "Saving..." : "Save"}
-                  </Button>
-                </DialogFooter>
-              </>
-            ) : (
-              <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-muted-foreground">
-                <div className="grid max-w-sm gap-2">
-                  <Sparkles className="mx-auto size-8 opacity-50" />
-                  <div className="text-lg font-medium text-foreground">
-                    No skill selected
+                  <DialogFooter className="shrink-0 border-t bg-background px-5 py-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-lg"
+                      onClick={() => {
+                        if (selectedSkill)
+                          setSkillDraft(skillToDraft(selectedSkill));
+                        else setSkillDraft(createBlankSkillDraft());
+                      }}
+                      disabled={!hasSkillDraftChanges || isSavingSkill}
+                    >
+                      Reset
+                    </Button>
+                    <Button
+                      type="button"
+                      className="rounded-lg"
+                      onClick={() => void saveCurrentSkillDraft()}
+                      disabled={!hasSkillDraftChanges || isSavingSkill}
+                    >
+                      {isSavingSkill ? "Saving..." : "Save"}
+                    </Button>
+                  </DialogFooter>
+                </>
+              ) : (
+                <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-muted-foreground">
+                  <div className="grid max-w-sm gap-2">
+                    <Sparkles className="mx-auto size-8 opacity-50" />
+                    <div className="text-lg font-medium text-foreground">
+                      No skill selected
+                    </div>
+                    <p className="text-base leading-6">
+                      Create a skill or select one from the list to edit its
+                      instructions.
+                    </p>
                   </div>
-                  <p className="text-base leading-6">
-                    Create a skill or select one from the list to edit its
-                    instructions.
-                  </p>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      </DialogContent>
+        </DialogContent>
       </Dialog>
 
       {skillDraft ? (
@@ -927,7 +935,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                 updateSkillDraft({ instructions: event.target.value })
               }
               placeholder="Write the reusable instructions for this skill..."
-              className="min-h-0 flex-1 resize-none rounded-lg font-mono text-sm leading-6"
+              className="min-h-0 flex-1 resize-none rounded-lg text-sm leading-6"
             />
 
             <DialogFooter>

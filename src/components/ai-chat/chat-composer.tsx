@@ -383,10 +383,10 @@ export const ChatComposer = memo(
     return (
       <form
         onSubmit={handleSubmit}
-        className="bg-background px-3 py-3 md:px-4 md:py-4"
+        className="bg-background py-3 md:py-4"
         data-draft-input
       >
-        <div className="mx-auto w-full max-w-3xl border rounded-lg bg-card p-3 pt-0 shadow-sm">
+        <div className="mx-auto w-full max-w-4xl border rounded-lg bg-card p-3 pt-0 shadow-sm">
           <div className="mx-auto grid w-full gap-2">
             <div className="relative">
               {isMentionMenuOpen && mentionMenuPosition && (

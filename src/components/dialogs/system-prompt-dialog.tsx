@@ -32,21 +32,21 @@ export const SystemPromptDialog = memo(function SystemPromptDialog({
 }: SystemPromptDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col gap-0 overflow-hidden rounded-lg p-0 sm:max-w-2xl">
+      <DialogContent className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl">
         <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
           <DialogTitle>System prompt</DialogTitle>
           <DialogDescription>
-            Define the instruction sent before every chat message. Leave it empty
-            to send no system prompt.
+            Define the instruction sent before every chat message. Leave it
+            empty to send no system prompt.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 px-5 py-4">
           <Textarea
             id="system-prompt"
             value={value}
             onChange={(event) => onValueChange(event.target.value)}
-            className="min-h-[320px] resize-y leading-6"
+            className="min-h-0 flex-1 resize-none leading-6"
             placeholder="You are a helpful assistant."
           />
         </div>

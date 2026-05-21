@@ -1379,7 +1379,7 @@ export default function Home() {
         onClearCurrentChat={clearCurrentChat}
       />
 
-      <section className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] bg-background">
+      <section className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] bg-background px-4">
         {findBarOpen && (
           <FindBar
             inputRef={findInputRef}
@@ -1409,7 +1409,7 @@ export default function Home() {
             <div
               ref={chatContentRef}
               className={cn(
-                "mx-auto flex w-full min-w-0 max-w-3xl flex-col [overflow-anchor:none]",
+                "mx-auto flex w-full min-w-0 max-w-4xl   flex-col [overflow-anchor:none]",
                 hasMessages ? "gap-5" : "h-full",
               )}
             >
@@ -1474,7 +1474,7 @@ export default function Home() {
             !isNearChatBottom &&
             showScrollToBottomButton && (
               <div className="pointer-events-none absolute inset-x-0 bottom-0 right-[-74px] z-10 px-3 md:px-4">
-                <div className="mx-auto flex w-full max-w-3xl justify-end">
+                <div className="mx-auto flex w-full max-w-4xl justify-end">
                   <Button
                     type="button"
                     variant="secondary"
