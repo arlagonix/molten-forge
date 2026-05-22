@@ -388,6 +388,36 @@ export function useChatGeneration({
     );
   }
 
+  function completeAssistantThinkingStep(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    stepId: string,
+  ) {
+    const completedAt = new Date().toISOString();
+
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: (variant.processSteps ?? []).map((step) => {
+          if (step.id !== stepId || step.type !== "thinking") return step;
+          if (step.status === "complete") return step;
+
+          return {
+            ...step,
+            status: "complete",
+            startedAt: step.startedAt ?? completedAt,
+            completedAt: step.completedAt ?? completedAt,
+          };
+        }),
+      }),
+      { touch: false },
+    );
+  }
+
   function updateAssistantToolStepStatus(
     chatId: string,
     assistantMessageId: string,
@@ -514,6 +544,16 @@ export function useChatGeneration({
       return activeStep.id;
     }
 
+    if (activeStep?.type === "thinking" && activeStep.id) {
+      flushBufferedAssistantVariant(bufferKey);
+      completeAssistantThinkingStep(
+        chatId,
+        assistantMessageId,
+        variantId,
+        activeStep.id,
+      );
+    }
+
     const assistantMessageStepId = createId();
     appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
       { id: assistantMessageStepId, type: "assistant_message", content: "" },
@@ -539,7 +579,12 @@ export function useChatGeneration({
 
     const thinkingStepId = createId();
     appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
-      { id: thinkingStepId, type: "thinking", content: "" },
+      {
+        id: thinkingStepId,
+        type: "thinking",
+        content: "",
+        status: "waiting",
+      },
     ]);
     setActiveStreamProcessStep(bufferKey, {
       type: "thinking",
@@ -949,7 +994,12 @@ export function useChatGeneration({
       for (let toolRound = 0; toolRound <= MAX_TOOL_ROUNDS; toolRound += 1) {
         const thinkingStepId = createId();
         appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
-          { id: thinkingStepId, type: "thinking", content: "" },
+          {
+            id: thinkingStepId,
+            type: "thinking",
+            content: "",
+            status: "waiting",
+          },
         ]);
         setActiveStreamProcessStep(bufferKey, {
           type: "thinking",
@@ -1037,6 +1087,19 @@ export function useChatGeneration({
         if (toolRound >= MAX_TOOL_ROUNDS) {
           throw new Error(
             `Stopped after ${MAX_TOOL_ROUNDS} tool rounds to avoid an infinite loop.`,
+          );
+        }
+
+        const activeStepBeforeTools = getActiveStreamProcessStep(bufferKey);
+        if (
+          activeStepBeforeTools?.type === "thinking" &&
+          activeStepBeforeTools.id
+        ) {
+          completeAssistantThinkingStep(
+            chatId,
+            assistantMessageId,
+            variantId,
+            activeStepBeforeTools.id,
           );
         }
 

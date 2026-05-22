@@ -36,6 +36,23 @@ export function cancelUnfinishedChecklistListSteps(
   return processSteps;
 }
 
+function completeThinkingProcessSteps(
+  processSteps: ChatAssistantProcessStep[],
+  completedAt = new Date().toISOString(),
+): ChatAssistantProcessStep[] {
+  return processSteps.map((step) => {
+    if (step.type !== "thinking") return step;
+    if (step.status === "complete") return step;
+
+    return {
+      ...step,
+      status: "complete",
+      startedAt: step.startedAt ?? completedAt,
+      completedAt: step.completedAt ?? completedAt,
+    };
+  });
+}
+
 export function appendStreamEventsToAssistantVariant(
   variant: ChatAssistantVariant,
   events: StreamBufferEvent[],
@@ -61,6 +78,7 @@ export function appendStreamEventsToAssistantVariant(
     }
   }
 
+  const now = new Date().toISOString();
   const processSteps = (variant.processSteps ?? []).map((step) => {
     if (step.type === "assistant_message") {
       const delta = contentDeltasByStepId.get(step.id);
@@ -69,7 +87,23 @@ export function appendStreamEventsToAssistantVariant(
 
     if (step.type === "thinking") {
       const delta = reasoningDeltasByStepId.get(step.id);
-      return delta ? { ...step, content: step.content + delta } : step;
+      if (!delta) return step;
+
+      const hasVisibleDelta = delta.trim().length > 0;
+
+      if (step.status === "complete") {
+        return {
+          ...step,
+          content: step.content + delta,
+        };
+      }
+
+      return {
+        ...step,
+        content: step.content + delta,
+        status: hasVisibleDelta ? "in_progress" : (step.status ?? "waiting"),
+        startedAt: hasVisibleDelta ? (step.startedAt ?? now) : step.startedAt,
+      };
     }
 
     return step;
@@ -168,16 +202,21 @@ export function markAssistantVariantDone({
   streamResult: Partial<StreamProviderChatResult>;
 }): ChatAssistantVariant {
   const durationMs = Math.max(1, performance.now() - responseStartedAtMs);
+  const completedAt = new Date().toISOString();
 
   return {
     ...variant,
     status: "done",
+    processSteps: completeThinkingProcessSteps(
+      variant.processSteps ?? [],
+      completedAt,
+    ),
     metrics: {
       startedAt:
         variant.metrics?.startedAt ??
         new Date(Date.now() - durationMs).toISOString(),
       ...variant.metrics,
-      completedAt: new Date().toISOString(),
+      completedAt,
       ...buildTokenMetrics({
         content: variant.content,
         durationMs,
@@ -212,8 +251,12 @@ export function markAssistantVariantErrored({
       ? `\n\nError: ${errorLabel}`
       : `Error: ${errorLabel}`;
   const content = `${variant.content}${appendedContent}`;
-  const baseProcessSteps = keepOnlyLatestChecklistListStep(
-    cancelUnfinishedChecklistListSteps(variant.processSteps ?? []),
+  const completedAt = new Date().toISOString();
+  const baseProcessSteps = completeThinkingProcessSteps(
+    keepOnlyLatestChecklistListStep(
+      cancelUnfinishedChecklistListSteps(variant.processSteps ?? []),
+    ),
+    completedAt,
   );
   const processSteps = appendedContent.trim()
     ? [
@@ -236,7 +279,7 @@ export function markAssistantVariantErrored({
         variant.metrics?.startedAt ??
         new Date(Date.now() - durationMs).toISOString(),
       ...variant.metrics,
-      completedAt: new Date().toISOString(),
+      completedAt,
       ...buildTokenMetrics({
         content,
         durationMs,

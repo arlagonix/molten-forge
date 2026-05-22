@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import { type ToolMentionOption } from "@/components/ai-chat/chat-composer";
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
@@ -44,15 +44,12 @@ import type {
   ChatMessage,
   ChatToolCall,
   ChatToolResult,
+  ThinkingStatus,
   ToolExecutionStatus,
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
 const USER_MENTION_PATTERN = /(^|\s)@(tool|skill):([A-Za-z0-9_-]+)(?=$|\s)/g;
-const THINKING_SUMMARY_POLL_INTERVAL_MS = 2000;
-const THINKING_SUMMARY_TYPE_INTERVAL_MS = 16;
-const THINKING_SUMMARY_TYPE_TARGET_DURATION_MS = 1000;
-const THINKING_SENTENCE_PATTERN = /[^.!?。！？]+[.!?。！？]+(?:["'”’)}\]]+)?/gu;
 
 type VisibleAssistantProcessStep = ChatAssistantProcessStep & {
   sourceStepIds: string[];
@@ -193,87 +190,87 @@ function renderJsonCodeBlock(
   );
 }
 
-function cleanThinkingSummaryCandidate(value: string) {
-  return value
-    .replace(/```+/g, "")
-    .replace(/~~~+/g, "")
-    .replace(/^\s*(?:[-*•]+|\d+[.)]|#+)\s*/u, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+function formatThoughtDuration({
+  startedAt,
+  completedAt,
+  currentTimeMs,
+  minOneSecond = false,
+}: {
+  startedAt?: string;
+  completedAt?: string;
+  currentTimeMs?: number;
+  minOneSecond?: boolean;
+}) {
+  if (!startedAt) return "";
 
-function truncateThinkingSummary(value: string) {
-  if (value.length <= 140) return value;
+  const startedAtMs = Date.parse(startedAt);
+  const completedAtMs = completedAt
+    ? Date.parse(completedAt)
+    : (currentTimeMs ?? Date.now());
 
-  const slice = value.slice(0, 141);
-  const boundary = Math.max(
-    slice.lastIndexOf(" "),
-    slice.lastIndexOf(","),
-    slice.lastIndexOf(";"),
-    slice.lastIndexOf(":"),
-  );
-
-  if (boundary >= 80) return `${slice.slice(0, boundary).trim()}…`;
-
-  return `${value.slice(0, 140).trim()}…`;
-}
-
-function getMeaningfulThinkingLines(content: string) {
-  return content
-    .split(/\r?\n+/)
-    .map(cleanThinkingSummaryCandidate)
-    .filter((line) => line.length >= 3 && !/^[`*_\-\s]+$/.test(line));
-}
-
-function getLatestCompletedThinkingSentence(lines: string[]) {
-  const completedSentences: string[] = [];
-
-  for (const line of lines) {
-    const matches = line.match(THINKING_SENTENCE_PATTERN) ?? [];
-
-    for (const match of matches) {
-      const sentence = cleanThinkingSummaryCandidate(match);
-      if (sentence.length >= 8) {
-        completedSentences.push(sentence);
-      }
-    }
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(completedAtMs)) {
+    return "";
   }
 
-  return completedSentences[completedSentences.length - 1] ?? "";
+  const rawElapsedSeconds = (completedAtMs - startedAtMs) / 1000;
+  const elapsedSeconds = completedAt
+    ? Math.round(rawElapsedSeconds)
+    : Math.floor(rawElapsedSeconds);
+  const totalSeconds = Math.max(minOneSecond ? 1 : 0, elapsedSeconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const parts: string[] = [];
+
+  if (hours > 0) parts.push(`${hours} h`);
+  if (minutes > 0) parts.push(`${minutes} min`);
+  if (seconds > 0 || parts.length === 0) parts.push(`${seconds} sec`);
+
+  return parts.join(" ");
 }
 
-function getLatestThinkingFragment(lines: string[]) {
-  const latestLine = lines[lines.length - 1] ?? "";
-  if (!latestLine) return "";
-
-  const sentenceParts = latestLine
-    .split(/(?<=[.!?。！？])\s+/u)
-    .map(cleanThinkingSummaryCandidate)
-    .filter((part) => part.length >= 8);
-
-  return sentenceParts[sentenceParts.length - 1] ?? latestLine;
-}
-
-function getCurrentThinkingSummary(
-  content: string,
-  { allowIncomplete }: { allowIncomplete: boolean },
+function getEffectiveThinkingStatus(
+  status: ThinkingStatus | undefined,
+  isStreaming: boolean,
 ) {
-  const lines = getMeaningfulThinkingLines(content);
-  if (lines.length === 0) return "";
+  if (status === "complete") return "complete";
+  if (isStreaming || status === "in_progress") return "in_progress";
+  return status ?? "complete";
+}
 
-  const completedSentence = getLatestCompletedThinkingSentence(lines);
-
-  if (allowIncomplete) {
-    const latestFragment = getLatestThinkingFragment(lines);
-    return truncateThinkingSummary(latestFragment || completedSentence);
+function renderThinkingStatus(status: ThinkingStatus) {
+  if (status === "complete") {
+    return (
+      <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+        <Check className="size-3.5" />
+        Complete
+      </span>
+    );
   }
 
-  return completedSentence ? truncateThinkingSummary(completedSentence) : "";
+  if (status === "waiting") {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+        <Spinner className="size-3.5" />
+        Waiting
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+      <Spinner className="size-3.5" />
+      In progress
+    </span>
+  );
 }
 
 type ThinkingBlockProps = {
   id: string;
   content: string;
+  status?: ThinkingStatus;
+  startedAt?: string;
+  completedAt?: string;
   isStreaming: boolean;
   isCollapsed: boolean;
   flushVersion: number;
@@ -286,6 +283,9 @@ type ThinkingBlockProps = {
 function ThinkingBlock({
   id,
   content,
+  status,
+  startedAt,
+  completedAt,
   isStreaming,
   isCollapsed,
   flushVersion,
@@ -294,146 +294,38 @@ function ThinkingBlock({
   onVisualProgress,
   onVisualStreamingChange,
 }: ThinkingBlockProps) {
-  const summary = getCurrentThinkingSummary(content, {
-    allowIncomplete: !isStreaming,
-  });
-  const [displayedSummary, setDisplayedSummary] = useState(
-    isStreaming ? "" : summary,
-  );
-  const latestSummaryRef = useRef(summary);
-  const visibleSummaryRef = useRef(isStreaming ? "" : summary);
-  const typingTargetRef = useRef("");
-  const isTypingSummaryRef = useRef(false);
-  const typingTimeoutRef = useRef<number | null>(null);
-
-  const clearTypingTimeout = useCallback(() => {
-    if (typingTimeoutRef.current === null) return;
-    window.clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = null;
-  }, []);
-
-  const setDisplayedSummaryValue = useCallback((nextSummary: string) => {
-    setDisplayedSummary(nextSummary);
-  }, []);
-
-  const stopTypingSummary = useCallback(() => {
-    clearTypingTimeout();
-    isTypingSummaryRef.current = false;
-    typingTargetRef.current = "";
-  }, [clearTypingTimeout]);
-
-  const typeSummary = useCallback(
-    (nextSummary: string) => {
-      if (!nextSummary) return;
-      if (nextSummary === visibleSummaryRef.current) return;
-      if (nextSummary === typingTargetRef.current) return;
-      if (isTypingSummaryRef.current) return;
-
-      clearTypingTimeout();
-      isTypingSummaryRef.current = true;
-      typingTargetRef.current = nextSummary;
-
-      let visibleLength = 0;
-      const charsPerTick = Math.max(
-        2,
-        Math.ceil(
-          nextSummary.length /
-            (THINKING_SUMMARY_TYPE_TARGET_DURATION_MS /
-              THINKING_SUMMARY_TYPE_INTERVAL_MS),
-        ),
-      );
-
-      const tick = () => {
-        visibleLength = Math.min(
-          nextSummary.length,
-          visibleLength + charsPerTick,
-        );
-        setDisplayedSummaryValue(nextSummary.slice(0, visibleLength));
-
-        if (visibleLength < nextSummary.length) {
-          typingTimeoutRef.current = window.setTimeout(
-            tick,
-            THINKING_SUMMARY_TYPE_INTERVAL_MS,
-          );
-          return;
-        }
-
-        typingTimeoutRef.current = null;
-        isTypingSummaryRef.current = false;
-        typingTargetRef.current = "";
-        visibleSummaryRef.current = nextSummary;
-      };
-
-      setDisplayedSummaryValue("");
-      tick();
-    },
-    [clearTypingTimeout, setDisplayedSummaryValue],
-  );
+  const effectiveStatus = getEffectiveThinkingStatus(status, isStreaming);
+  const [durationTickMs, setDurationTickMs] = useState(() => Date.now());
 
   useEffect(() => {
-    return clearTypingTimeout;
-  }, [clearTypingTimeout]);
+    if (effectiveStatus !== "in_progress" || !startedAt) return;
 
-  useEffect(() => {
-    latestSummaryRef.current = summary;
-
-    if (forceInstant) {
-      stopTypingSummary();
-      visibleSummaryRef.current = summary;
-      setDisplayedSummaryValue(summary);
-      return;
-    }
-
-    if (!isStreaming) {
-      if (!summary) {
-        stopTypingSummary();
-        visibleSummaryRef.current = "";
-        setDisplayedSummaryValue("");
-        return;
-      }
-
-      if (summary === visibleSummaryRef.current) return;
-      if (summary === typingTargetRef.current) return;
-
-      if (isTypingSummaryRef.current) {
-        stopTypingSummary();
-      }
-
-      typeSummary(summary);
-      return;
-    }
-
-    if (summary && !visibleSummaryRef.current && !typingTargetRef.current) {
-      typeSummary(summary);
-    }
-  }, [
-    forceInstant,
-    isStreaming,
-    setDisplayedSummaryValue,
-    stopTypingSummary,
-    summary,
-    typeSummary,
-  ]);
-
-  useEffect(() => {
-    if (!isStreaming) return;
-
-    const publishLatestCompletedSummary = () => {
-      const nextSummary = latestSummaryRef.current;
-      if (!nextSummary) return;
-      if (nextSummary === visibleSummaryRef.current) return;
-      if (nextSummary === typingTargetRef.current) return;
-      if (isTypingSummaryRef.current) return;
-      typeSummary(nextSummary);
-    };
-
-    const intervalId = window.setInterval(
-      publishLatestCompletedSummary,
-      THINKING_SUMMARY_POLL_INTERVAL_MS,
-    );
+    setDurationTickMs(Date.now());
+    const intervalId = window.setInterval(() => {
+      setDurationTickMs(Date.now());
+    }, 1000);
 
     return () => window.clearInterval(intervalId);
-  }, [isStreaming, typeSummary]);
+  }, [effectiveStatus, startedAt]);
+
+  const thoughtDuration = useMemo(() => {
+    if (effectiveStatus === "complete") {
+      return formatThoughtDuration({
+        startedAt,
+        completedAt,
+        minOneSecond: true,
+      });
+    }
+
+    if (effectiveStatus === "in_progress") {
+      return formatThoughtDuration({
+        startedAt,
+        currentTimeMs: durationTickMs,
+      });
+    }
+
+    return "";
+  }, [completedAt, durationTickMs, effectiveStatus, startedAt]);
 
   return (
     <article className="flex min-w-0 max-w-full justify-start">
@@ -447,12 +339,18 @@ function ThinkingBlock({
         >
           <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
             <div className="flex min-w-0 items-center gap-2">
-              {isStreaming ? (
-                <Spinner className="size-3.5 shrink-0" />
-              ) : (
-                <Brain className="size-3.5 shrink-0" />
-              )}
+              <Brain className="size-3.5 shrink-0" />
               <span className="truncate">Thinking</span>
+              <span className="text-muted-foreground/60">•</span>
+              {renderThinkingStatus(effectiveStatus)}
+              {thoughtDuration ? (
+                <>
+                  <span className="text-muted-foreground/60">•</span>
+                  <span className="shrink-0 tabular-nums text-muted-foreground/85">
+                    {thoughtDuration}
+                  </span>
+                </>
+              ) : null}
             </div>
             {isCollapsed ? (
               <ChevronRight className="size-3.5 shrink-0" />
@@ -462,16 +360,7 @@ function ThinkingBlock({
           </div>
         </button>
 
-        {isCollapsed ? (
-          displayedSummary ? (
-            <div
-              id={`${id}-thinking-content`}
-              className="mt-2 h-5 min-w-0 overflow-hidden text-sm leading-5 text-muted-foreground"
-            >
-              <span className="block truncate">{displayedSummary}</span>
-            </div>
-          ) : null
-        ) : (
+        {!isCollapsed && (
           <div
             id={`${id}-thinking-content`}
             className="mt-2 min-w-0 overflow-visible text-sm leading-5"
@@ -768,6 +657,9 @@ const ChatMessageItem = memo(
                     key={step.id}
                     id={step.id}
                     content={step.content}
+                    status={step.status}
+                    startedAt={step.startedAt}
+                    completedAt={step.completedAt}
                     isStreaming={isThinkingStreaming}
                     isCollapsed={isCollapsed}
                     flushVersion={stepFlushVersion}

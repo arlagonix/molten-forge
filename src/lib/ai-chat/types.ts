@@ -137,6 +137,8 @@ export type AskUserResponse = {
 
 export type UserInputStatus = "waiting" | "complete" | "cancelled" | "failed";
 
+export type ThinkingStatus = "waiting" | "in_progress" | "complete";
+
 export type ChecklistItem = {
   content: string;
   done: boolean;
@@ -151,6 +153,9 @@ export type ChatAssistantProcessStep =
       id: string;
       type: "thinking";
       content: string;
+      status?: ThinkingStatus;
+      startedAt?: string;
+      completedAt?: string;
     }
   | {
       id: string;
