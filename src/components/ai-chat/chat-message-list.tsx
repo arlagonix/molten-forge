@@ -12,7 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { type ToolMentionOption } from "@/components/ai-chat/chat-composer";
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
@@ -296,6 +296,15 @@ function ThinkingBlock({
 }: ThinkingBlockProps) {
   const effectiveStatus = getEffectiveThinkingStatus(status, isStreaming);
   const [durationTickMs, setDurationTickMs] = useState(() => Date.now());
+  const onVisualStreamingChangeRef = useRef(onVisualStreamingChange);
+
+  onVisualStreamingChangeRef.current = onVisualStreamingChange;
+
+  useEffect(() => {
+    if (!isCollapsed) return;
+
+    onVisualStreamingChangeRef.current(false);
+  }, [isCollapsed]);
 
   useEffect(() => {
     if (effectiveStatus !== "in_progress" || !startedAt) return;
@@ -650,7 +659,8 @@ const ChatMessageItem = memo(
                 const isThinkingStreaming =
                   status === "streaming" && isLatestProcessStep;
 
-                const isCollapsed = collapsedThinkingStepIds[step.id] ?? true;
+                const manualCollapsed = collapsedThinkingStepIds[step.id];
+                const isCollapsed = manualCollapsed ?? !isThinkingStreaming;
 
                 return (
                   <ThinkingBlock
@@ -786,14 +796,15 @@ const ChatMessageItem = memo(
           reasoning.trim() &&
           (() => {
             const reasoningStepId = `${message.id}:reasoning`;
-            const isCollapsed =
-              collapsedThinkingStepIds[reasoningStepId] ?? true;
+            const isReasoningStreaming = status === "streaming" && !content;
+            const manualCollapsed = collapsedThinkingStepIds[reasoningStepId];
+            const isCollapsed = manualCollapsed ?? !isReasoningStreaming;
 
             return (
               <ThinkingBlock
                 id={reasoningStepId}
                 content={reasoning}
-                isStreaming={status === "streaming" && !content}
+                isStreaming={isReasoningStreaming}
                 isCollapsed={isCollapsed}
                 flushVersion={visualFlushRequests[message.id] ?? 0}
                 forceInstant={Boolean(content)}

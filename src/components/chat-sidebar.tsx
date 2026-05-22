@@ -202,9 +202,9 @@ export const ChatSidebar = memo(function ChatSidebar({
             variant="ghost"
             size="icon-sm"
             className={triggerClassName}
-            title="Menu"
+            title="Settings"
           >
-            <MoreHorizontal className="size-4" />
+            <Settings className="size-4" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -427,7 +427,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           isCollapsed ? "flex md:hidden" : "flex",
         )}
       >
-        <div className="grid gap-2 border-b py-3 pl-3 pr-2">
+        <div className="py-3 pl-3 pr-2">
           <div className="flex items-center justify-between gap-2">
             <Button
               type="button"
@@ -451,27 +451,27 @@ export const ChatSidebar = memo(function ChatSidebar({
 
             {renderAppOptionsMenu("shrink-0 rounded-lg")}
           </div>
+        </div>
 
-          <div className="border-t pt-2 pr-1">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={chatSearchQuery}
-                onChange={(event) => setChatSearchQuery(event.target.value)}
-                placeholder="Search chats"
-                className="h-8 rounded-lg pl-7 pr-8 text-sm"
-              />
-              {chatSearchQuery ? (
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  onClick={() => setChatSearchQuery("")}
-                  title="Clear search"
-                >
-                  <X className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
+        <div className="border-y px-3 py-2">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={chatSearchQuery}
+              onChange={(event) => setChatSearchQuery(event.target.value)}
+              placeholder="Search chats"
+              className="h-8 rounded-lg pl-7 pr-8 text-sm"
+            />
+            {chatSearchQuery ? (
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setChatSearchQuery("")}
+                title="Clear search"
+              >
+                <X className="size-3.5" />
+              </button>
+            ) : null}
           </div>
         </div>
 

@@ -780,7 +780,12 @@ export const SkillsDialog = memo(function SkillsDialog({
                                   className="h-9 rounded-lg"
                                 />
                               </div>
-                              <div className="min-h-0 overflow-y-auto p-1">
+                              <div
+                                className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
+                                onWheelCapture={(event) =>
+                                  event.stopPropagation()
+                                }
+                              >
                                 {visibleRecommendedTools.length > 0 ? (
                                   visibleRecommendedTools.map((tool) => {
                                     const checked =
