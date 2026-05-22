@@ -27,11 +27,17 @@
 
 :root {
   --font-open-sans: "Open Sans", sans-serif;
-  --font-ibm-plex-sans: "IBM Plex Sans", sans-serif;
-  --font-imp-plex-mono: "IBM Plex Mono", monospace;
+  --font-ibm-plex-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-ibm-plex-mono:
+    "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    "Liberation Mono", "Courier New", monospace;
   --font-jetbrains-mono:
     "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
+
+  --font-sans: var(--font-ibm-plex-sans);
+  --font-mono: var(--font-ibm-plex-mono);
+
   --background: oklch(0.955 0.004 95);
   --foreground: oklch(0.24 0.01 95);
 
@@ -117,8 +123,8 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-ibm-plex-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-imp-plex-mono);
+  --font-sans: var(--font-ibm-plex-sans);
+  --font-mono: var(--font-ibm-plex-mono);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -161,8 +167,10 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
   }
 
   button:not(:disabled) {
@@ -173,7 +181,7 @@
   pre,
   kbd,
   samp {
-    font-family: var(--font-jetbrains-mono);
+    font-family: var(--font-mono);
   }
 }
 
@@ -209,16 +217,23 @@
     }
   }
 
-
   .context-usage-token-label {
-    /* font-family: var(--font-jetbrains-mono); */
+    /* font-family: var(--font-mono); */
+  }
+
+  .chat-forge-radix-theme,
+  .chat-forge-radix-theme.radix-themes,
+  .chat-forge-radix-theme .radix-themes {
+    --default-font-family: var(--font-sans);
+    --heading-font-family: var(--font-sans);
+    --code-font-family: var(--font-mono);
+    font-family: var(--font-sans);
   }
 
   .chat-forge-radix-theme.radix-themes {
     min-height: auto;
     background: transparent;
     color: inherit;
-    font-family: inherit;
   }
 
   @supports (min-height: 100dvh) {
@@ -244,6 +259,7 @@
     background-size: 200% auto;
     animation: generating-gradient-slide 2s linear infinite;
   }
+
   .generating-gradient-text {
     /* background-image: linear-gradient(90deg, #ffaa40, #9c40ff, #ffaa40); */
     background-image: linear-gradient(
@@ -593,6 +609,7 @@
     overflow-wrap: normal !important;
     word-break: normal !important;
   }
+
   .chat-markdown a {
     @apply font-medium break-words;
   }
@@ -605,7 +622,6 @@
   .chat-markdown i {
     font-style: oblique 8deg;
   }
-
 
   .chat-markdown .chat-code-block-fullscreen {
     @apply m-0 flex h-full min-h-0 flex-col overflow-hidden rounded-lg;
@@ -675,5 +691,4 @@
   .chat-code-fullscreen-preview .chat-code-html-preview-frame {
     @apply min-h-[480px];
   }
-
 }

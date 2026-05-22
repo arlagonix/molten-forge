@@ -20,6 +20,14 @@ function RadixThemeBridge({ children }: { children: ReactNode }) {
       hasBackground={false}
       radius="full"
       scaling="95%"
+      style={
+        {
+          "--default-font-family": "var(--font-sans)",
+          "--heading-font-family": "var(--font-sans)",
+          "--code-font-family": "var(--font-mono)",
+          fontFamily: "var(--font-sans)",
+        } as React.CSSProperties
+      }
     >
       {children}
     </RadixTheme>
