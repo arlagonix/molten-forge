@@ -1,4 +1,5 @@
 import {
+  BookOpen,
   Edit3,
   Loader2,
   MessageSquareText,
@@ -16,7 +17,6 @@ import {
   Trash2,
   Wrench,
   X,
-  BookOpen,
 } from "lucide-react";
 import type { UIEvent as ReactUIEvent } from "react";
 import { memo, useEffect, useMemo, useState } from "react";
@@ -98,9 +98,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
-  const [visibleChatLimit, setVisibleChatLimit] = useState(
-    CHAT_LIST_BATCH_SIZE,
-  );
+  const [visibleChatLimit, setVisibleChatLimit] =
+    useState(CHAT_LIST_BATCH_SIZE);
   const normalizedChatSearchQuery = chatSearchQuery.trim().toLocaleLowerCase();
 
   const filteredChatList = useMemo(() => {
@@ -209,7 +208,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="end"
-          className="rounded-lg"
+          className=""
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             window.requestAnimationFrame(() => {
@@ -285,7 +284,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         role="button"
         tabIndex={0}
         className={cn(
-          "group flex min-w-0 cursor-pointer items-center gap-1 rounded-lg border px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "group flex min-w-0 cursor-pointer items-center gap-1  border px-2 py-1 outline-none focus-visible:ring-2 focus-visible:ring-ring",
           isActive
             ? "border-primary/30 bg-accent text-accent-foreground"
             : "border-transparent hover:border-border hover:bg-muted/60",
@@ -307,7 +306,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             <Input
               value={renameValue}
               autoFocus
-              className="h-7 rounded-md px-2 py-1 text-base leading-6"
+              className="h-7  px-2 py-1 text-base leading-6"
               onChange={(event) => setRenameValue(event.target.value)}
               onClick={(event) => event.stopPropagation()}
               onFocus={(event) => event.currentTarget.select()}
@@ -336,7 +335,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                className="h-7 w-7 shrink-0 rounded-lg opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                className="h-7 w-7 shrink-0  opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
                 onClick={(event) => event.stopPropagation()}
                 title="Chat options"
               >
@@ -345,7 +344,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="rounded-lg"
+              className=""
               onCloseAutoFocus={(event) => event.preventDefault()}
             >
               <DropdownMenuItem
@@ -433,7 +432,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               type="button"
               variant="ghost"
               size="icon-sm"
-              className="hidden shrink-0 rounded-lg md:inline-flex"
+              className="hidden shrink-0  md:inline-flex"
               onClick={() => onCollapsedChange(true)}
               title="Hide sidebar"
             >
@@ -449,7 +448,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               </h1>
             </div>
 
-            {renderAppOptionsMenu("shrink-0 rounded-lg")}
+            {renderAppOptionsMenu("shrink-0 ")}
           </div>
         </div>
 
@@ -460,12 +459,12 @@ export const ChatSidebar = memo(function ChatSidebar({
               value={chatSearchQuery}
               onChange={(event) => setChatSearchQuery(event.target.value)}
               placeholder="Search chats"
-              className="h-8 rounded-lg pl-7 pr-8 text-sm"
+              className="h-8  pl-7 pr-8 text-sm"
             />
             {chatSearchQuery ? (
               <button
                 type="button"
-                className="absolute right-2 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="absolute right-2 top-1/2 inline-flex size-5 -translate-y-1/2 items-center justify-center  text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => setChatSearchQuery("")}
                 title="Clear search"
               >
@@ -503,7 +502,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           <Button
             type="button"
             variant="secondary"
-            className="w-full justify-center rounded-lg"
+            className="w-full justify-center "
             onClick={onCreateNewChat}
             title="New chat (Ctrl+N)"
           >
@@ -514,12 +513,12 @@ export const ChatSidebar = memo(function ChatSidebar({
       </aside>
 
       {isCollapsed ? (
-        <div className="absolute left-2 top-2 z-30 hidden items-center gap-1 rounded-lg border bg-card/95 p-1 shadow-sm md:flex">
+        <div className="absolute left-2 top-2 z-30 hidden items-center gap-1  border bg-card/95 p-1 shadow-sm md:flex">
           <Button
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="rounded-lg"
+            className=""
             onClick={() => onCollapsedChange(false)}
             title="Show sidebar"
           >
@@ -529,13 +528,13 @@ export const ChatSidebar = memo(function ChatSidebar({
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="rounded-lg"
+            className=""
             onClick={onCreateNewChat}
             title="New chat (Ctrl+N)"
           >
             <Plus className="size-4" />
           </Button>
-          {renderAppOptionsMenu("rounded-lg")}
+          {renderAppOptionsMenu("")}
         </div>
       ) : null}
     </>

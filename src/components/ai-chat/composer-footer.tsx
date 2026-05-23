@@ -1,8 +1,7 @@
-import { memo } from "react";
 import { BookOpen, Check, ChevronsUpDown, Lock, Wrench } from "lucide-react";
+import { memo } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import {
   Command,
   CommandEmpty,
@@ -16,6 +15,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
 import { providerDisplayName, providerLabel } from "@/lib/ai-chat/chat-utils";
 import type {
   LoadedSkillInfo,
@@ -107,7 +107,7 @@ export const ComposerFooter = memo(function ComposerFooter({
             role="combobox"
             disabled={!activeChatExists || isSending}
             aria-expanded={isModelPickerOpen}
-            className="model-picker-trigger h-9 w-full max-w-[14rem] justify-between overflow-hidden rounded-lg px-3 text-left font-normal"
+            className="model-picker-trigger h-9 w-full max-w-[14rem] justify-between overflow-hidden  px-3 text-left font-normal"
             title={
               isSending
                 ? "Wait until this chat finishes generating"
@@ -129,7 +129,7 @@ export const ComposerFooter = memo(function ComposerFooter({
         </PopoverTrigger>
         <PopoverContent
           align="start"
-          className="w-[min(var(--radix-popover-trigger-width),24rem)] rounded-lg p-0"
+          className="w-[min(var(--radix-popover-trigger-width),24rem)]  p-0"
         >
           <Command shouldFilter={false}>
             <CommandInput
@@ -192,7 +192,7 @@ export const ComposerFooter = memo(function ComposerFooter({
             role="combobox"
             disabled={!activeChatExists || isSending}
             aria-expanded={isToolPickerOpen}
-            className="h-9 shrink-0 justify-between gap-2 rounded-lg px-3 text-left font-normal"
+            className="h-9 shrink-0 justify-between gap-2  px-3 text-left font-normal"
             title={
               isSending
                 ? "Wait until this chat finishes generating"
@@ -207,7 +207,7 @@ export const ComposerFooter = memo(function ComposerFooter({
         </PopoverTrigger>
         <PopoverContent
           align="start"
-          className="w-[min(24rem,calc(100vw-2rem))] rounded-lg p-0"
+          className="w-[min(24rem,calc(100vw-2rem))]  p-0"
         >
           <Command shouldFilter={false}>
             <CommandInput
@@ -277,7 +277,7 @@ export const ComposerFooter = memo(function ComposerFooter({
             role="combobox"
             disabled={!activeChatExists || isSending}
             aria-expanded={isSkillPickerOpen}
-            className="h-9 shrink-0 justify-between gap-2 rounded-lg px-3 text-left font-normal"
+            className="h-9 shrink-0 justify-between gap-2  px-3 text-left font-normal"
             title={
               isSending
                 ? "Wait until this chat finishes generating"
@@ -292,7 +292,7 @@ export const ComposerFooter = memo(function ComposerFooter({
         </PopoverTrigger>
         <PopoverContent
           align="start"
-          className="w-[min(24rem,calc(100vw-2rem))] rounded-lg p-0"
+          className="w-[min(24rem,calc(100vw-2rem))]  p-0"
         >
           <Command shouldFilter={false}>
             <CommandInput
@@ -328,7 +328,7 @@ export const ComposerFooter = memo(function ComposerFooter({
                               {skill.name}
                             </span>
                             {isActive && (
-                              <span className="shrink-0 rounded-md border bg-muted/60 px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                              <span className="shrink-0  border bg-muted/60 px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
                                 active
                               </span>
                             )}

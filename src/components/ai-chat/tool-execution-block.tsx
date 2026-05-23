@@ -272,10 +272,10 @@ export function ToolExecutionBlock({
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <button
           type="button"
-          className="w-full rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={() => onToggleCollapsed(id, !isCollapsed)}
           aria-expanded={!isCollapsed}
         >

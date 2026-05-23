@@ -55,14 +55,14 @@ export const SystemPromptDialog = memo(function SystemPromptDialog({
           <Button
             type="button"
             variant="secondary"
-            className="rounded-lg"
+            className=""
             onClick={() => onValueChange("You are a helpful assistant.")}
           >
             Reset
           </Button>
           <Button
             type="button"
-            className="rounded-lg"
+            className=""
             onClick={async () => {
               try {
                 await saveSystemPrompt(value);

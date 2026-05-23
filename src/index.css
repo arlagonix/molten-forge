@@ -35,8 +35,8 @@
     "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
 
-  --font-sans: var(--font-ibm-plex-sans);
-  --font-mono: var(--font-ibm-plex-mono);
+  --font-sans: var(--font-jetbrains-mono);
+  --font-mono: var(--font-jetbrains-mono);
 
   --background: oklch(0.955 0.004 95);
   --foreground: oklch(0.24 0.01 95);
@@ -454,7 +454,7 @@
   }
 
   .chat-markdown .chat-code-block {
-    @apply relative my-2 w-full min-w-0 max-w-full border rounded-lg;
+    @apply relative my-2 w-full min-w-0 max-w-full border;
     background: var(--code-bg);
     border-color: var(--border);
     color: var(--code-fg);
@@ -624,7 +624,7 @@
   }
 
   .chat-markdown .chat-code-block-fullscreen {
-    @apply m-0 flex h-full min-h-0 flex-col overflow-hidden rounded-lg;
+    @apply m-0 flex h-full min-h-0 flex-col overflow-hidden;
   }
 
   .chat-markdown .chat-code-block-fullscreen .chat-code-header {
@@ -648,19 +648,19 @@
   .chat-code-preview-fullscreen .chat-code-preview-loading,
   .chat-code-fullscreen-preview .chat-code-preview-loading,
   .chat-markdown .chat-code-preview-loading {
-    @apply flex min-h-36 items-center justify-center rounded-md border border-dashed border-border bg-muted/40 px-4 py-8 text-sm text-muted-foreground;
+    @apply flex min-h-36 items-center justify-center  border border-dashed border-border bg-muted/40 px-4 py-8 text-sm text-muted-foreground;
   }
 
   .chat-code-preview-fullscreen .chat-code-preview-error,
   .chat-code-fullscreen-preview .chat-code-preview-error,
   .chat-markdown .chat-code-preview-error {
-    @apply whitespace-pre-wrap rounded-md border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive;
+    @apply whitespace-pre-wrap  border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive;
   }
 
   .chat-code-preview-fullscreen .chat-code-mermaid-preview,
   .chat-code-fullscreen-preview .chat-code-mermaid-preview,
   .chat-markdown .chat-code-mermaid-preview {
-    @apply flex min-h-36 w-full items-center justify-center overflow-auto rounded-md bg-background p-3;
+    @apply flex min-h-36 w-full items-center justify-center overflow-auto  bg-background p-3;
   }
 
   .chat-code-preview-fullscreen .chat-code-mermaid-preview svg,
@@ -673,7 +673,7 @@
   .chat-code-preview-fullscreen .chat-code-html-preview,
   .chat-code-fullscreen-preview .chat-code-html-preview,
   .chat-markdown .chat-code-html-preview {
-    @apply h-full min-h-72 min-w-0 overflow-auto rounded-md border border-border bg-background;
+    @apply h-full min-h-72 min-w-0 overflow-auto  border border-border bg-background;
   }
 
   .chat-code-preview-fullscreen .chat-code-html-preview,

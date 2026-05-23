@@ -76,7 +76,7 @@ export const ContextUsageIndicator = memo(function ContextUsageIndicator({
           variant="ghost"
           size="sm"
           className={cn(
-            "context-usage-token-label h-9 shrink-0 rounded-lg px-2 text-sm font-medium leading-none tabular-nums",
+            "context-usage-token-label h-9 shrink-0  px-2 text-sm font-medium leading-none tabular-nums",
             colorClass,
           )}
           title="Context usage"
@@ -85,7 +85,7 @@ export const ContextUsageIndicator = memo(function ContextUsageIndicator({
           {label}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-72 rounded-lg p-3">
+      <PopoverContent align="end" className="w-72  p-3">
         <div className="grid gap-2 text-sm leading-5">
           <div className="font-medium">Context usage</div>
           <div className="grid gap-1 text-muted-foreground">

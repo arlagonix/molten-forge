@@ -1494,7 +1494,7 @@ export default function Home() {
                     type="button"
                     variant="secondary"
                     size="icon"
-                    className="pointer-events-auto rounded-lg shadow-md opacity-80 hover:opacity-100"
+                    className="pointer-events-auto  shadow-md opacity-80 hover:opacity-100"
                     onClick={() => scrollChatToBottom()}
                     title="Scroll to bottom"
                     aria-label="Scroll to bottom"

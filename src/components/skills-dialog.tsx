@@ -437,7 +437,7 @@ export const SkillsDialog = memo(function SkillsDialog({
               <div
                 role="button"
                 tabIndex={0}
-                className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="mb-3 flex cursor-pointer items-center justify-between gap-3  border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() =>
                   onSkillsSettingsChange((current) => ({
                     ...current,
@@ -481,7 +481,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                   type="button"
                   variant="secondary"
                   size="sm"
-                  className="flex-1 rounded-lg"
+                  className="flex-1 "
                   onClick={() => {
                     const draft = createBlankSkillDraft();
                     setSelectedSkillName(null);
@@ -497,7 +497,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                       type="button"
                       variant="secondary"
                       size="sm"
-                      className="rounded-lg"
+                      className=""
                       title="Skill actions"
                     >
                       <MoreHorizontal className="size-4" />
@@ -545,7 +545,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                     role="button"
                     tabIndex={0}
                     className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                       selectedSkill?.id === skill.id
                         ? "border-primary/30 bg-accent text-accent-foreground"
                         : "border-transparent hover:border-border hover:bg-muted/60",
@@ -596,7 +596,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                 ))}
 
                 {loadedSkills.length === 0 && (
-                  <div className="rounded-lg border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
+                  <div className=" border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
                     No skills configured.
                   </div>
                 )}
@@ -610,7 +610,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                   {skillLoadErrors.map((error) => (
                     <div
                       key={`${error.source}:${error.message}`}
-                      className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-sm leading-5"
+                      className=" border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-sm leading-5"
                     >
                       <div
                         className="truncate font-medium text-destructive"
@@ -642,7 +642,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="rounded-lg"
+                              className=""
                               title="Skill options"
                             >
                               <MoreHorizontal className="size-4" />
@@ -686,7 +686,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                             updateSkillDraft({ name: event.target.value })
                           }
                           placeholder="release-notes"
-                          className="rounded-lg"
+                          className=""
                         />
                       </div>
 
@@ -701,7 +701,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                             })
                           }
                           placeholder="Use when generating concise user-facing release notes from version diffs."
-                          className="min-h-24 rounded-lg leading-6"
+                          className="min-h-24  leading-6"
                         />
                       </div>
 
@@ -714,7 +714,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="h-8 rounded-lg px-2 text-sm"
+                            className="h-8  px-2 text-sm"
                             onClick={() => setInstructionsEditorOpen(true)}
                           >
                             <Maximize2 className="size-4" />
@@ -730,7 +730,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                             })
                           }
                           placeholder="Write the reusable instructions for this skill..."
-                          className="min-h-72 rounded-lg text-sm leading-6"
+                          className="min-h-72  text-sm leading-6"
                         />
                       </div>
 
@@ -746,7 +746,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                               type="button"
                               variant="outline"
                               role="combobox"
-                              className="w-full justify-between rounded-lg px-3 text-left font-normal"
+                              className="w-full justify-between  px-3 text-left font-normal"
                               disabled={availableTools.length === 0}
                             >
                               <span
@@ -767,7 +767,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                           </PopoverTrigger>
                           <PopoverContent
                             align="start"
-                            className="w-[min(var(--radix-popover-trigger-width),32rem)] rounded-lg p-0"
+                            className="w-[min(var(--radix-popover-trigger-width),32rem)]  p-0"
                           >
                             <div className="grid max-h-[24rem] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
                               <div className="border-b p-2">
@@ -777,7 +777,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                                     setRecommendedToolSearch(event.target.value)
                                   }
                                   placeholder="Search tools..."
-                                  className="h-9 rounded-lg"
+                                  className="h-9 "
                                 />
                               </div>
                               <div
@@ -798,7 +798,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                                         key={tool.name}
                                         role="button"
                                         tabIndex={0}
-                                        className="flex w-full min-w-0 cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        className="flex w-full min-w-0 cursor-pointer items-start gap-2  px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                         onClick={() =>
                                           toggleRecommendedTool(tool.name)
                                         }
@@ -842,14 +842,14 @@ export const SkillsDialog = memo(function SkillsDialog({
                         </Popover>
 
                         {skillDraft.recommendedToolNames.length > 0 && (
-                          <div className="grid max-h-56 gap-1 overflow-y-auto rounded-lg border bg-muted/10 p-2">
+                          <div className="grid max-h-56 gap-1 overflow-y-auto  border bg-muted/10 p-2">
                             {skillDraft.recommendedToolNames.map((toolName) => {
                               const tool = recommendedToolsByName.get(toolName);
 
                               return (
                                 <div
                                   key={toolName}
-                                  className="flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-muted/70"
+                                  className="flex min-w-0 items-start gap-2  px-2 py-1.5 hover:bg-muted/70"
                                   title={tool?.description}
                                 >
                                   <Checkbox
@@ -882,7 +882,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                     <Button
                       type="button"
                       variant="outline"
-                      className="rounded-lg"
+                      className=""
                       onClick={() => {
                         if (selectedSkill)
                           setSkillDraft(skillToDraft(selectedSkill));
@@ -894,7 +894,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                     </Button>
                     <Button
                       type="button"
-                      className="rounded-lg"
+                      className=""
                       onClick={() => void saveCurrentSkillDraft()}
                       disabled={!hasSkillDraftChanges || isSavingSkill}
                     >
@@ -940,13 +940,13 @@ export const SkillsDialog = memo(function SkillsDialog({
                 updateSkillDraft({ instructions: event.target.value })
               }
               placeholder="Write the reusable instructions for this skill..."
-              className="min-h-0 flex-1 resize-none rounded-lg text-sm leading-6"
+              className="min-h-0 flex-1 resize-none  text-sm leading-6"
             />
 
             <DialogFooter>
               <Button
                 type="button"
-                className="rounded-lg"
+                className=""
                 onClick={() => setInstructionsEditorOpen(false)}
               >
                 Done

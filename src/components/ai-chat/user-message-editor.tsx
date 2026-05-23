@@ -280,11 +280,11 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   return (
     <div className="grid min-w-0 max-w-full gap-2">
       <article className="flex justify-end">
-        <div className="relative min-w-0 w-full overflow-visible bg-primary rounded-lg px-4 py-3 text-base leading-6 text-primary-foreground shadow-xs [overflow-wrap:anywhere]">
+        <div className="relative min-w-0 w-full overflow-visible bg-primary px-4 py-3 text-base leading-6 text-primary-foreground shadow-xs [overflow-wrap:anywhere]">
           {isMentionMenuOpen && mentionMenuPosition && (
             <div
               ref={mentionMenuRef}
-              className="absolute z-30 w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
+              className="absolute z-30 w-[min(28rem,calc(100vw-2rem))] overflow-y-auto border bg-popover p-1 text-popover-foreground shadow-lg"
               style={{
                 left: mentionMenuPosition.left,
                 top: mentionMenuPosition.top,
@@ -310,7 +310,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
                       applyMentionSuggestion(option.name);
                     }}
                     className={cn(
-                      "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                      "flex w-full min-w-0 items-start gap-2  px-2 py-1.5 text-left text-sm",
                       isSelected && "bg-accent text-accent-foreground",
                     )}
                     title={option.description}

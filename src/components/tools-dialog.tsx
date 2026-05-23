@@ -1070,7 +1070,7 @@ export const ToolsDialog = memo(function ToolsDialog({
             <div
               role="button"
               tabIndex={0}
-              className="mb-3 flex cursor-pointer items-center justify-between gap-3 rounded-lg border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="mb-3 flex cursor-pointer items-center justify-between gap-3  border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() =>
                 onToolsSettingsChange((current) => ({
                   ...current,
@@ -1111,7 +1111,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="flex-1 rounded-lg"
+                className="flex-1 "
                 onClick={() => {
                   const draft = createBlankToolDraft();
                   setSelectedToolName(null);
@@ -1127,7 +1127,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                     type="button"
                     variant="secondary"
                     size="sm"
-                    className="rounded-lg"
+                    className=""
                     title="Tool actions"
                   >
                     <MoreHorizontal className="size-4" />
@@ -1171,7 +1171,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 role="button"
                 tabIndex={0}
                 className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   isAskUserToolSelected
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1216,7 +1216,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 role="button"
                 tabIndex={0}
                 className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   isChecklistWriteToolSelected
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1263,7 +1263,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 role="button"
                 tabIndex={0}
                 className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   isLoadSkillToolSelected
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1311,7 +1311,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                   role="button"
                   tabIndex={0}
                   className={cn(
-                    "group flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     selectedTool?.id === tool.id
                       ? "border-primary/30 bg-accent text-accent-foreground"
                       : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1362,7 +1362,7 @@ export const ToolsDialog = memo(function ToolsDialog({
               ))}
 
               {loadedTools.length === 0 && (
-                <div className="rounded-lg border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
+                <div className=" border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
                   No custom command tools configured.
                 </div>
               )}
@@ -1376,7 +1376,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 {toolLoadErrors.map((error) => (
                   <div
                     key={`${error.source}:${error.message}`}
-                    className="rounded-lg border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-sm leading-5"
+                    className=" border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-sm leading-5"
                   >
                     <div
                       className="truncate font-medium text-destructive"
@@ -1399,7 +1399,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                     <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                       Built-in tool
                     </Label>
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                    <span className="inline-flex shrink-0 items-center gap-1  border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
                       <Lock className="size-3.5" />
                       Locked
                     </span>
@@ -1418,7 +1418,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+                    <div className="grid gap-2  border bg-muted/20 p-3">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
@@ -1459,7 +1459,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                     <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                       Built-in tool
                     </Label>
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                    <span className="inline-flex shrink-0 items-center gap-1  border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
                       <Lock className="size-3.5" />
                       Locked
                     </span>
@@ -1478,7 +1478,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+                    <div className="grid gap-2  border bg-muted/20 p-3">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
@@ -1514,7 +1514,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                     <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                       Built-in tool
                     </Label>
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-lg border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                    <span className="inline-flex shrink-0 items-center gap-1  border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
                       <Lock className="size-3.5" />
                       Locked
                     </span>
@@ -1533,7 +1533,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2 rounded-lg border bg-muted/20 p-3">
+                    <div className="grid gap-2  border bg-muted/20 p-3">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
@@ -1577,7 +1577,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                             type="button"
                             variant="ghost"
                             size="sm"
-                            className="rounded-lg"
+                            className=""
                             title="Tool options"
                           >
                             <MoreHorizontal className="size-4" />
@@ -1698,10 +1698,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                             })
                           }
                         >
-                          <SelectTrigger
-                            id="tool-input-mode"
-                            className="rounded-lg"
-                          >
+                          <SelectTrigger id="tool-input-mode" className="">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1729,7 +1726,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </div>
                     </div>
 
-                    <div className="grid gap-3 rounded-lg border bg-muted/20 p-3">
+                    <div className="grid gap-3  border bg-muted/20 p-3">
                       <div>
                         <Label>Execution limits</Label>
                         <p className="text-sm leading-5 text-muted-foreground">
@@ -1800,7 +1797,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                           <Button
                             type="button"
                             variant="secondary"
-                            className="rounded-lg"
+                            className=""
                             onClick={clearCurrentToolTest}
                             disabled={
                               !currentToolTestState || isTestingCurrentTool
@@ -1811,7 +1808,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                           <Button
                             type="button"
                             variant="secondary"
-                            className="rounded-lg"
+                            className=""
                             onClick={runCurrentToolTest}
                             disabled={isTestingCurrentTool}
                           >
@@ -1835,7 +1832,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                       />
                       {(currentToolTestResult ||
                         currentToolTestExecutionPreview) && (
-                        <div className="grid gap-3 rounded-lg border bg-card p-3">
+                        <div className="grid gap-3  border bg-card p-3">
                           <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
                             {currentToolTestResult ? (
                               <span>
@@ -1895,7 +1892,7 @@ export const ToolsDialog = memo(function ToolsDialog({
               </>
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
-                <div className="flex h-full items-center justify-center rounded-lg border border-dashed p-8 text-center text-base text-muted-foreground">
+                <div className="flex h-full items-center justify-center  border border-dashed p-8 text-center text-base text-muted-foreground">
                   Select a tool or add a new one.
                 </div>
               </div>
@@ -1913,7 +1910,7 @@ export const ToolsDialog = memo(function ToolsDialog({
               <Button
                 type="button"
                 variant="secondary"
-                className="rounded-lg"
+                className=""
                 onClick={() => {
                   if (selectedTool) setToolDraft(toolToDraft(selectedTool));
                   else setToolDraft(createBlankToolDraft());
@@ -1926,7 +1923,7 @@ export const ToolsDialog = memo(function ToolsDialog({
               <Button
                 type="button"
                 variant="secondary"
-                className="rounded-lg"
+                className=""
                 onClick={() => onOpenChange(false)}
               >
                 Close
@@ -1937,7 +1934,7 @@ export const ToolsDialog = memo(function ToolsDialog({
               !isLoadSkillToolSelected && (
                 <Button
                   type="button"
-                  className="rounded-lg"
+                  className=""
                   onClick={saveCurrentToolDraft}
                   disabled={!toolDraft || isSavingTool || !hasToolDraftChanges}
                 >

@@ -46,6 +46,10 @@ import {
   providerDisplayName,
   sanitizeGenerationSettings,
 } from "@/lib/ai-chat/chat-utils";
+import {
+  getActiveModelSettings,
+  loadProviderModels,
+} from "@/lib/ai-chat/direct-provider-client";
 import { defaultGenerationSettings } from "@/lib/ai-chat/provider-presets";
 import { saveCachedProviderModels } from "@/lib/ai-chat/storage";
 import type {
@@ -55,10 +59,6 @@ import type {
   ProvidersState,
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
-import {
-  getActiveModelSettings,
-  loadProviderModels,
-} from "@/lib/ai-chat/direct-provider-client";
 
 const EMPTY_MODEL_CONFIG: ProviderModelConfig = {};
 
@@ -107,13 +107,16 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelLoadStatus, setModelLoadStatus] =
     useState<ModelLoadStatus>("idle");
-  const [expandedProviderIds, setExpandedProviderIds] = useState<Record<string, boolean>>({});
+  const [expandedProviderIds, setExpandedProviderIds] = useState<
+    Record<string, boolean>
+  >({});
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>();
   const modelLoadStatusTimerRef = useRef<number | null>(null);
 
-  const selectedModel = selectedModelId && (activeProvider.models ?? []).includes(selectedModelId)
-    ? selectedModelId
-    : undefined;
+  const selectedModel =
+    selectedModelId && (activeProvider.models ?? []).includes(selectedModelId)
+      ? selectedModelId
+      : undefined;
   const selectedModelSettings = useMemo(
     () =>
       selectedModel
@@ -133,12 +136,17 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
   }, []);
 
   useEffect(() => {
-    if (selectedModelId && !(activeProvider.models ?? []).includes(selectedModelId)) {
+    if (
+      selectedModelId &&
+      !(activeProvider.models ?? []).includes(selectedModelId)
+    ) {
       setSelectedModelId(undefined);
     }
   }, [activeProvider.id, activeProvider.models, selectedModelId]);
 
-  function setTemporaryModelLoadStatus(status: Exclude<ModelLoadStatus, "idle">) {
+  function setTemporaryModelLoadStatus(
+    status: Exclude<ModelLoadStatus, "idle">,
+  ) {
     setModelLoadStatus(status);
 
     if (modelLoadStatusTimerRef.current !== null) {
@@ -220,7 +228,11 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
     });
   }
 
-  function toggleModelShownInMenu(providerId: string, model: string, checked: boolean) {
+  function toggleModelShownInMenu(
+    providerId: string,
+    model: string,
+    checked: boolean,
+  ) {
     updateProviderInState(providerId, (provider) => {
       const currentConfig = provider.modelConfigs?.[model] ?? {};
       return {
@@ -247,7 +259,9 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
 
     try {
       const loadedModels = await loadProviderModels(providerForLoad);
-      const loadedModelIds = normalizeProviderModels(loadedModels.map((model) => model.id));
+      const loadedModelIds = normalizeProviderModels(
+        loadedModels.map((model) => model.id),
+      );
       await saveCachedProviderModels(providerForLoad, loadedModelIds);
 
       onProvidersStateChange((currentState) => ({
@@ -316,7 +330,9 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
     });
   }
 
-  function updateSelectedModelGenerationSettings(patch: ProviderGenerationSettings) {
+  function updateSelectedModelGenerationSettings(
+    patch: ProviderGenerationSettings,
+  ) {
     updateSelectedModelConfig(
       sanitizeGenerationSettings({
         ...(selectedModelSettings ?? defaultGenerationSettings),
@@ -368,7 +384,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                 type="button"
                 variant="secondary"
                 size="sm"
-                className="h-7 rounded-lg px-2 text-sm"
+                className="h-7  px-2 text-sm"
                 onClick={onAddProvider}
               >
                 <Plus className="size-3.5" />
@@ -381,11 +397,14 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                 const isExpanded = expandedProviderIds[item.id] ?? true;
                 const shownModels = getShownProviderModels(item);
                 const modelCount = shownModels.length;
-                const loadedModelCount = normalizeProviderModels(item.models ?? []).length;
+                const loadedModelCount = normalizeProviderModels(
+                  item.models ?? [],
+                ).length;
                 const enabledModelCount = shownModels.filter((model) =>
                   isModelEnabled(item, model),
                 ).length;
-                const providerSelected = item.id === activeProvider.id && !selectedModel;
+                const providerSelected =
+                  item.id === activeProvider.id && !selectedModel;
 
                 return (
                   <div key={item.id} className="grid gap-1">
@@ -393,7 +412,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                       role="button"
                       tabIndex={0}
                       className={cn(
-                        "group flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "group flex min-w-0 cursor-pointer items-center gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         providerSelected
                           ? "border-primary/30 bg-accent text-accent-foreground"
                           : "border-transparent hover:border-border hover:bg-muted/60",
@@ -410,7 +429,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="h-7 w-7 shrink-0 rounded-lg"
+                        className="h-7 w-7 shrink-0 "
                         onClick={(event) => {
                           event.stopPropagation();
                           toggleProviderExpanded(item.id);
@@ -430,15 +449,23 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                           {providerDisplayName(item)}
                         </div>
                         <div className="truncate text-sm leading-5 text-muted-foreground">
-                          {enabledModelCount}/{modelCount} shown · {loadedModelCount} loaded · {item.baseUrl || "No base URL"}
+                          {enabledModelCount}/{modelCount} shown ·{" "}
+                          {loadedModelCount} loaded ·{" "}
+                          {item.baseUrl || "No base URL"}
                         </div>
                       </div>
 
                       <Switch
                         checked={isProviderEnabled(item)}
                         onClick={(event) => event.stopPropagation()}
-                        onCheckedChange={(checked) => toggleProvider(item.id, checked)}
-                        title={isProviderEnabled(item) ? "Disable provider" : "Enable provider"}
+                        onCheckedChange={(checked) =>
+                          toggleProvider(item.id, checked)
+                        }
+                        title={
+                          isProviderEnabled(item)
+                            ? "Disable provider"
+                            : "Enable provider"
+                        }
                       />
                     </div>
 
@@ -447,7 +474,8 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                         {modelCount > 0 ? (
                           shownModels.map((model) => {
                             const modelSelected =
-                              item.id === activeProvider.id && selectedModel === model;
+                              item.id === activeProvider.id &&
+                              selectedModel === model;
                             const checked = isModelEnabled(item, model);
 
                             return (
@@ -456,14 +484,17 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                                 role="button"
                                 tabIndex={0}
                                 className={cn(
-                                  "flex min-w-0 cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                  "flex min-w-0 cursor-pointer items-center gap-2  border px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring",
                                   modelSelected
                                     ? "border-primary/30 bg-accent text-accent-foreground"
                                     : "border-transparent hover:border-border hover:bg-muted/60",
                                 )}
                                 onClick={() => selectModel(item.id, model)}
                                 onKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
+                                  if (
+                                    event.key === "Enter" ||
+                                    event.key === " "
+                                  ) {
                                     event.preventDefault();
                                     selectModel(item.id, model);
                                   }
@@ -479,13 +510,15 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                                   onCheckedChange={(nextChecked) =>
                                     toggleModel(item.id, model, nextChecked)
                                   }
-                                  title={checked ? "Disable model" : "Enable model"}
+                                  title={
+                                    checked ? "Disable model" : "Enable model"
+                                  }
                                 />
                               </div>
                             );
                           })
                         ) : (
-                          <p className="rounded-lg px-2 py-2 text-sm leading-5 text-muted-foreground">
+                          <p className=" px-2 py-2 text-sm leading-5 text-muted-foreground">
                             No models shown. Select models in provider settings.
                           </p>
                         )}
@@ -515,14 +548,16 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                         type="button"
                         variant="ghost"
                         size="icon-sm"
-                        className="h-8 w-8 shrink-0 rounded-lg"
+                        className="h-8 w-8 shrink-0 "
                         title="Provider actions"
                       >
                         <MoreVertical className="size-4" />
                       </Button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="rounded-lg">
-                      <DropdownMenuItem onClick={() => onDuplicateProvider(activeProvider.id)}>
+                    <DropdownMenuContent align="end" className="">
+                      <DropdownMenuItem
+                        onClick={() => onDuplicateProvider(activeProvider.id)}
+                      >
                         <Copy className="size-4" />
                         Duplicate
                       </DropdownMenuItem>
@@ -582,7 +617,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2 rounded-lg text-muted-foreground"
+                      className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2  text-muted-foreground"
                       onClick={() => setIsApiKeyVisible((current) => !current)}
                       title={isApiKeyVisible ? "Hide API key" : "Show API key"}
                     >
@@ -595,21 +630,24 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                   </div>
                 </div>
 
-                <div className="grid gap-3 rounded-lg border bg-card p-3">
+                <div className="grid gap-3  border bg-card p-3">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <Label>Loaded models</Label>
                       <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                        Select which loaded models should appear in the left menu.
+                        Select which loaded models should appear in the left
+                        menu.
                       </p>
                     </div>
                     <Button
                       type="button"
                       variant="secondary"
                       size="sm"
-                      className="rounded-lg"
+                      className=""
                       onClick={() => loadModelsFromProvider(activeProvider)}
-                      disabled={isLoadingModels || !activeProvider.baseUrl.trim()}
+                      disabled={
+                        isLoadingModels || !activeProvider.baseUrl.trim()
+                      }
                     >
                       <RefreshCcw
                         className={cn(
@@ -621,34 +659,42 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                     </Button>
                   </div>
 
-                  {normalizeProviderModels(activeProvider.models ?? []).length > 0 ? (
-                    <div className="grid max-h-80 gap-1 overflow-y-auto rounded-lg border bg-background/60 p-2">
-                      {normalizeProviderModels(activeProvider.models ?? []).map((model) => {
-                        const checked = isModelShownInMenu(activeProvider, model);
+                  {normalizeProviderModels(activeProvider.models ?? []).length >
+                  0 ? (
+                    <div className="grid max-h-80 gap-1 overflow-y-auto  border bg-background/60 p-2">
+                      {normalizeProviderModels(activeProvider.models ?? []).map(
+                        (model) => {
+                          const checked = isModelShownInMenu(
+                            activeProvider,
+                            model,
+                          );
 
-                        return (
-                          <label
-                            key={`${activeProvider.id}:${model}:shown`}
-                            className="flex min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm leading-5 hover:bg-muted/60"
-                            title={model}
-                          >
-                            <Checkbox
-                              checked={checked}
-                              onCheckedChange={(nextChecked) =>
-                                toggleModelShownInMenu(
-                                  activeProvider.id,
-                                  model,
-                                  nextChecked === true,
-                                )
-                              }
-                            />
-                            <span className="min-w-0 flex-1 truncate">{model}</span>
-                          </label>
-                        );
-                      })}
+                          return (
+                            <label
+                              key={`${activeProvider.id}:${model}:shown`}
+                              className="flex min-w-0 cursor-pointer items-center gap-2  px-2 py-1.5 text-sm leading-5 hover:bg-muted/60"
+                              title={model}
+                            >
+                              <Checkbox
+                                checked={checked}
+                                onCheckedChange={(nextChecked) =>
+                                  toggleModelShownInMenu(
+                                    activeProvider.id,
+                                    model,
+                                    nextChecked === true,
+                                  )
+                                }
+                              />
+                              <span className="min-w-0 flex-1 truncate">
+                                {model}
+                              </span>
+                            </label>
+                          );
+                        },
+                      )}
                     </div>
                   ) : (
-                    <p className="rounded-lg border border-dashed px-3 py-4 text-sm leading-5 text-muted-foreground">
+                    <p className=" border border-dashed px-3 py-4 text-sm leading-5 text-muted-foreground">
                       No models loaded yet. Load models from the provider first.
                     </p>
                   )}
@@ -661,7 +707,8 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                     {selectedModel}
                   </h3>
                   <p className="text-sm leading-5 text-muted-foreground">
-                    Per-model generation and context settings for {providerDisplayName(activeProvider)}.
+                    Per-model generation and context settings for{" "}
+                    {providerDisplayName(activeProvider)}.
                   </p>
                 </div>
 
@@ -677,7 +724,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="rounded-lg"
+                      className=""
                       onClick={resetSelectedModelGenerationSettings}
                     >
                       Reset
@@ -686,17 +733,23 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
 
                   <div className="grid gap-4 md:grid-cols-4">
                     <div className="grid gap-2">
-                      <Label htmlFor="generation-temperature">Temperature</Label>
+                      <Label htmlFor="generation-temperature">
+                        Temperature
+                      </Label>
                       <Input
                         id="generation-temperature"
                         type="number"
                         min="0"
                         max="2"
                         step="0.1"
-                        value={formatOptionalNumber(selectedModelSettings?.temperature)}
+                        value={formatOptionalNumber(
+                          selectedModelSettings?.temperature,
+                        )}
                         onChange={(event) =>
                           updateSelectedModelGenerationSettings({
-                            temperature: parseOptionalNumber(event.target.value),
+                            temperature: parseOptionalNumber(
+                              event.target.value,
+                            ),
                           })
                         }
                         placeholder="Provider default"
@@ -711,7 +764,9 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                         min="0"
                         max="1"
                         step="0.05"
-                        value={formatOptionalNumber(selectedModelSettings?.topP)}
+                        value={formatOptionalNumber(
+                          selectedModelSettings?.topP,
+                        )}
                         onChange={(event) =>
                           updateSelectedModelGenerationSettings({
                             topP: parseOptionalNumber(event.target.value),
@@ -722,13 +777,17 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                     </div>
 
                     <div className="grid gap-2">
-                      <Label htmlFor="generation-max-tokens">Max output tokens</Label>
+                      <Label htmlFor="generation-max-tokens">
+                        Max output tokens
+                      </Label>
                       <Input
                         id="generation-max-tokens"
                         type="number"
                         min="1"
                         step="1"
-                        value={formatOptionalNumber(selectedModelSettings?.maxTokens)}
+                        value={formatOptionalNumber(
+                          selectedModelSettings?.maxTokens,
+                        )}
                         onChange={(event) =>
                           updateSelectedModelGenerationSettings({
                             maxTokens: parseOptionalNumber(event.target.value),
@@ -739,16 +798,22 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                     </div>
 
                     <div className="grid gap-2">
-                      <Label htmlFor="generation-timeout">Request timeout, ms</Label>
+                      <Label htmlFor="generation-timeout">
+                        Request timeout, ms
+                      </Label>
                       <Input
                         id="generation-timeout"
                         type="number"
                         min="1000"
                         step="1000"
-                        value={formatOptionalNumber(selectedModelSettings?.requestTimeoutMs)}
+                        value={formatOptionalNumber(
+                          selectedModelSettings?.requestTimeoutMs,
+                        )}
                         onChange={(event) =>
                           updateSelectedModelGenerationSettings({
-                            requestTimeoutMs: parseOptionalNumber(event.target.value),
+                            requestTimeoutMs: parseOptionalNumber(
+                              event.target.value,
+                            ),
                           })
                         }
                         placeholder="30000"
@@ -763,18 +828,23 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                   <div>
                     <Label>Context size</Label>
                     <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                      Set the context limit used by the context counter. Leave empty when you do not know it.
+                      Set the context limit used by the context counter. Leave
+                      empty when you do not know it.
                     </p>
                   </div>
 
                   <div className="grid max-w-sm gap-2">
-                    <Label htmlFor="manual-context-size">Manual context size</Label>
+                    <Label htmlFor="manual-context-size">
+                      Manual context size
+                    </Label>
                     <Input
                       id="manual-context-size"
                       type="number"
                       min="1"
                       step="1"
-                      value={formatOptionalNumber(selectedModelConfig?.context?.manualContextLength)}
+                      value={formatOptionalNumber(
+                        selectedModelConfig?.context?.manualContextLength,
+                      )}
                       onChange={(event) =>
                         updateSelectedModelManualContext(event.target.value)
                       }
@@ -788,7 +858,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
         </div>
 
         <DialogFooter className="h-[72px] shrink-0 items-center border-t px-5 py-3">
-          <Button type="button" className="rounded-lg" onClick={onSave}>
+          <Button type="button" className="" onClick={onSave}>
             Save
           </Button>
         </DialogFooter>

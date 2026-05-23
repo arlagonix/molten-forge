@@ -338,10 +338,10 @@ function ThinkingBlock({
 
   return (
     <article className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <button
           type="button"
-          className="w-full rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={onToggleCollapsed}
           aria-expanded={!isCollapsed}
           aria-controls={`${id}-thinking-content`}
@@ -446,7 +446,7 @@ const UserMessageContent = memo(function UserMessageContent({
     parts.push(
       <span
         key={`${tokenStartIndex}-${token}`}
-        className="inline-flex items-center rounded-md border border-primary-foreground/25 bg-primary-foreground/15 px-1.5 py-0.5 font-mono text-[0.875em] font-medium leading-5 text-primary-foreground"
+        className="inline-flex items-center  border border-primary-foreground/25 bg-primary-foreground/15 px-1.5 py-0.5 font-mono text-[0.875em] font-medium leading-5 text-primary-foreground"
         title={`One-shot ${mentionType} for this request: ${mentionName}`}
       >
         {token}
@@ -710,7 +710,7 @@ const ChatMessageItem = memo(
                         onCaptureMessageContext(event, message.id)
                       }
                     >
-                      <div className="min-w-0 max-w-full overflow-visible rounded-lg px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]">
+                      <div className="min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]">
                         <SmoothAssistantMessageContent
                           content={step.content}
                           isApiStreaming={isAssistantBlockStreaming}
@@ -882,7 +882,7 @@ const ChatMessageItem = memo(
               >
                 <div
                   className={cn(
-                    "min-w-0 text-base leading-6 [overflow-wrap:anywhere] w-full rounded-lg",
+                    "min-w-0 text-base leading-6 [overflow-wrap:anywhere] w-full ",
                     message.role === "user"
                       ? "max-h-[32rem] overflow-y-auto overflow-x-hidden chat-message-scrollbar bg-primary px-4 py-3 text-primary-foreground shadow-xs"
                       : "min-w-0 max-w-full overflow-visible px-0 py-1 text-card-foreground shadow-xs",
@@ -914,7 +914,7 @@ const ChatMessageItem = memo(
               {messageContextMenu?.messageId === message.id && (
                 <div
                   data-message-context-menu
-                  className="fixed z-50 min-w-55 rounded-lg border bg-popover p-1 text-base text-popover-foreground shadow-md"
+                  className="fixed z-50 min-w-55  border bg-popover p-1 text-base text-popover-foreground shadow-md"
                   style={{
                     left: messageContextMenu.x,
                     top: messageContextMenu.y,
@@ -925,7 +925,7 @@ const ChatMessageItem = memo(
                     <>
                       <button
                         type="button"
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                        className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                         onClick={() => {
                           void onCopyLinkHref(messageContextMenu.linkHref);
                           onCloseMessageContextMenu();
@@ -939,7 +939,7 @@ const ChatMessageItem = memo(
                   )}
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                    className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                     disabled={
                       !messageContextMenu.selectedText.trim() && !content.trim()
                     }
@@ -962,7 +962,7 @@ const ChatMessageItem = memo(
                     <>
                       <button
                         type="button"
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                        className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                         disabled={isSending}
                         onClick={() => {
                           void onRegenerateAssistantMessage(message.id);
@@ -976,7 +976,7 @@ const ChatMessageItem = memo(
                       </button>
                       <button
                         type="button"
-                        className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                        className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                         disabled={isSending || isMessageStreaming}
                         onClick={() => {
                           void onContinueAssistantMessage(message.id);
@@ -991,7 +991,7 @@ const ChatMessageItem = memo(
                   {message.role === "user" && (
                     <button
                       type="button"
-                      className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                      className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                       disabled={isSending}
                       onClick={() => {
                         onStartEditingUserMessage(message.id);
@@ -1005,7 +1005,7 @@ const ChatMessageItem = memo(
                   <div className="-mx-1 my-1 h-px bg-border" />
                   <button
                     type="button"
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-destructive/20"
+                    className="flex w-full items-center gap-2  px-2 py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-destructive/20"
                     disabled={isSending}
                     onClick={() => {
                       onDeleteMessage(message.id);
@@ -1140,7 +1140,7 @@ const ChatMessageItem = memo(
                           type="button"
                           variant="ghost"
                           size="icon-sm"
-                          className="h-6 w-6 rounded-lg text-muted-foreground"
+                          className="h-6 w-6  text-muted-foreground"
                           disabled={metrics?.durationMs === undefined}
                           title="Generation info"
                           aria-label="Generation info"
@@ -1153,7 +1153,7 @@ const ChatMessageItem = memo(
                   </Tooltip>
                   <PopoverContent
                     align="end"
-                    className="w-[min(26rem,calc(100vw-2rem))] rounded-lg p-3"
+                    className="w-[min(26rem,calc(100vw-2rem))]  p-3"
                   >
                     <div className="mb-2 text-sm font-medium text-popover-foreground">
                       Generation info

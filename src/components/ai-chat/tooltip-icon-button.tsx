@@ -25,7 +25,7 @@ export function TooltipIconButton({
         <Button
           aria-label={label}
           title={label}
-          className={cn("h-6 w-6 rounded-lg text-muted-foreground", className)}
+          className={cn("h-6 w-6  text-muted-foreground", className)}
           {...props}
         >
           {children}

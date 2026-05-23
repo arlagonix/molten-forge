@@ -297,7 +297,7 @@ export const AskUserBlock = memo(function AskUserBlock({
         maxLength={MAX_ASK_USER_CUSTOM_ANSWER_LENGTH}
         onChange={(event) => updateAnswer(event.target.value)}
         onKeyDown={handleTextareaAnswerKeyDown}
-        className="min-h-24 rounded-lg text-sm"
+        className="min-h-24  text-sm"
       />
     );
   }
@@ -374,7 +374,7 @@ export const AskUserBlock = memo(function AskUserBlock({
         tabIndex={isInteractive ? 0 : -1}
         data-ask-user-option
         className={cn(
-          "flex items-start gap-2 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          "flex items-start gap-2  border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
           checked
             ? "border-primary/50 bg-primary/10 text-foreground"
             : "border-border/70 bg-background/60",
@@ -448,7 +448,7 @@ export const AskUserBlock = memo(function AskUserBlock({
         tabIndex={isInteractive ? 0 : -1}
         data-ask-user-option
         className={cn(
-          "grid gap-2 rounded-lg border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+          "grid gap-2  border px-3 py-2 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
           checked
             ? "border-primary/50 bg-primary/10 text-foreground"
             : "border-border/70 bg-background/60",
@@ -556,7 +556,7 @@ export const AskUserBlock = memo(function AskUserBlock({
               event.stopPropagation();
               handleTextareaAnswerKeyDown(event);
             }}
-            className="min-h-20 rounded-lg text-sm"
+            className="min-h-20  text-sm"
           />
         )}
       </div>
@@ -800,10 +800,10 @@ export const AskUserBlock = memo(function AskUserBlock({
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <button
           type="button"
-          className="w-full rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={onToggleCollapsed}
           aria-expanded={!isCollapsed}
         >
@@ -902,7 +902,7 @@ export const AskUserBlock = memo(function AskUserBlock({
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="rounded-lg"
+                          className=""
                           onClick={onCancel}
                         >
                           Cancel
@@ -913,7 +913,7 @@ export const AskUserBlock = memo(function AskUserBlock({
                               type="button"
                               variant="outline"
                               size="sm"
-                              className="rounded-lg"
+                              className=""
                               onClick={goToPreviousQuestion}
                             >
                               Back
@@ -923,7 +923,7 @@ export const AskUserBlock = memo(function AskUserBlock({
                             <Button
                               type="button"
                               size="sm"
-                              className="rounded-lg"
+                              className=""
                               onClick={goToNextQuestion}
                               disabled={!currentQuestionAnswered}
                             >
@@ -933,7 +933,7 @@ export const AskUserBlock = memo(function AskUserBlock({
                             <Button
                               type="button"
                               size="sm"
-                              className="rounded-lg"
+                              className=""
                               onClick={handleSubmit}
                               disabled={!canSendAnswers}
                             >
@@ -948,7 +948,7 @@ export const AskUserBlock = memo(function AskUserBlock({
               })()}
 
             {isWaiting && !canSubmit && (
-              <div className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
+              <div className=" border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
                 This input request is no longer connected to an active
                 generation. Regenerate the response to ask again.
               </div>
@@ -1004,10 +1004,10 @@ export const ChecklistBlock = memo(function ChecklistBlock({
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden rounded-lg border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <button
           type="button"
-          className="w-full rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onClick={onToggleCollapsed}
           aria-expanded={!isCollapsed}
         >
@@ -1033,7 +1033,7 @@ export const ChecklistBlock = memo(function ChecklistBlock({
             {request.items.map((item, index) => (
               <li
                 key={`${index}-${item.content}`}
-                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-lg px-2 py-1.5"
+                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2  px-2 py-1.5"
               >
                 <span className="mt-0.5">
                   {getChecklistItemIcon(item.done)}

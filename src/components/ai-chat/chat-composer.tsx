@@ -386,13 +386,13 @@ export const ChatComposer = memo(
         className="bg-background py-3 md:py-4"
         data-draft-input
       >
-        <div className="mx-auto w-full max-w-4xl border rounded-lg bg-card p-3 pt-0 shadow-sm">
+        <div className="mx-auto w-full max-w-4xl border  bg-card p-3 pt-0 shadow-sm">
           <div className="mx-auto grid w-full gap-2">
             <div className="relative">
               {isMentionMenuOpen && mentionMenuPosition && (
                 <div
                   ref={mentionMenuRef}
-                  className="absolute z-20 w-[min(28rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg"
+                  className="absolute z-20 w-[min(28rem,calc(100vw-2rem))] overflow-y-auto  border bg-popover p-1 text-popover-foreground shadow-lg"
                   style={{
                     left: mentionMenuPosition.left,
                     top: mentionMenuPosition.top,
@@ -418,7 +418,7 @@ export const ChatComposer = memo(
                           applyMentionSuggestion(option.name);
                         }}
                         className={cn(
-                          "flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm",
+                          "flex w-full min-w-0 items-start gap-2  px-2 py-1.5 text-left text-sm",
                           isSelected && "bg-accent text-accent-foreground",
                         )}
                         title={option.description}
@@ -545,7 +545,7 @@ export const ChatComposer = memo(
                   type="button"
                   variant="secondary"
                   onClick={onStop}
-                  className="shrink-0 rounded-lg"
+                  className="shrink-0 "
                   title="Stop generation"
                 >
                   <Square className="size-4" />
@@ -555,7 +555,7 @@ export const ChatComposer = memo(
                 <Button
                   type="submit"
                   disabled={!canSend}
-                  className="shrink-0 rounded-lg"
+                  className="shrink-0 "
                   title="Send message"
                 >
                   <Send className="size-4" />
