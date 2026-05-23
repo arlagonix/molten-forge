@@ -10,6 +10,8 @@ import {
   CHECKLIST_WRITE_TOOL,
   CHECKLIST_WRITE_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
+  WEB_FETCH_TOOL,
+  WEB_FETCH_TOOL_NAME,
   createLoadSkillTool,
   isValidToolName,
   parseSkillMentionNames,
@@ -93,7 +95,8 @@ export function getGlobalEnabledTools({
           tool.enabled &&
           tool.name !== ASK_USER_TOOL_NAME &&
           tool.name !== CHECKLIST_WRITE_TOOL_NAME &&
-          tool.name !== LOAD_SKILL_TOOL_NAME,
+          tool.name !== LOAD_SKILL_TOOL_NAME &&
+          tool.name !== WEB_FETCH_TOOL_NAME,
       )
     : [];
 
@@ -102,6 +105,7 @@ export function getGlobalEnabledTools({
   return [
     ...(toolsSettings.askUserEnabled ? [ASK_USER_TOOL] : []),
     ...(toolsSettings.checklistWriteEnabled ? [CHECKLIST_WRITE_TOOL] : []),
+    ...(toolsSettings.webFetchEnabled ? [WEB_FETCH_TOOL] : []),
     ...enabledCommandTools,
   ];
 }

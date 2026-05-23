@@ -18,6 +18,7 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   askUserEnabled: true,
   checklistWriteEnabled: true,
   loadSkillEnabled: true,
+  webFetchEnabled: false,
 };
 
 export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
@@ -27,6 +28,7 @@ export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
 export const ASK_USER_TOOL_NAME = "ask_user";
 export const CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
 export const LOAD_SKILL_TOOL_NAME = "load_skill";
+export const WEB_FETCH_TOOL_NAME = "web_fetch";
 export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
 
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
@@ -161,6 +163,30 @@ export const CHECKLIST_WRITE_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
+export const WEB_FETCH_TOOL: LoadedToolInfo = {
+  id: "builtin-web-fetch",
+  name: WEB_FETCH_TOOL_NAME,
+  enabled: true,
+  description:
+    "Fetch readable text from a specific HTTP/HTTPS URL. Use this when the user provides a URL or when an exact official documentation URL is known. This tool does not search the web.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      url: {
+        type: "string",
+        description:
+          "The exact HTTP or HTTPS URL to fetch. URL fragments like #section are supported for documentation anchors.",
+      },
+    },
+    required: ["url"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
 export function createLoadSkillTool(
   availableSkills: LoadedSkillInfo[],
 ): LoadedToolInfo | null {
@@ -212,7 +238,8 @@ export function isBuiltInToolName(toolName: string) {
   return (
     toolName === ASK_USER_TOOL_NAME ||
     toolName === CHECKLIST_WRITE_TOOL_NAME ||
-    toolName === LOAD_SKILL_TOOL_NAME
+    toolName === LOAD_SKILL_TOOL_NAME ||
+    toolName === WEB_FETCH_TOOL_NAME
   );
 }
 

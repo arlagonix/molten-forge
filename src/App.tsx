@@ -31,6 +31,8 @@ import {
   CHECKLIST_WRITE_TOOL_NAME,
   DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
+  WEB_FETCH_TOOL,
+  WEB_FETCH_TOOL_NAME,
   compareToolsByDisplayOrder,
   isBuiltInToolName,
   isValidToolName,
@@ -455,7 +457,12 @@ export default function Home() {
   const availableTools = useMemo(() => {
     const byName = new Map<string, LoadedToolInfo>();
 
-    for (const tool of [ASK_USER_TOOL, CHECKLIST_WRITE_TOOL, ...loadedTools]) {
+    for (const tool of [
+      ASK_USER_TOOL,
+      CHECKLIST_WRITE_TOOL,
+      WEB_FETCH_TOOL,
+      ...loadedTools,
+    ]) {
       if (!isValidToolName(tool.name) || byName.has(tool.name)) continue;
       byName.set(tool.name, tool);
     }
@@ -475,12 +482,14 @@ export default function Home() {
     if (toolsSettings.askUserEnabled) names.add(ASK_USER_TOOL_NAME);
     if (toolsSettings.checklistWriteEnabled)
       names.add(CHECKLIST_WRITE_TOOL_NAME);
+    if (toolsSettings.webFetchEnabled) names.add(WEB_FETCH_TOOL_NAME);
 
     for (const tool of loadedTools) {
       if (
         tool.enabled &&
         tool.name !== ASK_USER_TOOL_NAME &&
         tool.name !== CHECKLIST_WRITE_TOOL_NAME &&
+        tool.name !== WEB_FETCH_TOOL_NAME &&
         isValidToolName(tool.name)
       ) {
         names.add(tool.name);

@@ -351,6 +351,7 @@ export type ToolsSettings = {
   askUserEnabled: boolean;
   checklistWriteEnabled: boolean;
   loadSkillEnabled: boolean;
+  webFetchEnabled: boolean;
 };
 
 export type SkillsSettings = {

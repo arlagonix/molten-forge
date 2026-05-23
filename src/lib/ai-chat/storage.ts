@@ -178,6 +178,10 @@ function normalizeToolsSettings(
       typeof value?.loadSkillEnabled === "boolean"
         ? value.loadSkillEnabled
         : true,
+    webFetchEnabled:
+      typeof value?.webFetchEnabled === "boolean"
+        ? value.webFetchEnabled
+        : false,
   };
 }
 

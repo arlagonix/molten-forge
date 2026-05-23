@@ -26,10 +26,13 @@ import { cn } from "@/lib/utils";
 
 const ASK_USER_TOOL_NAME = "ask_user";
 const CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
+const WEB_FETCH_TOOL_NAME = "web_fetch";
 
 function isBuiltInToolName(toolName: string) {
   return (
-    toolName === ASK_USER_TOOL_NAME || toolName === CHECKLIST_WRITE_TOOL_NAME
+    toolName === ASK_USER_TOOL_NAME ||
+    toolName === CHECKLIST_WRITE_TOOL_NAME ||
+    toolName === WEB_FETCH_TOOL_NAME
   );
 }
 

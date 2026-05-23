@@ -4,6 +4,7 @@ import {
   Copy,
   Download,
   FolderOpen,
+  Globe,
   ListTodo,
   Lock,
   MessageSquareText,
@@ -76,6 +77,8 @@ const BUILTIN_CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
 const BUILTIN_CHECKLIST_WRITE_TOOL_ID = "builtin-checklist-write";
 const BUILTIN_LOAD_SKILL_TOOL_NAME = "load_skill";
 const BUILTIN_LOAD_SKILL_TOOL_ID = "builtin-load-skill";
+const BUILTIN_WEB_FETCH_TOOL_NAME = "web_fetch";
+const BUILTIN_WEB_FETCH_TOOL_ID = "builtin-web-fetch";
 const BUILTIN_ASK_USER_TOOL_DESCRIPTION =
   "Pauses the assistant so it can ask focused clarification questions, including single-choice, multi-select, and text answers, then resumes the same response.";
 const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
@@ -129,6 +132,8 @@ const BUILTIN_CHECKLIST_WRITE_TOOL_DESCRIPTION =
   "Creates visible checklist snapshots for tracking progress during complex multi-step work.";
 const BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION =
   "Loads full instructions for one relevant skill and activates it for the current chat when skills are available.";
+const BUILTIN_WEB_FETCH_TOOL_DESCRIPTION =
+  "Fetches readable text from a specific HTTP/HTTPS URL. It can read official docs or user-provided links, but it does not search the web.";
 const BUILTIN_LOAD_SKILL_TOOL_PARAMETERS = {
   type: "object",
   properties: {
@@ -138,6 +143,19 @@ const BUILTIN_LOAD_SKILL_TOOL_PARAMETERS = {
     },
   },
   required: ["skillName"],
+};
+
+const BUILTIN_WEB_FETCH_TOOL_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    url: {
+      type: "string",
+      description:
+        "Exact HTTP or HTTPS URL to fetch. URL fragments like #section are supported for documentation anchors.",
+    },
+  },
+  required: ["url"],
 };
 
 const BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS = {
@@ -599,7 +617,8 @@ function validateToolDraft(tool: LoadedToolInfo) {
   if (
     tool.name === BUILTIN_ASK_USER_TOOL_NAME ||
     tool.name === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
-    tool.name === BUILTIN_LOAD_SKILL_TOOL_NAME
+    tool.name === BUILTIN_LOAD_SKILL_TOOL_NAME ||
+    tool.name === BUILTIN_WEB_FETCH_TOOL_NAME
   ) {
     throw new Error(
       `${tool.name} is a built-in tool name and cannot be used by a custom command tool.`,
@@ -688,22 +707,26 @@ export const ToolsDialog = memo(function ToolsDialog({
     selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME;
   const isLoadSkillToolSelected =
     selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME;
+  const isWebFetchToolSelected =
+    selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME;
   const selectedTool = useMemo(
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 3;
+  const totalToolsCount = loadedTools.length + 4;
   const enabledToolsCount = useMemo(
     () =>
       loadedTools.filter((tool) => tool.enabled).length +
       (toolsSettings.askUserEnabled ? 1 : 0) +
       (toolsSettings.checklistWriteEnabled ? 1 : 0) +
-      (toolsSettings.loadSkillEnabled ? 1 : 0),
+      (toolsSettings.loadSkillEnabled ? 1 : 0) +
+      (toolsSettings.webFetchEnabled ? 1 : 0),
     [
       loadedTools,
       toolsSettings.askUserEnabled,
       toolsSettings.checklistWriteEnabled,
       toolsSettings.loadSkillEnabled,
+      toolsSettings.webFetchEnabled,
     ],
   );
   const currentToolTestState = toolDraft
@@ -731,7 +754,8 @@ export const ToolsDialog = memo(function ToolsDialog({
     if (
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
       selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
-      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME
+      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
+      selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME
     ) {
       return;
     }
@@ -748,7 +772,8 @@ export const ToolsDialog = memo(function ToolsDialog({
     if (
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
       selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
-      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME
+      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
+      selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME
     ) {
       setToolDraft(null);
       return;
@@ -777,7 +802,8 @@ export const ToolsDialog = memo(function ToolsDialog({
       !toolDraft ||
       isAskUserToolSelected ||
       isChecklistWriteToolSelected ||
-      isLoadSkillToolSelected
+      isLoadSkillToolSelected ||
+      isWebFetchToolSelected
     ) {
       return false;
     }
@@ -1305,6 +1331,53 @@ export const ToolsDialog = memo(function ToolsDialog({
                 />
               </div>
 
+              <div
+                key={BUILTIN_WEB_FETCH_TOOL_ID}
+                role="button"
+                tabIndex={0}
+                className={cn(
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isWebFetchToolSelected
+                    ? "border-primary/30 bg-accent text-accent-foreground"
+                    : "border-transparent hover:border-border hover:bg-muted/60",
+                )}
+                onClick={() =>
+                  setSelectedToolName(BUILTIN_WEB_FETCH_TOOL_NAME)
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedToolName(BUILTIN_WEB_FETCH_TOOL_NAME);
+                  }
+                }}
+              >
+                <Globe className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
+                    <span className="truncate">
+                      {BUILTIN_WEB_FETCH_TOOL_NAME}
+                    </span>
+                    <Lock className="size-3 shrink-0 text-muted-foreground" />
+                  </div>
+                </div>
+                <Switch
+                  checked={toolsSettings.webFetchEnabled}
+                  onClick={(event) => event.stopPropagation()}
+                  onCheckedChange={(checked) =>
+                    onToolsSettingsChange((current) => ({
+                      ...current,
+                      webFetchEnabled: checked,
+                    }))
+                  }
+                  className="mt-0.5 shrink-0 cursor-pointer"
+                  title={
+                    toolsSettings.webFetchEnabled
+                      ? "Disable web_fetch"
+                      : "Enable web_fetch"
+                  }
+                />
+              </div>
+
               {loadedTools.map((tool) => (
                 <div
                   key={tool.id}
@@ -1555,6 +1628,63 @@ export const ToolsDialog = memo(function ToolsDialog({
                       {renderJsonCodeBlock(
                         JSON.stringify(
                           BUILTIN_LOAD_SKILL_TOOL_PARAMETERS,
+                          null,
+                          2,
+                        ),
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : isWebFetchToolSelected ? (
+              <>
+                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
+                  <div className="flex w-full items-center justify-between gap-4">
+                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                      Built-in tool
+                    </Label>
+                    <span className="inline-flex shrink-0 items-center gap-1  border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                      <Lock className="size-3.5" />
+                      Locked
+                    </span>
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                  <div className="grid gap-5 pb-1">
+                    <div className="grid gap-1">
+                      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <Globe className="size-5 text-muted-foreground" />
+                        {BUILTIN_WEB_FETCH_TOOL_NAME}
+                      </h3>
+                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
+                        {BUILTIN_WEB_FETCH_TOOL_DESCRIPTION}
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2  border bg-muted/20 p-3">
+                      <Label>Behavior</Label>
+                      <div className="grid gap-2 text-base leading-6 text-muted-foreground">
+                        <p>
+                          The assistant can call this tool only when it already
+                          has an exact URL, such as a documentation link from a
+                          skill or a link pasted by the user. It does not search
+                          for unknown pages.
+                        </p>
+                        <p>
+                          Chat Forge fetches the page safely, blocks local or
+                          private network addresses, extracts readable text,
+                          supports URL fragments like #commands, and truncates
+                          long results automatically.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Parameters JSON schema</Label>
+                      {renderJsonCodeBlock(
+                        JSON.stringify(
+                          BUILTIN_WEB_FETCH_TOOL_PARAMETERS,
                           null,
                           2,
                         ),

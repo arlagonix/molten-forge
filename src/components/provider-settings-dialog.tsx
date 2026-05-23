@@ -269,11 +269,17 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
         providers: currentState.providers.map((provider) => {
           if (provider.id !== providerForLoad.id) return provider;
 
-          const modelConfigs = { ...(provider.modelConfigs ?? {}) };
-          for (const loadedModel of loadedModels) {
-            const currentConfig = modelConfigs[loadedModel.id] ?? {};
+          const loadedModelIdSet = new Set(loadedModelIds);
+          const loadedModelsById = new Map(
+            loadedModels.map((loadedModel) => [loadedModel.id, loadedModel]),
+          );
+          const modelConfigs: Record<string, ProviderModelConfig> = {};
+
+          for (const loadedModelId of loadedModelIds) {
+            const loadedModel = loadedModelsById.get(loadedModelId);
+            const currentConfig = provider.modelConfigs?.[loadedModelId] ?? {};
             const context = { ...(currentConfig.context ?? {}) };
-            if (loadedModel.contextLength !== undefined) {
+            if (loadedModel?.contextLength !== undefined) {
               if (loadedModel.contextLengthSource === "detected") {
                 context.detectedContextLength = loadedModel.contextLength;
               } else {
@@ -281,23 +287,40 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
               }
             }
 
+            const enabled =
+              typeof currentConfig.enabled === "boolean"
+                ? currentConfig.enabled
+                : true;
             const showInMenu =
               typeof currentConfig.showInMenu === "boolean"
                 ? currentConfig.showInMenu
-                : (currentConfig.enabled ?? false);
+                : enabled;
 
-            modelConfigs[loadedModel.id] = {
+            modelConfigs[loadedModelId] = {
               ...currentConfig,
-              enabled: currentConfig.enabled ?? showInMenu,
+              enabled,
               showInMenu,
               context,
             };
           }
 
+          const selectedModelStillExists = loadedModelIdSet.has(provider.model);
+          const fallbackModel =
+            (selectedModelStillExists ? provider.model : "") ||
+            loadedModelIds.find((modelId) => {
+              const config = modelConfigs[modelId];
+              return config.enabled !== false && config.showInMenu !== false;
+            }) ||
+            loadedModelIds[0] ||
+            "";
+
           return normalizeProviderForState({
             ...provider,
+            model: fallbackModel,
             models: loadedModelIds,
             modelConfigs,
+            enabledModelIds: [],
+            modelSettings: {},
           });
         }),
       }));

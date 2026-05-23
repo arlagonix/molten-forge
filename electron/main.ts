@@ -1,6 +1,8 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
-import { existsSync, promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
+import { lookup } from "node:dns/promises";
+import { existsSync, promises as fs } from "node:fs";
+import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -94,6 +96,9 @@ type ToolExecutionPreview = {
 };
 
 type ToolCommandResult = {
+  toolName?: string;
+  content?: string;
+  isError?: boolean;
   exitCode: number | null;
   stdout: string;
   stderr: string;
@@ -119,6 +124,7 @@ type ToolsSettings = {
   askUserEnabled: boolean;
   checklistWriteEnabled: boolean;
   loadSkillEnabled: boolean;
+  webFetchEnabled: boolean;
 };
 
 type SkillsSettings = {
@@ -192,6 +198,7 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   askUserEnabled: true,
   checklistWriteEnabled: true,
   loadSkillEnabled: true,
+  webFetchEnabled: false,
 };
 const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   enabled: true,
@@ -200,6 +207,19 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
 };
 const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
+const WEB_FETCH_TOOL_NAME = "web_fetch";
+const WEB_FETCH_TIMEOUT_MS = 15_000;
+const WEB_FETCH_MAX_RESPONSE_BYTES = 2_000_000;
+const WEB_FETCH_MAX_RETURN_CHARS = 20_000;
+const WEB_FETCH_MAX_REDIRECTS = 5;
+const WEB_FETCH_ALLOWED_CONTENT_TYPES = new Set([
+  "",
+  "text/html",
+  "text/plain",
+  "application/json",
+  "application/xml",
+  "text/xml",
+]);
 const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const APP_TITLE = `Chat Forge v${app.getVersion()}`;
 let win: BrowserWindow | null = null;
@@ -417,6 +437,10 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
       typeof value.loadSkillEnabled === "boolean"
         ? value.loadSkillEnabled
         : true,
+    webFetchEnabled:
+      typeof value.webFetchEnabled === "boolean"
+        ? value.webFetchEnabled
+        : false,
   };
 }
 
@@ -795,9 +819,479 @@ async function runCommandTool(
   });
 }
 
+
+function parseWebFetchArgs(args: unknown) {
+  if (!isPlainObject(args)) {
+    throw new Error("web_fetch arguments must be a JSON object.");
+  }
+
+  const url = safeString(args.url).trim();
+  if (!url) throw new Error("web_fetch requires url.");
+
+  return { url };
+}
+
+function parseWebFetchUrl(rawUrl: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    throw new Error("web_fetch requires a valid URL.");
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("web_fetch supports only HTTP and HTTPS URLs.");
+  }
+
+  return parsed;
+}
+
+function getNormalizedHostname(url: URL) {
+  return url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+}
+
+function isBlockedIpv4Address(address: string) {
+  const parts = address.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part))) {
+    return true;
+  }
+
+  const [a, b, c, d] = parts;
+  if (parts.some((part) => part < 0 || part > 255)) return true;
+
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 192 && b === 0 && c === 0) ||
+    (a === 192 && b === 0 && c === 2) ||
+    (a === 198 && (b === 18 || b === 19)) ||
+    (a === 198 && b === 51 && c === 100) ||
+    (a === 203 && b === 0 && c === 113) ||
+    a >= 224 ||
+    (a === 255 && b === 255 && c === 255 && d === 255)
+  );
+}
+
+function isBlockedIpv6Address(address: string) {
+  const normalized = address.toLowerCase();
+  if (normalized === "::" || normalized === "::1") return true;
+
+  const mappedIpv4Match = normalized.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mappedIpv4Match) return isBlockedIpv4Address(mappedIpv4Match[1]);
+
+  const firstSegment = Number.parseInt(normalized.split(":")[0] || "0", 16);
+  if (!Number.isFinite(firstSegment)) return true;
+
+  // fc00::/7 unique local, fe80::/10 link-local, 2001:db8::/32 docs.
+  return (
+    (firstSegment & 0xfe00) === 0xfc00 ||
+    (firstSegment & 0xffc0) === 0xfe80 ||
+    normalized.startsWith("2001:db8:")
+  );
+}
+
+function isBlockedIpAddress(address: string) {
+  const ipVersion = isIP(address);
+  if (ipVersion === 4) return isBlockedIpv4Address(address);
+  if (ipVersion === 6) return isBlockedIpv6Address(address);
+  return true;
+}
+
+async function assertFetchablePublicUrl(url: URL) {
+  const hostname = getNormalizedHostname(url);
+  if (!hostname) throw new Error("web_fetch URL is missing a hostname.");
+
+  if (hostname === "localhost" || hostname.endsWith(".localhost")) {
+    throw new Error("web_fetch blocks localhost URLs.");
+  }
+
+  if (isIP(hostname)) {
+    if (isBlockedIpAddress(hostname)) {
+      throw new Error("web_fetch blocks local, private, and reserved IP addresses.");
+    }
+    return;
+  }
+
+  let addresses: Array<{ address: string }>;
+  try {
+    addresses = await lookup(hostname, { all: true, verbatim: true });
+  } catch (error) {
+    throw new Error(`web_fetch could not resolve host ${hostname}: ${getErrorMessage(error)}`);
+  }
+
+  if (!addresses.length) throw new Error(`web_fetch could not resolve host ${hostname}.`);
+
+  for (const address of addresses) {
+    if (isBlockedIpAddress(address.address)) {
+      throw new Error(
+        "web_fetch blocks hosts that resolve to local, private, or reserved IP addresses.",
+      );
+    }
+  }
+}
+
+function normalizeContentType(contentTypeHeader: string | null) {
+  return (contentTypeHeader ?? "").split(";")[0].trim().toLowerCase();
+}
+
+function isAllowedWebFetchContentType(contentType: string) {
+  return WEB_FETCH_ALLOWED_CONTENT_TYPES.has(contentType);
+}
+
+async function readResponseTextWithLimit(response: Response) {
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (
+    Number.isFinite(contentLength) &&
+    contentLength > WEB_FETCH_MAX_RESPONSE_BYTES
+  ) {
+    throw new Error(
+      `web_fetch response is too large (${contentLength} bytes). Maximum is ${WEB_FETCH_MAX_RESPONSE_BYTES} bytes.`,
+    );
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > WEB_FETCH_MAX_RESPONSE_BYTES) {
+      throw new Error(
+        `web_fetch response is too large. Maximum is ${WEB_FETCH_MAX_RESPONSE_BYTES} bytes.`,
+      );
+    }
+    return new TextDecoder("utf-8", { fatal: false }).decode(buffer);
+  }
+
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+
+    totalBytes += value.byteLength;
+    if (totalBytes > WEB_FETCH_MAX_RESPONSE_BYTES) {
+      try {
+        await reader.cancel();
+      } catch {
+        // Ignore cancellation errors.
+      }
+      throw new Error(
+        `web_fetch response is too large. Maximum is ${WEB_FETCH_MAX_RESPONSE_BYTES} bytes.`,
+      );
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+}
+
+async function fetchWebUrl(startUrl: URL) {
+  let currentUrl = new URL(startUrl.toString());
+  currentUrl.hash = "";
+
+  for (let redirectCount = 0; redirectCount <= WEB_FETCH_MAX_REDIRECTS; redirectCount += 1) {
+    await assertFetchablePublicUrl(currentUrl);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(currentUrl, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          Accept:
+            "text/html,application/xhtml+xml,text/plain,application/json,application/xml,text/xml;q=0.9,*/*;q=0.8",
+          "User-Agent": `${APP_TITLE} web_fetch`,
+        },
+      });
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new Error(
+          `web_fetch timed out after ${Math.round(WEB_FETCH_TIMEOUT_MS / 1000)} seconds.`,
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location) throw new Error(`web_fetch redirect from ${currentUrl} had no Location header.`);
+      currentUrl = new URL(location, currentUrl);
+      currentUrl.hash = "";
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new Error(`web_fetch received HTTP ${response.status} from ${currentUrl}.`);
+    }
+
+    const contentType = normalizeContentType(response.headers.get("content-type"));
+    if (!isAllowedWebFetchContentType(contentType)) {
+      throw new Error(
+        `web_fetch cannot read content type ${contentType || "unknown"}.`,
+      );
+    }
+
+    const text = await readResponseTextWithLimit(response);
+    return {
+      finalUrl: currentUrl.toString(),
+      contentType,
+      text,
+    };
+  }
+
+  throw new Error(`web_fetch followed too many redirects. Maximum is ${WEB_FETCH_MAX_REDIRECTS}.`);
+}
+
+function decodeHtmlCodePoint(value: string, radix: number) {
+  const code = Number.parseInt(value, radix);
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return "";
+
+  try {
+    return String.fromCodePoint(code);
+  } catch {
+    return "";
+  }
+}
+
+function decodeHtmlEntities(value: string) {
+  const namedEntities: Record<string, string> = {
+    amp: "&",
+    lt: "<",
+    gt: ">",
+    quot: '"',
+    apos: "'",
+    nbsp: " ",
+  };
+
+  return value
+    .replace(/&#x([\da-f]+);/gi, (_match, hex: string) =>
+      decodeHtmlCodePoint(hex, 16),
+    )
+    .replace(/&#(\d+);/g, (_match, decimal: string) =>
+      decodeHtmlCodePoint(decimal, 10),
+    )
+    .replace(/&([a-z]+);/gi, (match, name: string) => namedEntities[name.toLowerCase()] ?? match);
+}
+
+function normalizeExtractedText(value: string) {
+  return decodeHtmlEntities(value)
+    .replace(/\r/g, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function stripHtmlToText(html: string) {
+  return normalizeExtractedText(
+    html
+      .replace(/<!doctype[\s\S]*?>/gi, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<script\b[\s\S]*?<\/script>/gi, "\n")
+      .replace(/<style\b[\s\S]*?<\/style>/gi, "\n")
+      .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, "\n")
+      .replace(/<svg\b[\s\S]*?<\/svg>/gi, "\n")
+      .replace(/<head\b[\s\S]*?<\/head>/gi, "\n")
+      .replace(/<(nav|footer|header|form|button|aside)\b[\s\S]*?<\/\1>/gi, "\n")
+      .replace(/<br\s*\/?\s*>/gi, "\n")
+      .replace(/<\/(p|div|section|article|main|li|tr|table|h[1-6])>/gi, "\n")
+      .replace(/<li\b[^>]*>/gi, "\n- ")
+      .replace(/<h([1-6])\b[^>]*>/gi, "\n\n")
+      .replace(/<[^>]+>/g, " "),
+  );
+}
+
+function extractTitleFromHtml(html: string) {
+  const titleMatch = html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i);
+  return titleMatch ? normalizeExtractedText(titleMatch[1]) : "";
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findPreviousHeadingStart(html: string, index: number) {
+  const headingPattern = /<h([1-6])\b[^>]*>/gi;
+  let previous: { index: number; level: number } | undefined;
+  let match: RegExpExecArray | null;
+
+  while ((match = headingPattern.exec(html)) && match.index < index) {
+    previous = { index: match.index, level: Number(match[1]) };
+  }
+
+  return previous;
+}
+
+function findNextSectionEnd(html: string, startIndex: number, headingLevel: number) {
+  const headingPattern = /<h([1-6])\b[^>]*>/gi;
+  headingPattern.lastIndex = startIndex + 1;
+
+  let match: RegExpExecArray | null;
+  while ((match = headingPattern.exec(html))) {
+    const level = Number(match[1]);
+    if (level <= headingLevel) return match.index;
+  }
+
+  return html.length;
+}
+
+function extractHtmlFragmentSection(html: string, fragment: string) {
+  const escapedFragment = escapeRegExp(fragment);
+  const elementPattern = new RegExp(
+    `<([a-zA-Z][a-zA-Z0-9:-]*)\\b(?=[^>]*(?:id|name)\\s*=\\s*["']?${escapedFragment}["'\\s>])[^>]*>`,
+    "i",
+  );
+  const match = elementPattern.exec(html);
+  if (!match) return undefined;
+
+  const matchedTagName = match[1].toLowerCase();
+  const headingMatch = /^h([1-6])$/.exec(matchedTagName);
+  const previousHeading = headingMatch
+    ? { index: match.index, level: Number(headingMatch[1]) }
+    : findPreviousHeadingStart(html, match.index);
+
+  const sectionStart = previousHeading?.index ?? match.index;
+  const headingLevel = previousHeading?.level ?? 6;
+  const sectionEnd = findNextSectionEnd(html, sectionStart, headingLevel);
+
+  return html.slice(sectionStart, sectionEnd);
+}
+
+function extractReadableContent({
+  rawText,
+  contentType,
+  fragment,
+}: {
+  rawText: string;
+  contentType: string;
+  fragment: string;
+}) {
+  if (contentType.includes("json")) {
+    try {
+      return {
+        text: JSON.stringify(JSON.parse(rawText), null, 2),
+        fragmentFound: false,
+      };
+    } catch {
+      return { text: normalizeExtractedText(rawText), fragmentFound: false };
+    }
+  }
+
+  if (contentType.includes("xml")) {
+    return { text: stripHtmlToText(rawText), fragmentFound: false };
+  }
+
+  if (contentType && !contentType.includes("html")) {
+    return { text: normalizeExtractedText(rawText), fragmentFound: false };
+  }
+
+  if (fragment) {
+    const sectionHtml = extractHtmlFragmentSection(rawText, fragment);
+    if (sectionHtml) {
+      return { text: stripHtmlToText(sectionHtml), fragmentFound: true };
+    }
+  }
+
+  return { text: stripHtmlToText(rawText), fragmentFound: false };
+}
+
+function truncateWebFetchContent(value: string) {
+  if (value.length <= WEB_FETCH_MAX_RETURN_CHARS) {
+    return { content: value, truncated: false };
+  }
+
+  return {
+    content: value.slice(0, WEB_FETCH_MAX_RETURN_CHARS).trimEnd(),
+    truncated: true,
+  };
+}
+
+function decodeUrlComponentSafely(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+async function executeWebFetchTool(args: unknown): Promise<ToolCommandResult> {
+  const { url: rawUrl } = parseWebFetchArgs(args);
+  const requestedUrl = parseWebFetchUrl(rawUrl);
+  const requestedFragment = requestedUrl.hash
+    ? decodeUrlComponentSafely(requestedUrl.hash.slice(1))
+    : "";
+
+  const fetched = await fetchWebUrl(requestedUrl);
+  const title = fetched.contentType.includes("html")
+    ? extractTitleFromHtml(fetched.text)
+    : "";
+  const extracted = extractReadableContent({
+    rawText: fetched.text,
+    contentType: fetched.contentType,
+    fragment: requestedFragment,
+  });
+  const truncated = truncateWebFetchContent(extracted.text);
+
+  const metadataLines = [
+    `Fetched: ${rawUrl}`,
+    fetched.finalUrl !== requestedUrl.toString().replace(/#.*$/, "")
+      ? `Final URL: ${fetched.finalUrl}`
+      : "",
+    title ? `Title: ${title}` : "",
+    requestedFragment
+      ? extracted.fragmentFound
+        ? `Section: #${requestedFragment}`
+        : `Fragment "#${requestedFragment}" was not found. Returning readable page content instead.`
+      : "",
+    fetched.contentType ? `Content-Type: ${fetched.contentType}` : "",
+  ].filter(Boolean);
+
+  const content = [
+    metadataLines.join("\n"),
+    "",
+    truncated.content || "No readable text was extracted from this URL.",
+    truncated.truncated
+      ? `\n[Content truncated to ${WEB_FETCH_MAX_RETURN_CHARS} characters.]`
+      : "",
+  ]
+    .filter((part) => part.length > 0)
+    .join("\n");
+
+  return {
+    toolName: WEB_FETCH_TOOL_NAME,
+    content,
+    exitCode: 0,
+    stdout: content,
+    stderr: "",
+    timedOut: false,
+  };
+}
+
 async function executeToolManifest(name: unknown, args: unknown) {
   const toolName = typeof name === "string" ? name.trim() : "";
   if (!toolName) throw new Error("Tool name is required.");
+
+  if (toolName === WEB_FETCH_TOOL_NAME) {
+    return executeWebFetchTool(args);
+  }
 
   const tools = await loadJsonTools();
   const tool = tools.find((candidate) => candidate.name === toolName);
@@ -1554,7 +2048,7 @@ async function loadJsonTools() {
 
 async function saveJsonTool(value: unknown) {
   const tool = normalizeToolDefinition(value);
-  validateToolDefinition(tool);
+  validateImportedToolDefinition(tool);
 
   await queueStorageWrite(async () => {
     await initializeJsonStorageIfNeeded();
@@ -1600,7 +2094,12 @@ function createEmptyToolImportResult(cancelled: boolean): ToolImportResult {
 
 function validateImportedToolDefinition(tool: ToolDefinition) {
   validateToolDefinition(tool);
-  if (tool.name === "ask_user" || tool.name === "checklist_write") {
+  if (
+    tool.name === "ask_user" ||
+    tool.name === "checklist_write" ||
+    tool.name === "load_skill" ||
+    tool.name === WEB_FETCH_TOOL_NAME
+  ) {
     throw new Error(
       `${tool.name} is a built-in tool name and cannot be imported as a custom command tool.`,
     );
