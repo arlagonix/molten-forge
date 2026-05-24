@@ -26,6 +26,7 @@ export type ProviderConfig = {
   apiKey: string;
   model: string;
   models?: string[];
+  customModels?: string[];
   enabled?: boolean;
   modelConfigs?: Record<string, ProviderModelConfig>;
   /** Deprecated: migrated into modelConfigs. */

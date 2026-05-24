@@ -13,6 +13,7 @@ export const defaultProvider: ProviderConfig = {
   apiKey: "not-needed",
   model: "",
   models: [],
+  customModels: [],
   enabled: true,
   modelConfigs: {},
   enabledModelIds: [],

@@ -35,6 +35,21 @@ export function isProviderEnabled(provider: Pick<ProviderConfig, "enabled">) {
   return provider.enabled !== false;
 }
 
+export function getProviderModelIds(provider: ProviderConfig) {
+  return normalizeProviderModels([
+    ...(provider.models ?? []),
+    ...(provider.customModels ?? []),
+  ]);
+}
+
+export function isCustomProviderModel(provider: ProviderConfig, model: string) {
+  const normalizedModel = model.trim();
+  return Boolean(
+    normalizedModel &&
+      normalizeProviderModels(provider.customModels ?? []).includes(normalizedModel),
+  );
+}
+
 export function isModelShownInMenu(provider: ProviderConfig, model: string) {
   const normalizedModel = model.trim();
   if (!normalizedModel) return false;
@@ -43,7 +58,11 @@ export function isModelShownInMenu(provider: ProviderConfig, model: string) {
   if (typeof config?.showInMenu === "boolean") return config.showInMenu;
   if (typeof config?.enabled === "boolean") return config.enabled;
 
-  return normalizeProviderModels(provider.enabledModelIds ?? []).includes(normalizedModel);
+  if (isCustomProviderModel(provider, normalizedModel)) return true;
+
+  return normalizeProviderModels(provider.enabledModelIds ?? []).includes(
+    normalizedModel,
+  );
 }
 
 export function isModelEnabled(provider: ProviderConfig, model: string) {
@@ -53,11 +72,15 @@ export function isModelEnabled(provider: ProviderConfig, model: string) {
   const config = provider.modelConfigs?.[normalizedModel];
   if (typeof config?.enabled === "boolean") return config.enabled;
 
-  return normalizeProviderModels(provider.enabledModelIds ?? []).includes(normalizedModel);
+  if (isCustomProviderModel(provider, normalizedModel)) return true;
+
+  return normalizeProviderModels(provider.enabledModelIds ?? []).includes(
+    normalizedModel,
+  );
 }
 
 export function getShownProviderModels(provider: ProviderConfig) {
-  return normalizeProviderModels(provider.models ?? []).filter((model) =>
+  return getProviderModelIds(provider).filter((model) =>
     isModelShownInMenu(provider, model),
   );
 }
@@ -127,24 +150,35 @@ export function normalizeProviderForState(
     ...(provider.defaultSettings ?? {}),
   };
   const legacyModelSettings = provider.modelSettings ?? {};
-  const models = normalizeProviderModels([
-    ...(provider.models ?? []),
+  const models = normalizeProviderModels(provider.models ?? []);
+  const modelSet = new Set(models);
+  const legacyCustomModels = normalizeProviderModels([
     ...legacyEnabledModelIds,
     provider.model ?? "",
-    ...Object.keys(provider.modelConfigs ?? {}),
     ...Object.keys(legacyModelSettings),
-  ]);
-  const modelConfigs = { ...(provider.modelConfigs ?? {}) };
+  ]).filter((model) => !modelSet.has(model));
+  const customModels = normalizeProviderModels([
+    ...(provider.customModels ?? []),
+    ...legacyCustomModels,
+  ]).filter((model) => !modelSet.has(model));
+  const modelIds = normalizeProviderModels([...models, ...customModels]);
+  const incomingModelConfigs = provider.modelConfigs ?? {};
+  const modelConfigs: Record<string, ProviderModelConfig> = {};
 
-  for (const model of models) {
-    const existing = modelConfigs[model] ?? {};
+  for (const model of modelIds) {
+    const existing = incomingModelConfigs[model] ?? {};
     const legacySettings = legacyModelSettings[model] ?? {};
     const wasLegacyEnabled = legacyEnabledModelIds.includes(model);
+    const isCustom = customModels.includes(model);
     const hasExplicitEnabled = typeof existing.enabled === "boolean";
     const hasExplicitShowInMenu = typeof existing.showInMenu === "boolean";
+    const defaultEnabled = isCustom || wasLegacyEnabled;
+    const enabled = hasExplicitEnabled ? existing.enabled : defaultEnabled;
     const showInMenu = hasExplicitShowInMenu
       ? existing.showInMenu
-      : wasLegacyEnabled;
+      : hasExplicitEnabled
+        ? enabled
+        : defaultEnabled;
 
     modelConfigs[model] = {
       ...sanitizeGenerationSettings({
@@ -152,7 +186,7 @@ export function normalizeProviderForState(
         ...legacySettings,
         ...existing,
       }),
-      enabled: hasExplicitEnabled ? existing.enabled : wasLegacyEnabled,
+      enabled,
       showInMenu,
       context: {
         ...(existing.context ?? {}),
@@ -178,11 +212,13 @@ export function normalizeProviderForState(
     apiKey: provider.apiKey ?? "",
     model: preferredModel,
     models,
+    customModels,
     modelConfigs,
     enabledModelIds: getEnabledProviderModels({
       ...provider,
       enabled: provider.enabled !== false,
       models,
+      customModels,
       modelConfigs,
     }),
     headers: provider.headers ?? {},
@@ -211,6 +247,7 @@ export function createNewProvider(): ProviderConfig {
     apiKey: "",
     model: "",
     models: [],
+    customModels: [],
     enabled: true,
     modelConfigs: {},
     enabledModelIds: [],

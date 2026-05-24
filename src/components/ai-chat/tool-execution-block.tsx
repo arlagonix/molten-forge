@@ -13,6 +13,8 @@ import type {
 } from "@/lib/ai-chat/types";
 
 const TOOL_DESCRIPTION_PREVIEW_MAX_LENGTH = 95;
+const TOOL_INFO_CODE_BLOCK_CLASS_NAME =
+  "chat-markdown-compact chat-tool-info-codeblock";
 
 function formatJsonLikeCodeBlock(value: string) {
   const trimmed = value.trim();
@@ -27,7 +29,7 @@ function formatJsonLikeCodeBlock(value: string) {
 
 function renderJsonCodeBlock(
   value: string,
-  className = "chat-markdown-compact",
+  className = TOOL_INFO_CODE_BLOCK_CLASS_NAME,
 ) {
   const normalized = formatJsonLikeCodeBlock(value);
   return (
@@ -41,7 +43,7 @@ function renderJsonCodeBlock(
 function renderCodeBlock(
   value: string,
   language = "text",
-  className = "chat-markdown-compact",
+  className = TOOL_INFO_CODE_BLOCK_CLASS_NAME,
 ) {
   return (
     <MarkdownMessage

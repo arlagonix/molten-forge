@@ -505,6 +505,13 @@
     overflow-x: auto;
   }
 
+  .chat-tool-info-codeblock
+    .chat-code-block:not(.chat-code-block-fullscreen)
+    .chat-code-scroll {
+    max-height: min(24rem, 50dvh);
+    overflow-y: auto;
+  }
+
   .chat-markdown .chat-code-pre {
     @apply m-0 block bg-transparent p-3;
     min-width: 100%;

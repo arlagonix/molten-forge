@@ -36,6 +36,7 @@ import { Switch } from "@/components/ui/switch";
 import {
   formatOptionalNumber,
   getModelConfig,
+  getProviderModelIds,
   getShownProviderModels,
   isModelEnabled,
   isModelShownInMenu,
@@ -111,10 +112,15 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
     Record<string, boolean>
   >({});
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>();
+  const [customModelValue, setCustomModelValue] = useState("");
   const modelLoadStatusTimerRef = useRef<number | null>(null);
+  const activeProviderModelIds = useMemo(
+    () => getProviderModelIds(activeProvider),
+    [activeProvider],
+  );
 
   const selectedModel =
-    selectedModelId && (activeProvider.models ?? []).includes(selectedModelId)
+    selectedModelId && activeProviderModelIds.includes(selectedModelId)
       ? selectedModelId
       : undefined;
   const selectedModelSettings = useMemo(
@@ -136,13 +142,14 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
   }, []);
 
   useEffect(() => {
-    if (
-      selectedModelId &&
-      !(activeProvider.models ?? []).includes(selectedModelId)
-    ) {
+    if (selectedModelId && !activeProviderModelIds.includes(selectedModelId)) {
       setSelectedModelId(undefined);
     }
-  }, [activeProvider.id, activeProvider.models, selectedModelId]);
+  }, [activeProvider.id, activeProviderModelIds, selectedModelId]);
+
+  useEffect(() => {
+    setCustomModelValue("");
+  }, [activeProvider.id]);
 
   function setTemporaryModelLoadStatus(
     status: Exclude<ModelLoadStatus, "idle">,
@@ -290,11 +297,11 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
             const enabled =
               typeof currentConfig.enabled === "boolean"
                 ? currentConfig.enabled
-                : true;
+                : false;
             const showInMenu =
               typeof currentConfig.showInMenu === "boolean"
                 ? currentConfig.showInMenu
-                : enabled;
+                : false;
 
             modelConfigs[loadedModelId] = {
               ...currentConfig,
@@ -304,20 +311,49 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
             };
           }
 
-          const selectedModelStillExists = loadedModelIdSet.has(provider.model);
+          const customModelIds = normalizeProviderModels(
+            provider.customModels ?? [],
+          ).filter((modelId) => !loadedModelIdSet.has(modelId));
+
+          for (const customModelId of customModelIds) {
+            const currentConfig = provider.modelConfigs?.[customModelId] ?? {};
+            const enabled =
+              typeof currentConfig.enabled === "boolean"
+                ? currentConfig.enabled
+                : true;
+            const showInMenu =
+              typeof currentConfig.showInMenu === "boolean"
+                ? currentConfig.showInMenu
+                : enabled;
+
+            modelConfigs[customModelId] = {
+              ...currentConfig,
+              enabled,
+              showInMenu,
+            };
+          }
+
+          const availableModelIds = normalizeProviderModels([
+            ...loadedModelIds,
+            ...customModelIds,
+          ]);
+          const selectedModelStillExists = availableModelIds.includes(
+            provider.model,
+          );
           const fallbackModel =
             (selectedModelStillExists ? provider.model : "") ||
-            loadedModelIds.find((modelId) => {
+            availableModelIds.find((modelId) => {
               const config = modelConfigs[modelId];
               return config.enabled !== false && config.showInMenu !== false;
             }) ||
-            loadedModelIds[0] ||
+            provider.model ||
             "";
 
           return normalizeProviderForState({
             ...provider,
             model: fallbackModel,
             models: loadedModelIds,
+            customModels: customModelIds,
             modelConfigs,
             enabledModelIds: [],
             modelSettings: {},
@@ -336,6 +372,56 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
     } finally {
       setIsLoadingModels(false);
     }
+  }
+
+  function addCustomModel() {
+    const model = customModelValue.trim();
+    if (!model) return;
+
+    updateProviderInState(activeProvider.id, (provider) => {
+      const loadedModels = normalizeProviderModels(provider.models ?? []);
+      const customModels = normalizeProviderModels(provider.customModels ?? []);
+      const isLoadedModel = loadedModels.includes(model);
+      const nextCustomModels = isLoadedModel
+        ? customModels
+        : normalizeProviderModels([...customModels, model]);
+      const currentConfig = provider.modelConfigs?.[model] ?? {};
+
+      return {
+        ...provider,
+        customModels: nextCustomModels,
+        modelConfigs: {
+          ...(provider.modelConfigs ?? {}),
+          [model]: modelConfigWithPatch(currentConfig, {
+            enabled: true,
+            showInMenu: true,
+          }),
+        },
+      };
+    });
+    setCustomModelValue("");
+  }
+
+  function deleteCustomModel(model: string) {
+    updateProviderInState(activeProvider.id, (provider) => {
+      const normalizedModel = model.trim();
+      const loadedModels = normalizeProviderModels(provider.models ?? []);
+      const customModels = normalizeProviderModels(
+        provider.customModels ?? [],
+      ).filter((customModel) => customModel !== normalizedModel);
+      const modelConfigs = { ...(provider.modelConfigs ?? {}) };
+
+      if (!loadedModels.includes(normalizedModel)) {
+        delete modelConfigs[normalizedModel];
+      }
+
+      return {
+        ...provider,
+        model: provider.model === normalizedModel ? "" : provider.model,
+        customModels,
+        modelConfigs,
+      };
+    });
   }
 
   function updateSelectedModelConfig(patch: Partial<ProviderModelConfig>) {
@@ -423,6 +509,9 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                 const loadedModelCount = normalizeProviderModels(
                   item.models ?? [],
                 ).length;
+                const customModelCount = normalizeProviderModels(
+                  item.customModels ?? [],
+                ).length;
                 const enabledModelCount = shownModels.filter((model) =>
                   isModelEnabled(item, model),
                 ).length;
@@ -473,8 +562,11 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                         </div>
                         <div className="truncate text-sm leading-5 text-muted-foreground">
                           {enabledModelCount}/{modelCount} shown ·{" "}
-                          {loadedModelCount} loaded ·{" "}
-                          {item.baseUrl || "No base URL"}
+                          {loadedModelCount} loaded
+                          {customModelCount > 0
+                            ? ` · ${customModelCount} custom`
+                            : ""}{" "}
+                          · {item.baseUrl || "No base URL"}
                         </div>
                       </div>
 
@@ -659,7 +751,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                       <Label>Loaded models</Label>
                       <p className="mt-1 text-sm leading-5 text-muted-foreground">
                         Select which loaded models should appear in the left
-                        menu.
+                        menu. Newly loaded models stay hidden by default.
                       </p>
                     </div>
                     <Button
@@ -719,6 +811,92 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                   ) : (
                     <p className=" border border-dashed px-3 py-4 text-sm leading-5 text-muted-foreground">
                       No models loaded yet. Load models from the provider first.
+                    </p>
+                  )}
+                </div>
+
+                <div className="grid gap-3  border bg-card p-3">
+                  <div>
+                    <Label>Custom models</Label>
+                    <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                      Add model IDs manually when they are not returned by the
+                      provider. Custom models are shown immediately.
+                    </p>
+                  </div>
+
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={customModelValue}
+                      onChange={(event) =>
+                        setCustomModelValue(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter") return;
+                        event.preventDefault();
+                        addCustomModel();
+                      }}
+                      placeholder="openai/gpt-4.1-mini"
+                      className="min-w-0 flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="shrink-0"
+                      disabled={!customModelValue.trim()}
+                      onClick={addCustomModel}
+                    >
+                      <Plus className="size-4" />
+                      Add model
+                    </Button>
+                  </div>
+
+                  {normalizeProviderModels(activeProvider.customModels ?? [])
+                    .length > 0 ? (
+                    <div className="grid max-h-64 gap-1 overflow-y-auto  border bg-background/60 p-2">
+                      {normalizeProviderModels(
+                        activeProvider.customModels ?? [],
+                      ).map((model) => {
+                        const checked = isModelShownInMenu(
+                          activeProvider,
+                          model,
+                        );
+
+                        return (
+                          <div
+                            key={`${activeProvider.id}:${model}:custom`}
+                            className="flex min-w-0 items-center gap-2  px-2 py-1.5 text-sm leading-5 hover:bg-muted/60"
+                            title={model}
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(nextChecked) =>
+                                toggleModelShownInMenu(
+                                  activeProvider.id,
+                                  model,
+                                  nextChecked === true,
+                                )
+                              }
+                            />
+                            <span className="min-w-0 flex-1 truncate">
+                              {model}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                              onClick={() => deleteCustomModel(model)}
+                              title="Delete custom model"
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className=" border border-dashed px-3 py-4 text-sm leading-5 text-muted-foreground">
+                      No custom models yet.
                     </p>
                   )}
                 </div>

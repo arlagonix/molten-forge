@@ -145,6 +145,9 @@ const BUILTIN_LOAD_SKILL_TOOL_PARAMETERS = {
   required: ["skillName"],
 };
 
+const TOOL_INFO_CODE_BLOCK_CLASS_NAME =
+  "chat-markdown-compact chat-tool-info-codeblock";
+
 const BUILTIN_WEB_FETCH_TOOL_PARAMETERS = {
   type: "object",
   additionalProperties: false,
@@ -413,7 +416,7 @@ function formatJsonLikeCodeBlock(value: string) {
 
 function renderJsonCodeBlock(
   value: string,
-  className = "chat-markdown-compact",
+  className = TOOL_INFO_CODE_BLOCK_CLASS_NAME,
 ) {
   const normalized = formatJsonLikeCodeBlock(value);
   return (
@@ -427,7 +430,7 @@ function renderJsonCodeBlock(
 function renderCodeBlock(
   value: string,
   language = "text",
-  className = "chat-markdown-compact",
+  className = TOOL_INFO_CODE_BLOCK_CLASS_NAME,
 ) {
   return (
     <MarkdownMessage
