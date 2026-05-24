@@ -337,7 +337,7 @@ function ThinkingBlock({
   }, [completedAt, durationTickMs, effectiveStatus, startedAt]);
 
   return (
-    <article className="flex min-w-0 max-w-full justify-start">
+    <article className="flex w-full min-w-0 max-w-full justify-start">
       <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <button
           type="button"
@@ -705,12 +705,12 @@ const ChatMessageItem = memo(
                 return (
                   <div key={step.id} className="grid gap-1">
                     <article
-                      className="flex min-w-0 max-w-full justify-start"
+                      className="flex w-full min-w-0 max-w-full justify-start"
                       onContextMenu={(event) =>
                         onCaptureMessageContext(event, message.id)
                       }
                     >
-                      <div className="min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]">
+                      <div className="w-full min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]">
                         <SmoothAssistantMessageContent
                           content={step.content}
                           isApiStreaming={isAssistantBlockStreaming}

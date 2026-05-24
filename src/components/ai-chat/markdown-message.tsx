@@ -571,7 +571,7 @@ export const MarkdownMessage = React.memo(function MarkdownMessage({
   skipSyntaxHighlight = false,
 }: MarkdownMessageProps) {
   return (
-    <div className={cn("chat-markdown min-w-0 max-w-full", className)}>
+    <div className={cn("chat-markdown w-full min-w-0 max-w-full", className)}>
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={
