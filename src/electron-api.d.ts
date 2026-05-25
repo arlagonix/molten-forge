@@ -1,7 +1,11 @@
 import type {
+  AgentsSettings,
+  AgentExportResult,
+  AgentImportResult,
   AppSettings,
   ChatReasoningMetadata,
   ChatTokenUsage,
+  LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   ToolCommandResult,
@@ -102,6 +106,8 @@ declare global {
       saveToolsSettings: (value: ToolsSettings) => Promise<void>;
       loadSkillsSettings: () => Promise<SkillsSettings | undefined>;
       saveSkillsSettings: (value: SkillsSettings) => Promise<void>;
+      loadAgentsSettings: () => Promise<AgentsSettings | undefined>;
+      saveAgentsSettings: (value: AgentsSettings) => Promise<void>;
       loadAppSettings: () => Promise<AppSettings | undefined>;
       saveAppSettings: (value: AppSettings) => Promise<void>;
       loadTools: () => Promise<LoadedToolInfo[]>;
@@ -118,6 +124,13 @@ declare global {
       exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
       exportSkills: (skills: LoadedSkillInfo[]) => Promise<SkillExportResult>;
       openSkillsFolder: () => Promise<void>;
+      loadAgents: () => Promise<LoadedAgentInfo[]>;
+      saveAgent: (agent: LoadedAgentInfo) => Promise<LoadedAgentInfo>;
+      deleteAgent: (agentId: string) => Promise<void>;
+      importAgents: () => Promise<AgentImportResult>;
+      exportAgent: (agent: LoadedAgentInfo) => Promise<AgentExportResult>;
+      exportAgents: (agents: LoadedAgentInfo[]) => Promise<AgentExportResult>;
+      openAgentsFolder: () => Promise<void>;
     };
   }
 }

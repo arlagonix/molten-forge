@@ -125,6 +125,25 @@ type SkillDefinition = {
 
 type PublicSkillDefinition = SkillDefinition;
 
+type AgentContextMode = "task_only" | "full_chat";
+
+type AgentDefinition = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  description: string;
+  instructions: string;
+  contextMode: AgentContextMode;
+  providerId?: string;
+  model?: string;
+  maxNestingDepth: number;
+  loadedSkillNames: string[];
+  allowedToolNames: string[];
+  allowedAgentNames: string[];
+};
+
+type PublicAgentDefinition = AgentDefinition;
+
 type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
@@ -134,6 +153,10 @@ type ToolsSettings = {
 };
 
 type SkillsSettings = {
+  enabled: boolean;
+};
+
+type AgentsSettings = {
   enabled: boolean;
 };
 
@@ -188,6 +211,27 @@ type SkillExportResult = {
   path?: string;
 };
 
+type AgentImportIssue = {
+  source: string;
+  agentName?: string;
+  message: string;
+};
+
+type AgentImportResult = {
+  cancelled: boolean;
+  imported: number;
+  updated: number;
+  skipped: AgentImportIssue[];
+  invalid: AgentImportIssue[];
+  renamed: AgentImportIssue[];
+};
+
+type AgentExportResult = {
+  cancelled: boolean;
+  exported: number;
+  path?: string;
+};
+
 const blockedUpstreamHeaders = new Set([
   "host",
   "connection",
@@ -207,6 +251,9 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   webFetchEnabled: false,
 };
 const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
+  enabled: true,
+};
+const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
   enabled: true,
 };
 const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -512,6 +559,14 @@ function normalizeSkillsSettings(value: unknown): SkillsSettings {
   };
 }
 
+function normalizeAgentsSettings(value: unknown): AgentsSettings {
+  if (!isPlainObject(value)) return DEFAULT_AGENTS_SETTINGS;
+
+  return {
+    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
+  };
+}
+
 function normalizeAppSettings(value: unknown): AppSettings {
   if (!isPlainObject(value)) return DEFAULT_APP_SETTINGS;
 
@@ -678,6 +733,63 @@ function validateSkillDefinition(skill: SkillDefinition) {
 
 function toPublicSkill(skill: SkillDefinition): PublicSkillDefinition {
   return skill;
+}
+
+function normalizeAgentContextMode(value: unknown): AgentContextMode {
+  return value === "full_chat" ? "full_chat" : "task_only";
+}
+
+function normalizeAgentDefinition(candidate: unknown): AgentDefinition {
+  const source = isPlainObject(candidate) ? candidate : {};
+  const id =
+    safeString(source.id).trim() ||
+    `agent-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const providerId = safeString(source.providerId).trim();
+  const model = safeString(source.model).trim();
+  const rawMaxNestingDepth = Number(source.maxNestingDepth);
+
+  return {
+    id,
+    name: safeString(source.name).trim(),
+    enabled: typeof source.enabled === "boolean" ? source.enabled : true,
+    description: safeString(source.description).trim(),
+    instructions: safeString(source.instructions).trim(),
+    contextMode: normalizeAgentContextMode(source.contextMode),
+    providerId: providerId || undefined,
+    model: model || undefined,
+    maxNestingDepth: Number.isFinite(rawMaxNestingDepth)
+      ? Math.min(Math.max(Math.round(rawMaxNestingDepth), 1), 8)
+      : 2,
+    loadedSkillNames: safeStringArray(source.loadedSkillNames)
+      .map((item) => item.trim())
+      .filter(Boolean),
+    allowedToolNames: safeStringArray(source.allowedToolNames)
+      .map((item) => item.trim())
+      .filter(Boolean),
+    allowedAgentNames: safeStringArray(source.allowedAgentNames)
+      .map((item) => item.trim())
+      .filter(Boolean),
+  };
+}
+
+function validateAgentDefinition(agent: AgentDefinition) {
+  if (!agent.name) throw new Error("Agent name is required.");
+  if (!TOOL_NAME_PATTERN.test(agent.name)) {
+    throw new Error(
+      "Agent name must use only letters, numbers, underscores, or hyphens.",
+    );
+  }
+  if (agent.name === "call_agent") {
+    throw new Error(
+      "call_agent is a built-in tool name and cannot be used by an agent.",
+    );
+  }
+  if (!agent.description) throw new Error("Agent description is required.");
+  if (!agent.instructions) throw new Error("Agent instructions are required.");
+}
+
+function toPublicAgent(agent: AgentDefinition): PublicAgentDefinition {
+  return agent;
 }
 
 function stringifyToolResult(result: unknown) {
@@ -1609,6 +1721,7 @@ function getStoragePaths() {
     chatsIndex: path.join(root, "chats", "index.json"),
     toolsDir: path.join(root, "tools"),
     skillsDir: path.join(root, "skills"),
+    agentsDir: path.join(root, "agents"),
     backupsDir: path.join(root, "backups"),
     attachmentsDir: path.join(root, "attachments"),
   };
@@ -1757,6 +1870,7 @@ async function ensureStorageDirectories() {
   await fs.mkdir(paths.backupsDir, { recursive: true });
   await fs.mkdir(paths.toolsDir, { recursive: true });
   await fs.mkdir(paths.skillsDir, { recursive: true });
+  await fs.mkdir(paths.agentsDir, { recursive: true });
   await fs.mkdir(paths.attachmentsDir, { recursive: true });
 }
 
@@ -1774,6 +1888,7 @@ async function initializeJsonStorageIfNeeded() {
     providerModelsCache: {},
     toolsSettings: DEFAULT_TOOLS_SETTINGS,
     skillsSettings: DEFAULT_SKILLS_SETTINGS,
+    agentsSettings: DEFAULT_AGENTS_SETTINGS,
     appSettings: DEFAULT_APP_SETTINGS,
   });
   await writeJsonAtomic(getStoragePaths().providers, null);
@@ -1974,6 +2089,7 @@ async function migrateFromIndexedDbSnapshot(snapshot: StorageSnapshot) {
         : {},
       toolsSettings: DEFAULT_TOOLS_SETTINGS,
       skillsSettings: DEFAULT_SKILLS_SETTINGS,
+      agentsSettings: DEFAULT_AGENTS_SETTINGS,
       appSettings: normalizeAppSettings(snapshot.appSettings),
     };
 
@@ -2774,6 +2890,380 @@ async function openJsonSkillsFolder() {
   if (error) throw new Error(error);
 }
 
+type AgentFileRecord = {
+  agent: AgentDefinition;
+  filePath: string;
+  fileName: string;
+};
+
+function legacyAgentFilePath(agentId: string) {
+  return path.join(
+    getStoragePaths().agentsDir,
+    `${sanitizeFileNamePart(agentId)}.json`,
+  );
+}
+
+function readableAgentFilePath(agent: Pick<AgentDefinition, "id" | "name">) {
+  const fileNameBase = agent.name || agent.id || "agent";
+  return path.join(
+    getStoragePaths().agentsDir,
+    `${sanitizeFileNamePart(fileNameBase)}.json`,
+  );
+}
+
+async function readAgentFileRecords() {
+  await fs.mkdir(getStoragePaths().agentsDir, { recursive: true });
+  const entries = await fs.readdir(getStoragePaths().agentsDir, {
+    withFileTypes: true,
+  });
+  const records: AgentFileRecord[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+
+    const filePath = path.join(getStoragePaths().agentsDir, entry.name);
+    const raw = await readJsonFile<unknown>(filePath, undefined);
+    const agent = normalizeAgentDefinition(raw);
+
+    try {
+      validateAgentDefinition(agent);
+      records.push({ agent, filePath, fileName: entry.name });
+    } catch (error) {
+      console.error(`Invalid agent manifest ${entry.name}:`, error);
+    }
+  }
+
+  return records;
+}
+
+async function migrateReadableAgentFileNames(records: AgentFileRecord[]) {
+  const usedFileNames = new Set(records.map((record) => record.fileName));
+
+  for (const record of records) {
+    const preferredBase = sanitizeFileNamePart(
+      record.agent.name || record.agent.id || "agent",
+    );
+    const preferredFileName = `${preferredBase}.json`;
+
+    if (record.fileName === preferredFileName) continue;
+
+    let candidateFileName = preferredFileName;
+    let index = 1;
+
+    while (usedFileNames.has(candidateFileName)) {
+      candidateFileName = `${preferredBase} (${index}).json`;
+      index += 1;
+    }
+
+    const nextFilePath = path.join(
+      getStoragePaths().agentsDir,
+      candidateFileName,
+    );
+
+    try {
+      await fs.rename(record.filePath, nextFilePath);
+      usedFileNames.delete(record.fileName);
+      usedFileNames.add(candidateFileName);
+      record.filePath = nextFilePath;
+      record.fileName = candidateFileName;
+    } catch (error) {
+      console.error(
+        `Failed to rename agent manifest ${record.fileName}:`,
+        error,
+      );
+    }
+  }
+}
+
+async function deleteAgentFilesById(agentId: string, exceptFilePath?: string) {
+  const normalizedExcept = exceptFilePath
+    ? path.resolve(exceptFilePath)
+    : undefined;
+  const records = await readAgentFileRecords();
+  const candidates = new Set<string>();
+
+  for (const record of records) {
+    if (record.agent.id === agentId) candidates.add(record.filePath);
+  }
+
+  candidates.add(legacyAgentFilePath(agentId));
+
+  for (const filePath of candidates) {
+    if (normalizedExcept && path.resolve(filePath) === normalizedExcept)
+      continue;
+
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code !== "ENOENT") throw error;
+    }
+  }
+}
+
+async function loadJsonAgents() {
+  await initializeJsonStorageIfNeeded();
+  const records = await readAgentFileRecords();
+  await migrateReadableAgentFileNames(records);
+
+  const agents = records.map((record) => record.agent);
+  agents.sort((left, right) => left.name.localeCompare(right.name));
+  return agents.map(toPublicAgent);
+}
+
+async function saveJsonAgent(value: unknown) {
+  const agent = normalizeAgentDefinition(value);
+  validateAgentDefinition(agent);
+
+  await queueStorageWrite(async () => {
+    await initializeJsonStorageIfNeeded();
+    const existingAgents = await loadJsonAgents();
+    const duplicate = existingAgents.find(
+      (candidate) => candidate.id !== agent.id && candidate.name === agent.name,
+    );
+    if (duplicate)
+      throw new Error(`Another agent already uses the name: ${agent.name}`);
+
+    const targetPath = readableAgentFilePath(agent);
+    await writeJsonAtomic(targetPath, agent);
+    await deleteAgentFilesById(agent.id, targetPath);
+  });
+
+  return agent;
+}
+
+async function deleteJsonAgent(agentId: unknown) {
+  const id = safeString(agentId).trim();
+  if (!id) return;
+
+  await queueStorageWrite(async () => {
+    await initializeJsonStorageIfNeeded();
+    await deleteAgentFilesById(id);
+  });
+}
+
+function createEmptyAgentImportResult(cancelled: boolean): AgentImportResult {
+  return {
+    cancelled,
+    imported: 0,
+    updated: 0,
+    skipped: [],
+    invalid: [],
+    renamed: [],
+  };
+}
+
+function createUniqueImportedAgentName(
+  baseName: string,
+  existingByName: Map<string, PublicAgentDefinition>,
+) {
+  let index = 1;
+  let candidate = `${baseName}_${index}`;
+
+  while (existingByName.has(candidate)) {
+    index += 1;
+    candidate = `${baseName}_${index}`;
+  }
+
+  return candidate;
+}
+
+function areAgentDefinitionsEquivalent(
+  left: PublicAgentDefinition,
+  right: AgentDefinition,
+) {
+  return (
+    JSON.stringify({ ...left, id: undefined }) ===
+    JSON.stringify({ ...right, id: undefined })
+  );
+}
+
+async function importJsonAgentsFromFiles(): Promise<AgentImportResult> {
+  await initializeJsonStorageIfNeeded();
+  await fs.mkdir(getStoragePaths().agentsDir, { recursive: true });
+
+  const openOptions = {
+    title: "Import agents",
+    properties: ["openFile", "multiSelections"] as Array<
+      "openFile" | "multiSelections"
+    >,
+    filters: [{ name: "JSON files", extensions: ["json"] }],
+  };
+  const result = win
+    ? await dialog.showOpenDialog(win, openOptions)
+    : await dialog.showOpenDialog(openOptions);
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return createEmptyAgentImportResult(true);
+  }
+
+  const importResult = createEmptyAgentImportResult(false);
+  const parsedAgents: Array<{ source: string; agent: AgentDefinition }> = [];
+
+  for (const filePath of result.filePaths) {
+    const source = path.basename(filePath);
+    try {
+      const raw = JSON.parse(await fs.readFile(filePath, "utf8"));
+      const agent = normalizeAgentDefinition(raw);
+      validateAgentDefinition(agent);
+      parsedAgents.push({ source, agent });
+    } catch (error) {
+      importResult.invalid.push({ source, message: getErrorMessage(error) });
+    }
+  }
+
+  if (parsedAgents.length === 0) return importResult;
+
+  await queueStorageWrite(async () => {
+    await initializeJsonStorageIfNeeded();
+    await fs.mkdir(getStoragePaths().agentsDir, { recursive: true });
+
+    const existingAgents = await loadJsonAgents();
+    const existingById = new Map(
+      existingAgents.map((agent) => [agent.id, agent]),
+    );
+    const existingByName = new Map(
+      existingAgents.map((agent) => [agent.name, agent]),
+    );
+
+    for (const { source, agent } of parsedAgents) {
+      const sameIdAgent = existingById.get(agent.id);
+      const sameNameAgent = existingByName.get(agent.name);
+      let agentToSave = agent;
+
+      if (sameNameAgent && sameNameAgent.id !== agent.id) {
+        if (areAgentDefinitionsEquivalent(sameNameAgent, agent)) {
+          importResult.skipped.push({
+            source,
+            agentName: agent.name,
+            message: `A matching agent already exists: ${agent.name}`,
+          });
+          continue;
+        }
+
+        const renamedAgent = {
+          ...agent,
+          name: createUniqueImportedAgentName(agent.name, existingByName),
+        };
+        agentToSave = renamedAgent;
+        importResult.renamed.push({
+          source,
+          agentName: renamedAgent.name,
+          message: `Renamed ${agent.name} to ${renamedAgent.name} because the original name already exists with different settings.`,
+        });
+      }
+
+      const targetPath = readableAgentFilePath(agentToSave);
+      await writeJsonAtomic(targetPath, agentToSave);
+      await deleteAgentFilesById(agentToSave.id, targetPath);
+
+      if (sameIdAgent) {
+        importResult.updated += 1;
+        existingByName.delete(sameIdAgent.name);
+      } else {
+        importResult.imported += 1;
+      }
+
+      existingById.set(agentToSave.id, agentToSave);
+      existingByName.set(agentToSave.name, agentToSave);
+    }
+  });
+
+  return importResult;
+}
+
+function agentExportFileName(agent: AgentDefinition, usedNames: Set<string>) {
+  const base = sanitizeFileNamePart(agent.name || agent.id || "agent");
+  let candidate = `${base}.json`;
+  let index = 1;
+
+  while (usedNames.has(candidate)) {
+    candidate = `${base} (${index}).json`;
+    index += 1;
+  }
+
+  usedNames.add(candidate);
+  return candidate;
+}
+
+function normalizeExportAgents(value: unknown): AgentDefinition[] {
+  const values = Array.isArray(value) ? value : [value];
+  return values.map((item) => {
+    const agent = normalizeAgentDefinition(item);
+    validateAgentDefinition(agent);
+    return agent;
+  });
+}
+
+async function exportJsonAgentToFile(
+  value: unknown,
+): Promise<AgentExportResult> {
+  const agents = normalizeExportAgents(value);
+  const agent = agents[0];
+  if (!agent) throw new Error("No agent to export.");
+
+  const saveOptions = {
+    title: "Export agent",
+    defaultPath: `${sanitizeFileNamePart(agent.name || agent.id || "agent")}.json`,
+    filters: [{ name: "JSON files", extensions: ["json"] }],
+  };
+  const result = win
+    ? await dialog.showSaveDialog(win, saveOptions)
+    : await dialog.showSaveDialog(saveOptions);
+
+  if (result.canceled || !result.filePath) {
+    return { cancelled: true, exported: 0 };
+  }
+
+  const filePath = ensureJsonExtension(result.filePath);
+  await writeJsonAtomic(filePath, agent);
+
+  return { cancelled: false, exported: 1, path: filePath };
+}
+
+async function exportJsonAgentsToFolder(
+  value: unknown,
+): Promise<AgentExportResult> {
+  const agents = normalizeExportAgents(value);
+  if (agents.length === 0) throw new Error("No agents to export.");
+
+  const openOptions = {
+    title: "Export agents to folder",
+    properties: ["openDirectory", "createDirectory"] as Array<
+      "openDirectory" | "createDirectory"
+    >,
+  };
+  const result = win
+    ? await dialog.showOpenDialog(win, openOptions)
+    : await dialog.showOpenDialog(openOptions);
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { cancelled: true, exported: 0 };
+  }
+
+  const folderPath = result.filePaths[0];
+  await fs.mkdir(folderPath, { recursive: true });
+
+  const usedNames = new Set<string>();
+  for (const agent of agents) {
+    const fileName = agentExportFileName(agent, usedNames);
+    await writeJsonAtomic(path.join(folderPath, fileName), agent);
+  }
+
+  return { cancelled: false, exported: agents.length, path: folderPath };
+}
+
+async function openJsonAgentsFolder() {
+  await initializeJsonStorageIfNeeded();
+  await fs.mkdir(getStoragePaths().agentsDir, { recursive: true });
+
+  const error = await shell.openPath(getStoragePaths().agentsDir);
+  if (error) throw new Error(error);
+}
+
 function normalizeFindInPageRequest(request: unknown) {
   const value = isPlainObject(request) ? request : {};
   const text = safeString(value.text).trim();
@@ -2904,6 +3394,21 @@ ipcMain.handle(
   },
 );
 
+ipcMain.handle("storage:agents-settings:load", async () => {
+  await initializeJsonStorageIfNeeded();
+  const settings = await readSettingsFile();
+  return normalizeAgentsSettings(settings.agentsSettings);
+});
+
+ipcMain.handle(
+  "storage:agents-settings:save",
+  async (_event, value: unknown) => {
+    await writeSettingsPatch({
+      agentsSettings: normalizeAgentsSettings(value),
+    });
+  },
+);
+
 ipcMain.handle("storage:app-settings:load", async () => {
   await initializeJsonStorageIfNeeded();
   const settings = await readSettingsFile();
@@ -2960,6 +3465,32 @@ ipcMain.handle("storage:skills:export", async (_event, skills: unknown) =>
 
 ipcMain.handle("storage:skills:open-folder", async () =>
   openJsonSkillsFolder(),
+);
+
+ipcMain.handle("storage:agents:load", async () => loadJsonAgents());
+
+ipcMain.handle("storage:agent:save", async (_event, value: unknown) =>
+  saveJsonAgent(value),
+);
+
+ipcMain.handle("storage:agent:delete", async (_event, agentId: unknown) =>
+  deleteJsonAgent(agentId),
+);
+
+ipcMain.handle("storage:agents:import", async () =>
+  importJsonAgentsFromFiles(),
+);
+
+ipcMain.handle("storage:agent:export", async (_event, agent: unknown) =>
+  exportJsonAgentToFile(agent),
+);
+
+ipcMain.handle("storage:agents:export", async (_event, agents: unknown) =>
+  exportJsonAgentsToFolder(agents),
+);
+
+ipcMain.handle("storage:agents:open-folder", async () =>
+  openJsonAgentsFolder(),
 );
 
 ipcMain.handle("tools:execute", async (_event, request: unknown) => {

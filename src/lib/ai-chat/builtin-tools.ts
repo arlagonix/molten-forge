@@ -7,8 +7,10 @@ import type {
   ChatToolResult,
   ChecklistItem,
   ChecklistWriteRequest,
+  LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
+  AgentsSettings,
   SkillsSettings,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
@@ -25,15 +27,21 @@ export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   enabled: true,
 };
 
+export const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
+  enabled: true,
+};
+
 export const ASK_USER_TOOL_NAME = "ask_user";
 export const CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
 export const LOAD_SKILL_TOOL_NAME = "load_skill";
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
+export const CALL_AGENT_TOOL_NAME = "call_agent";
 export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
 
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TOOL_MENTION_PATTERN = /(^|\s)@tool:([A-Za-z0-9_-]+)(?=$|\s)/g;
 const SKILL_MENTION_PATTERN = /(^|\s)@skill:([A-Za-z0-9_-]+)(?=$|\s)/g;
+const AGENT_MENTION_PATTERN = /(^|\s)@agent:([A-Za-z0-9_-]+)(?=$|\s)/g;
 const MAX_ASK_USER_QUESTIONS = 5;
 const MAX_ASK_USER_OPTIONS = 8;
 const MAX_ASK_USER_TITLE_LENGTH = 120;
@@ -187,6 +195,45 @@ export const WEB_FETCH_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
+export function createCallAgentTool(agents: LoadedAgentInfo[]): LoadedToolInfo | null {
+  const enabledAgents = agents
+    .filter((agent) => agent.enabled)
+    .map((agent) => agent.name)
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+
+  if (enabledAgents.length === 0) return null;
+
+  return {
+    id: "builtin-call-agent",
+    name: CALL_AGENT_TOOL_NAME,
+    enabled: true,
+    description:
+      "Delegate a focused subtask to one configured agent. Use this when an agent's description closely matches a separable part of the user's request. The agent result will be returned so you can continue the final answer.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        agentName: {
+          type: "string",
+          enum: enabledAgents,
+          description: "Name of the configured agent to call.",
+        },
+        task: {
+          type: "string",
+          description:
+            "Focused task for the agent. Include all important constraints and what output you need back.",
+        },
+      },
+      required: ["agentName", "task"],
+    },
+    command: "",
+    args: [],
+    input: "none",
+    timeoutMs: 0,
+  };
+}
+
 export function createLoadSkillTool(
   availableSkills: LoadedSkillInfo[],
 ): LoadedToolInfo | null {
@@ -239,7 +286,8 @@ export function isBuiltInToolName(toolName: string) {
     toolName === ASK_USER_TOOL_NAME ||
     toolName === CHECKLIST_WRITE_TOOL_NAME ||
     toolName === LOAD_SKILL_TOOL_NAME ||
-    toolName === WEB_FETCH_TOOL_NAME
+    toolName === WEB_FETCH_TOOL_NAME ||
+    toolName === CALL_AGENT_TOOL_NAME
   );
 }
 
@@ -278,6 +326,53 @@ export function parseToolMentionNames(content: string) {
 
 export function parseSkillMentionNames(content: string) {
   return parseMentionNames(content, SKILL_MENTION_PATTERN);
+}
+
+export function parseAgentMentionNames(content: string) {
+  return parseMentionNames(content, AGENT_MENTION_PATTERN);
+}
+
+export function parseCallAgentRequestFromToolCall(toolCall: ChatToolCall) {
+  const args = parseToolArgumentsText(toolCall.function.arguments || "{}");
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error("call_agent arguments must be a JSON object.");
+  }
+
+  const source = args as Record<string, unknown>;
+  const agentName = typeof source.agentName === "string" ? source.agentName.trim() : "";
+  const task = typeof source.task === "string" ? source.task.trim() : "";
+
+  if (!agentName) throw new Error("call_agent requires agentName.");
+  if (!task) throw new Error("call_agent requires task.");
+
+  return { agentName, task };
+}
+
+export function createAgentToolResult({
+  toolCall,
+  agentName,
+  output,
+  isError = false,
+}: {
+  toolCall: ChatToolCall;
+  agentName: string;
+  output: string;
+  isError?: boolean;
+}): ChatToolResult {
+  return {
+    toolCallId: toolCall.id,
+    toolName: CALL_AGENT_TOOL_NAME,
+    content: JSON.stringify(
+      {
+        ok: !isError,
+        agentName,
+        output,
+      },
+      null,
+      2,
+    ),
+    isError,
+  };
 }
 
 export function getAskUserQuestionType(

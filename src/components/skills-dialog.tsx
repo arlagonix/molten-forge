@@ -7,7 +7,6 @@ import {
   Maximize2,
   MoreHorizontal,
   Plus,
-  RefreshCcw,
   Sparkles,
   Trash2,
   Upload,
@@ -241,29 +240,6 @@ export const SkillsDialog = memo(function SkillsDialog({
       : { ...createBlankSkillDraft(), id: skillDraft.id };
     return !areSkillDraftsEqual(skillDraft, originalDraft);
   }, [selectedSkill, skillDraft]);
-
-  async function refreshSkills(showToast = false) {
-    setIsLoadingSkills(true);
-
-    try {
-      const skills = await loadSkills();
-      onLoadedSkillsChange(skills);
-      setSkillLoadErrors([]);
-      if (showToast) {
-        showSuccess(
-          `Loaded ${skills.length} skill${skills.length === 1 ? "" : "s"}.`,
-        );
-      }
-    } catch (error) {
-      console.error("Failed to load skills:", error);
-      setSkillLoadErrors([
-        { source: "Skills storage", message: labelForError(error) },
-      ]);
-      showError("Failed to load skills", labelForError(error));
-    } finally {
-      setIsLoadingSkills(false);
-    }
-  }
 
   async function saveCurrentSkillDraft() {
     if (!skillDraft) return;
@@ -520,19 +496,6 @@ export const SkillsDialog = memo(function SkillsDialog({
                     >
                       <FolderOpen className="size-4" />
                       Open skills folder
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      disabled={isLoadingSkills}
-                      onSelect={() => void refreshSkills(true)}
-                    >
-                      <RefreshCcw
-                        className={cn(
-                          "size-4",
-                          isLoadingSkills && "animate-spin",
-                        )}
-                      />
-                      Reload from app storage
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>

@@ -14,11 +14,14 @@ import {
   WEB_FETCH_TOOL_NAME,
   createLoadSkillTool,
   isValidToolName,
+  parseAgentMentionNames,
   parseSkillMentionNames,
   parseToolMentionNames,
 } from "@/lib/ai-chat/builtin-tools";
 import type {
+  AgentsSettings,
   ChatSession,
+  LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
@@ -257,6 +260,84 @@ export function validateSkillMentionsForRequest({
   }
 
   return { ok: true as const, skillNames };
+}
+
+export function getGlobalEnabledAgents({
+  agentsSettings,
+  loadedAgents,
+}: {
+  agentsSettings: AgentsSettings;
+  loadedAgents: LoadedAgentInfo[];
+}) {
+  if (!agentsSettings.enabled) return [];
+
+  return loadedAgents.filter((agent) => agent.enabled);
+}
+
+export function getEnabledAgentsForChat({
+  chat,
+  globalEnabledAgents,
+  availableAgentsByName,
+}: {
+  chat: ChatSession;
+  globalEnabledAgents: LoadedAgentInfo[];
+  availableAgentsByName: Map<string, LoadedAgentInfo>;
+}) {
+  const globallyEnabledAgentNames = new Set(
+    globalEnabledAgents.map((agent) => agent.name),
+  );
+  const chatEnabledAgentNames = new Set(chat.enabledAgentNames ?? []);
+  const chatDisabledAgentNames = new Set(chat.disabledAgentNames ?? []);
+
+  return [...availableAgentsByName.values()].filter((agent) => {
+    if (!agent.enabled) return false;
+    if (chatDisabledAgentNames.has(agent.name)) return false;
+    return (
+      globallyEnabledAgentNames.has(agent.name) ||
+      chatEnabledAgentNames.has(agent.name)
+    );
+  });
+}
+
+export function validateAgentMentionsForRequest({
+  content,
+  availableAgentsByName,
+}: {
+  content: string;
+  availableAgentsByName: Map<string, LoadedAgentInfo>;
+}) {
+  const agentNames = parseAgentMentionNames(content);
+  const unknownAgentNames = agentNames.filter(
+    (agentName) => !availableAgentsByName.has(agentName),
+  );
+
+  if (unknownAgentNames.length > 0) {
+    return {
+      ok: false as const,
+      unknownAgentNames,
+      message:
+        unknownAgentNames.length === 1
+          ? `Agent not found: ${unknownAgentNames[0]}`
+          : `Agents not found: ${unknownAgentNames.join(", ")}`,
+    };
+  }
+
+  const disabledAgentNames = agentNames.filter(
+    (agentName) => !availableAgentsByName.get(agentName)?.enabled,
+  );
+
+  if (disabledAgentNames.length > 0) {
+    return {
+      ok: false as const,
+      disabledAgentNames,
+      message:
+        disabledAgentNames.length === 1
+          ? `Agent is disabled: ${disabledAgentNames[0]}`
+          : `Agents are disabled: ${disabledAgentNames.join(", ")}`,
+    };
+  }
+
+  return { ok: true as const, agentNames };
 }
 
 export function buildSystemPromptWithActiveSkills({

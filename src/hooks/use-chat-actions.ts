@@ -17,6 +17,7 @@ import {
 import type {
   ChatMessage,
   ChatSession,
+  LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
 } from "@/lib/ai-chat/types";
@@ -26,9 +27,11 @@ export function useChatActions({
   activeChatId,
   availableTools,
   availableSkills,
+  availableAgents,
   chats,
   globallyEnabledToolNames,
   globallyEnabledSkillNames,
+  globallyEnabledAgentNames,
   isSending,
   messageElementRefs,
   setActiveChatId,
@@ -49,9 +52,11 @@ export function useChatActions({
   activeChatId?: string;
   availableTools: LoadedToolInfo[];
   availableSkills: LoadedSkillInfo[];
+  availableAgents: LoadedAgentInfo[];
   chats: ChatSession[];
   globallyEnabledToolNames: Set<string>;
   globallyEnabledSkillNames: Set<string>;
+  globallyEnabledAgentNames: Set<string>;
   isSending: boolean;
   messageElementRefs: MutableRefObject<Map<string, HTMLDivElement>>;
   setActiveChatId: Dispatch<SetStateAction<string | undefined>>;
@@ -306,6 +311,12 @@ export function useChatActions({
       disabledSkillNames: activeChat.disabledSkillNames
         ? [...activeChat.disabledSkillNames]
         : undefined,
+      enabledAgentNames: activeChat.enabledAgentNames
+        ? [...activeChat.enabledAgentNames]
+        : undefined,
+      disabledAgentNames: activeChat.disabledAgentNames
+        ? [...activeChat.disabledAgentNames]
+        : undefined,
       activeSkillNames: activeChat.activeSkillNames
         ? [...activeChat.activeSkillNames]
         : undefined,
@@ -407,6 +418,46 @@ export function useChatActions({
     });
   }
 
+
+  function toggleActiveChatAgent(agentName: string) {
+    if (!activeChat) return;
+
+    const isGloballyEnabled = globallyEnabledAgentNames.has(agentName);
+
+    updateChat(activeChat.id, (chat) => {
+      const chatEnabled = new Set(chat.enabledAgentNames ?? []);
+      const chatDisabled = new Set(chat.disabledAgentNames ?? []);
+      const isCurrentlyEnabled =
+        !chatDisabled.has(agentName) &&
+        (isGloballyEnabled || chatEnabled.has(agentName));
+
+      if (isCurrentlyEnabled) {
+        chatEnabled.delete(agentName);
+
+        if (isGloballyEnabled) chatDisabled.add(agentName);
+        else chatDisabled.delete(agentName);
+      } else {
+        chatDisabled.delete(agentName);
+
+        if (isGloballyEnabled) chatEnabled.delete(agentName);
+        else chatEnabled.add(agentName);
+      }
+
+      const enabledAgentNames = availableAgents
+        .map((agent) => agent.name)
+        .filter((name) => chatEnabled.has(name));
+      const disabledAgentNames = availableAgents
+        .map((agent) => agent.name)
+        .filter((name) => chatDisabled.has(name));
+
+      return {
+        ...chat,
+        enabledAgentNames,
+        disabledAgentNames,
+      };
+    });
+  }
+
   function renameChat(chatId: string, title: string) {
     const nextTitle = normalizeManualChatTitle(title);
     if (!nextTitle) return;
@@ -441,6 +492,7 @@ export function useChatActions({
     branchChatFromMessage,
     toggleActiveChatTool,
     toggleActiveChatSkill,
+    toggleActiveChatAgent,
     renameChat,
     toggleChatPinned,
   };

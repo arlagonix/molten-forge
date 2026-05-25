@@ -1,4 +1,4 @@
-import { BookOpen, Lock, Send, Square, Wrench } from "lucide-react";
+import { BookOpen, Bot, Lock, Send, Square, Wrench } from "lucide-react";
 import type { FormEvent, ReactNode } from "react";
 import {
   forwardRef,
@@ -27,7 +27,7 @@ export type ToolMentionOption = {
 };
 
 type ActiveMention = {
-  type: "tool" | "skill";
+  type: "tool" | "skill" | "agent";
   startIndex: number;
   endIndex: number;
   query: string;
@@ -152,13 +152,14 @@ function findActiveMention(
   cursorIndex: number,
 ): ActiveMention | null {
   const prefix = content.slice(0, cursorIndex);
-  const match = /(^|\s)@(tool|skill):?([A-Za-z0-9_-]*)$/.exec(prefix);
+  const match = /(^|\s)@(tool|skill|agent):?([A-Za-z0-9_-]*)$/.exec(prefix);
 
   if (!match) return null;
 
   const fullMatch = match[0] ?? "";
   const leadingWhitespace = match[1] ?? "";
-  const type = match[2] === "skill" ? "skill" : "tool";
+  const type =
+    match[2] === "skill" ? "skill" : match[2] === "agent" ? "agent" : "tool";
   const query = match[3] ?? "";
   const startIndex = cursorIndex - fullMatch.length + leadingWhitespace.length;
 
@@ -185,6 +186,7 @@ export const ChatComposer = memo(
       contextUsage?: ContextUsageInfo;
       toolMentionOptions?: ToolMentionOption[];
       skillMentionOptions?: ToolMentionOption[];
+      agentMentionOptions?: ToolMentionOption[];
     }
   >(function ChatComposer(
     {
@@ -199,6 +201,7 @@ export const ChatComposer = memo(
       contextUsage,
       toolMentionOptions = [],
       skillMentionOptions = [],
+      agentMentionOptions = [],
     },
     ref,
   ) {
@@ -221,7 +224,9 @@ export const ChatComposer = memo(
       const options: ToolMentionOption[] =
         activeMention.type === "skill"
           ? skillMentionOptions
-          : toolMentionOptions;
+          : activeMention.type === "agent"
+            ? agentMentionOptions
+            : toolMentionOptions;
       const query = activeMention.query.trim().toLowerCase();
       const filteredOptions = query
         ? options.filter((option) =>
@@ -236,6 +241,7 @@ export const ChatComposer = memo(
       activeMention,
       disabled,
       isSending,
+      agentMentionOptions,
       skillMentionOptions,
       toolMentionOptions,
     ]);
@@ -406,7 +412,11 @@ export const ChatComposer = memo(
                   {mentionSuggestions.map((option, index) => {
                     const isSelected = index === selectedMentionSuggestionIndex;
                     const Icon =
-                      activeMention?.type === "skill" ? BookOpen : Wrench;
+                      activeMention?.type === "skill"
+                        ? BookOpen
+                        : activeMention?.type === "agent"
+                          ? Bot
+                          : Wrench;
 
                     return (
                       <button

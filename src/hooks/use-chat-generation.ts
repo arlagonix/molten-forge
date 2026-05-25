@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createId,
+  getProviderFallbackModel,
   isAutoTitledChat,
   labelForError,
   mergeReasoningMetadata,
@@ -12,7 +13,11 @@ import { generateTitleFromFirstExchange } from "@/lib/ai-chat/title-generation";
 import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL_NAME,
+  CALL_AGENT_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
+  createAgentToolResult,
+  createCallAgentTool,
+  parseCallAgentRequestFromToolCall,
   parseAskUserRequestFromToolCall,
   parseChecklistWriteRequestFromToolCall,
   parseSkillMentionNames,
@@ -42,18 +47,23 @@ import {
 } from "@/lib/ai-chat/generation-metadata";
 import {
   buildSystemPromptWithActiveSkills,
+  getEnabledAgentsForChat,
   getEnabledSkillsForChat,
   getEnabledToolsForChat,
+  getGlobalEnabledAgents,
   getGlobalEnabledSkills,
   getGlobalEnabledTools,
   getToolsWithLoadSkillTool,
   resolveProviderForChat,
   validateProviderForGeneration,
+  validateAgentMentionsForRequest,
   validateSkillMentionsForRequest,
   validateToolMentionsForRequest,
 } from "@/lib/ai-chat/request-builder";
 import type {
+  AgentsSettings,
   AskUserResponse,
+  ChatAgentCall,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatReasoningMetadata,
@@ -62,6 +72,7 @@ import type {
   ChatSession,
   ChatToolCall,
   ChatToolResult,
+  LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
@@ -167,11 +178,14 @@ export function useChatGeneration({
   systemPrompt,
   toolsSettings,
   skillsSettings,
+  agentsSettings,
   chatTitleGenerationMode,
   loadedTools,
   availableToolsByName,
   loadedSkills,
   availableSkillsByName,
+  loadedAgents,
+  availableAgentsByName,
   autoScrollEnabledRef,
   setEditingMessageId,
   setSettingsOpen,
@@ -196,11 +210,14 @@ export function useChatGeneration({
   systemPrompt: string;
   toolsSettings: ToolsSettings;
   skillsSettings: SkillsSettings;
+  agentsSettings: AgentsSettings;
   chatTitleGenerationMode: ChatTitleGenerationMode;
   loadedTools: LoadedToolInfo[];
   availableToolsByName: Map<string, LoadedToolInfo>;
   loadedSkills: LoadedSkillInfo[];
   availableSkillsByName: Map<string, LoadedSkillInfo>;
+  loadedAgents: LoadedAgentInfo[];
+  availableAgentsByName: Map<string, LoadedAgentInfo>;
   autoScrollEnabledRef: MutableRefObject<boolean>;
   setEditingMessageId: Dispatch<SetStateAction<string | null>>;
   setSettingsOpen: Dispatch<SetStateAction<boolean>>;
@@ -251,6 +268,11 @@ export function useChatGeneration({
   const globalEnabledSkills = useMemo(
     () => getGlobalEnabledSkills({ skillsSettings, loadedSkills }),
     [skillsSettings, loadedSkills],
+  );
+
+  const globalEnabledAgents = useMemo(
+    () => getGlobalEnabledAgents({ agentsSettings, loadedAgents }),
+    [agentsSettings, loadedAgents],
   );
 
   function appendToAssistantVariant(
@@ -671,6 +693,20 @@ export function useChatGeneration({
     return validation.skillNames;
   }
 
+  function validateAgentMentions(content: string) {
+    const validation = validateAgentMentionsForRequest({
+      content,
+      availableAgentsByName,
+    });
+
+    if (!validation.ok) {
+      showError(validation.message);
+      return undefined;
+    }
+
+    return validation.agentNames;
+  }
+
   function resolveProviderForActiveChat(chat: ChatSession) {
     return resolveProviderForChat({ chat, providers, activeProvider });
   }
@@ -737,9 +773,19 @@ export function useChatGeneration({
       globalEnabledTools,
       availableToolsByName,
     });
+    const enabledAgentsForChat = getEnabledAgentsForChat({
+      chat,
+      globalEnabledAgents,
+      availableAgentsByName,
+    });
+
+    const toolsWithAgentTool = (() => {
+      const callAgentTool = createCallAgentTool(enabledAgentsForChat);
+      return callAgentTool ? [...tools, callAgentTool] : tools;
+    })();
 
     return getToolsWithLoadSkillTool({
-      tools,
+      tools: toolsWithAgentTool,
       modelSelectableSkills: getEnabledSkillsForChat({
         chat,
         globalEnabledSkills,
@@ -806,6 +852,626 @@ export function useChatGeneration({
     generation.controller.abort();
   }
 
+  function createSyntheticAgentToolCall(
+    agentName: string,
+    task: string,
+  ): ChatToolCall {
+    return {
+      id: createId(),
+      type: "function",
+      function: {
+        name: CALL_AGENT_TOOL_NAME,
+        arguments: JSON.stringify({ agentName, task }),
+      },
+    };
+  }
+
+  function updateAgentCallTree(
+    calls: ChatAgentCall[],
+    callId: string,
+    updater: (agentCall: ChatAgentCall) => ChatAgentCall,
+  ): ChatAgentCall[] {
+    return calls.map((call) => {
+      if (call.id === callId) return updater(call);
+      return {
+        ...call,
+        childAgentCalls: updateAgentCallTree(
+          call.childAgentCalls ?? [],
+          callId,
+          updater,
+        ),
+      };
+    });
+  }
+
+  function updateAssistantAgentCall(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    agentCallId: string,
+    updater: (agentCall: ChatAgentCall) => ChatAgentCall,
+  ) {
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: (variant.processSteps ?? []).map((step) => {
+          if (step.type !== "agent_call") return step;
+          if (step.agentCall.id === agentCallId) {
+            const nextAgentCall = updater(step.agentCall);
+            return {
+              ...step,
+              status: nextAgentCall.status,
+              agentCall: nextAgentCall,
+            };
+          }
+          return {
+            ...step,
+            agentCall: {
+              ...step.agentCall,
+              childAgentCalls: updateAgentCallTree(
+                step.agentCall.childAgentCalls ?? [],
+                agentCallId,
+                updater,
+              ),
+            },
+          };
+        }),
+      }),
+      { touch: false },
+    );
+  }
+
+  function attachChildAgentCallToVisibleTree({
+    chatId,
+    assistantMessageId,
+    variantId,
+    parentAgentCallId,
+    childAgentCall,
+  }: {
+    chatId: string;
+    assistantMessageId: string;
+    variantId: string;
+    parentAgentCallId: string;
+    childAgentCall: ChatAgentCall;
+  }) {
+    updateAssistantAgentCall(
+      chatId,
+      assistantMessageId,
+      variantId,
+      parentAgentCallId,
+      (agentCall) => ({
+        ...agentCall,
+        childAgentCalls: [...(agentCall.childAgentCalls ?? []), childAgentCall],
+      }),
+    );
+  }
+
+  function createAgentCall({
+    agent,
+    task,
+    depth,
+    provider,
+  }: {
+    agent: LoadedAgentInfo;
+    task: string;
+    depth: number;
+    provider: ProviderConfig;
+  }): ChatAgentCall {
+    return {
+      id: createId(),
+      agentId: agent.id,
+      agentName: agent.name,
+      description: agent.description,
+      task,
+      status: "pending",
+      contextMode: agent.contextMode,
+      depth,
+      startedAt: new Date().toISOString(),
+      providerName: provider.name,
+      model: provider.model,
+      output: "",
+      reasoning: "",
+      messages: [],
+      toolCalls: [],
+      toolResults: [],
+      childAgentCalls: [],
+    };
+  }
+
+  function appendTopLevelAgentCallStep({
+    chatId,
+    assistantMessageId,
+    variantId,
+    toolCall,
+    agentCall,
+  }: {
+    chatId: string;
+    assistantMessageId: string;
+    variantId: string;
+    toolCall: ChatToolCall;
+    agentCall: ChatAgentCall;
+  }) {
+    appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
+      {
+        id: createId(),
+        type: "agent_call",
+        status: agentCall.status,
+        toolCall,
+        agentCall,
+      },
+    ]);
+  }
+
+  function resolveProviderForAgent(
+    agent: LoadedAgentInfo,
+    fallbackProvider: ProviderConfig,
+  ) {
+    const provider = agent.providerId
+      ? providers.find((item) => item.id === agent.providerId)
+      : undefined;
+    const resolvedProvider = provider ?? fallbackProvider;
+    const model =
+      agent.model?.trim() ||
+      resolvedProvider.model ||
+      getProviderFallbackModel(resolvedProvider);
+    return { ...resolvedProvider, model };
+  }
+
+  function createAgentSystemPrompt(agent: LoadedAgentInfo) {
+    const basePrompt = [
+      `You are the configured Chat Forge agent named ${agent.name}.`,
+      agent.description.trim()
+        ? `Agent description: ${agent.description.trim()}`
+        : "",
+      agent.instructions.trim(),
+      "Return the result for the delegated task. Do not address the user unless the task asks you to draft user-facing text.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    return buildSystemPromptWithActiveSkills({
+      systemPrompt: basePrompt,
+      activeSkillNames: agent.loadedSkillNames ?? [],
+      availableSkillsByName,
+    });
+  }
+
+  function getAgentTools(agent: LoadedAgentInfo, depth: number) {
+    const allowedToolNames = new Set(agent.allowedToolNames ?? []);
+    const tools = loadedTools.filter(
+      (tool) =>
+        tool.enabled &&
+        allowedToolNames.has(tool.name) &&
+        availableToolsByName.has(tool.name),
+    );
+
+    const allowedAgentNames = new Set(agent.allowedAgentNames ?? []);
+    const nextAgents = globalEnabledAgents.filter(
+      (candidate) =>
+        candidate.name !== agent.name && allowedAgentNames.has(candidate.name),
+    );
+    const canCallAllowedAgents =
+      agentsSettings.enabled && depth < Math.max(1, agent.maxNestingDepth ?? 2);
+    const callAgentTool = canCallAllowedAgents
+      ? createCallAgentTool(nextAgents)
+      : null;
+
+    return callAgentTool ? [...tools, callAgentTool] : tools;
+  }
+
+  async function runAgentCall({
+    chatId,
+    assistantMessageId,
+    variantId,
+    agentName,
+    task,
+    toolCall: sourceToolCall,
+    depth,
+    parentAgentCallId,
+    parentProvider,
+    maxAllowedDepth,
+    signal,
+    contextMessages,
+    userMessage,
+  }: {
+    chatId: string;
+    assistantMessageId: string;
+    variantId: string;
+    agentName: string;
+    task: string;
+    toolCall?: ChatToolCall;
+    depth: number;
+    parentAgentCallId?: string;
+    parentProvider: ProviderConfig;
+    maxAllowedDepth?: number;
+    signal: AbortSignal;
+    contextMessages: ChatMessage[];
+    userMessage: string;
+  }): Promise<{ agentCall: ChatAgentCall; toolResult: ChatToolResult }> {
+    const toolCall =
+      sourceToolCall ?? createSyntheticAgentToolCall(agentName, task);
+    const agent = availableAgentsByName.get(agentName);
+
+    if (!agentsSettings.enabled || !agent || !agent.enabled) {
+      const content = !agentsSettings.enabled
+        ? "Agents are disabled."
+        : `Agent not available: ${agentName}`;
+      const result = createAgentToolResult({
+        toolCall,
+        agentName,
+        output: content,
+        isError: true,
+      });
+      return {
+        agentCall: {
+          id: createId(),
+          agentName,
+          task,
+          status: "failed",
+          contextMode: "task_only",
+          depth,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          output: "",
+          error: content,
+          messages: [],
+          childAgentCalls: [],
+        },
+        toolResult: result,
+      };
+    }
+
+    if (maxAllowedDepth !== undefined && depth > Math.max(1, maxAllowedDepth)) {
+      const content = `Agent nesting depth exceeded (${maxAllowedDepth}).`;
+      const result = createAgentToolResult({
+        toolCall,
+        agentName,
+        output: content,
+        isError: true,
+      });
+      return {
+        agentCall: {
+          id: createId(),
+          agentId: agent.id,
+          agentName,
+          description: agent.description,
+          task,
+          status: "failed",
+          contextMode: agent.contextMode,
+          depth,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          output: "",
+          error: content,
+          messages: [],
+          childAgentCalls: [],
+        },
+        toolResult: result,
+      };
+    }
+
+    const provider = resolveProviderForAgent(agent, parentProvider);
+    const agentCall = createAgentCall({ agent, task, depth, provider });
+    const visibleToolCall = toolCall;
+
+    if (parentAgentCallId) {
+      attachChildAgentCallToVisibleTree({
+        chatId,
+        assistantMessageId,
+        variantId,
+        parentAgentCallId,
+        childAgentCall: agentCall,
+      });
+    } else {
+      appendTopLevelAgentCallStep({
+        chatId,
+        assistantMessageId,
+        variantId,
+        toolCall: visibleToolCall,
+        agentCall,
+      });
+    }
+
+    updateAssistantAgentCall(
+      chatId,
+      assistantMessageId,
+      variantId,
+      agentCall.id,
+      (call) => ({
+        ...call,
+        status: "running",
+      }),
+    );
+
+    const startedAt = new Date().toISOString();
+    const transcriptMessages = [
+      {
+        id: createId(),
+        role: "system" as const,
+        content: createAgentSystemPrompt(agent),
+        createdAt: startedAt,
+      },
+      {
+        id: createId(),
+        role: "user" as const,
+        content: task,
+        createdAt: startedAt,
+      },
+    ];
+    updateAssistantAgentCall(
+      chatId,
+      assistantMessageId,
+      variantId,
+      agentCall.id,
+      (call) => ({
+        ...call,
+        messages: transcriptMessages,
+      }),
+    );
+
+    let accumulatedOutput = "";
+    let accumulatedReasoning = "";
+    let toolCallsForContext: ChatToolCall[] = [];
+    let toolResultsForContext: ChatToolResult[] = [];
+    const agentContextMessages =
+      agent.contextMode === "full_chat"
+        ? [
+            ...contextMessages,
+            {
+              id: createId(),
+              role: "user" as const,
+              content: userMessage,
+              createdAt: new Date().toISOString(),
+            },
+          ]
+        : [];
+    const delegatedTaskMessage =
+      agent.contextMode === "full_chat"
+        ? `Delegated task for agent ${agent.name}:\n\n${task}`
+        : task;
+    const baseAgentMessages: ChatMessage[] = [
+      ...agentContextMessages,
+      {
+        id: createId(),
+        role: "user",
+        content: delegatedTaskMessage,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    let currentMessages = agentContextMessages;
+    let currentUserMessage: string | undefined = delegatedTaskMessage;
+
+    try {
+      for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+        const result = await streamProviderChat({
+          provider,
+          systemPrompt: createAgentSystemPrompt(agent),
+          messages: currentMessages,
+          userMessage: currentUserMessage,
+          signal,
+          tools: getAgentTools(agent, depth),
+          onContentDelta: (delta) => {
+            accumulatedOutput += delta;
+            updateAssistantAgentCall(
+              chatId,
+              assistantMessageId,
+              variantId,
+              agentCall.id,
+              (call) => ({
+                ...call,
+                output: accumulatedOutput,
+              }),
+            );
+            if (chatId === activeChatId) scheduleStickyScrollToBottom();
+          },
+          onReasoningDelta: (delta) => {
+            accumulatedReasoning += delta;
+            updateAssistantAgentCall(
+              chatId,
+              assistantMessageId,
+              variantId,
+              agentCall.id,
+              (call) => ({
+                ...call,
+                reasoning: accumulatedReasoning,
+              }),
+            );
+          },
+        });
+
+        const toolCalls = result.toolCalls ?? [];
+        toolCallsForContext = [...toolCallsForContext, ...toolCalls];
+        updateAssistantAgentCall(
+          chatId,
+          assistantMessageId,
+          variantId,
+          agentCall.id,
+          (call) => ({
+            ...call,
+            toolCalls: [...(call.toolCalls ?? []), ...toolCalls],
+          }),
+        );
+
+        if (!toolCalls.length) break;
+        if (round >= MAX_TOOL_ROUNDS) {
+          throw new Error(
+            `Stopped after ${MAX_TOOL_ROUNDS} agent tool rounds.`,
+          );
+        }
+
+        const toolResults = await Promise.all(
+          toolCalls.map(async (childToolCall) => {
+            if (childToolCall.function.name === CALL_AGENT_TOOL_NAME) {
+              try {
+                const request =
+                  parseCallAgentRequestFromToolCall(childToolCall);
+                const child = await runAgentCall({
+                  chatId,
+                  assistantMessageId,
+                  variantId,
+                  agentName: request.agentName,
+                  task: request.task,
+                  toolCall: childToolCall,
+                  depth: depth + 1,
+                  parentAgentCallId: agentCall.id,
+                  parentProvider: provider,
+                  maxAllowedDepth: agent.maxNestingDepth,
+                  signal,
+                  contextMessages,
+                  userMessage,
+                });
+                return {
+                  ...child.toolResult,
+                  toolCallId: childToolCall.id,
+                };
+              } catch (error) {
+                return createAgentToolResult({
+                  toolCall: childToolCall,
+                  agentName,
+                  output: labelForError(error),
+                  isError: true,
+                });
+              }
+            }
+
+            try {
+              const args = childToolCall.function.arguments.trim()
+                ? JSON.parse(childToolCall.function.arguments)
+                : {};
+              const execution = await executeExternalTool(
+                childToolCall.function.name,
+                args,
+              );
+              return {
+                toolCallId: childToolCall.id,
+                toolName: childToolCall.function.name,
+                content: execution.content,
+                isError: execution.exitCode !== 0 || execution.timedOut,
+                execution: execution.execution,
+              } satisfies ChatToolResult;
+            } catch (error) {
+              return {
+                toolCallId: childToolCall.id,
+                toolName: childToolCall.function.name,
+                content: labelForError(error),
+                isError: true,
+              } satisfies ChatToolResult;
+            }
+          }),
+        );
+
+        toolResultsForContext = [...toolResultsForContext, ...toolResults];
+        updateAssistantAgentCall(
+          chatId,
+          assistantMessageId,
+          variantId,
+          agentCall.id,
+          (call) => ({
+            ...call,
+            toolResults: [...(call.toolResults ?? []), ...toolResults],
+          }),
+        );
+
+        currentMessages = [
+          ...baseAgentMessages,
+          createContinuationAssistantMessage({
+            assistantMessageId: createId(),
+            variantId: createId(),
+            accumulatedContent: accumulatedOutput,
+            accumulatedReasoning,
+            accumulatedReasoningMetadata: undefined,
+            toolCalls: toolCallsForContext,
+            toolResults: toolResultsForContext,
+          }),
+        ];
+        currentUserMessage = undefined;
+      }
+
+      const completedAt = new Date().toISOString();
+      const finalMessages = [
+        ...transcriptMessages,
+        {
+          id: createId(),
+          role: "assistant" as const,
+          content: accumulatedOutput,
+          createdAt: completedAt,
+        },
+      ];
+      updateAssistantAgentCall(
+        chatId,
+        assistantMessageId,
+        variantId,
+        agentCall.id,
+        (call) => ({
+          ...call,
+          status: "complete",
+          completedAt,
+          output: accumulatedOutput,
+          reasoning: accumulatedReasoning,
+          messages: finalMessages,
+        }),
+      );
+
+      const toolResult = createAgentToolResult({
+        toolCall: visibleToolCall,
+        agentName,
+        output: accumulatedOutput || "Agent completed with no output.",
+      });
+      return {
+        agentCall: {
+          ...agentCall,
+          status: "complete",
+          completedAt,
+          output: accumulatedOutput,
+          reasoning: accumulatedReasoning,
+          messages: finalMessages,
+        },
+        toolResult,
+      };
+    } catch (error) {
+      const wasAborted =
+        error instanceof DOMException && error.name === "AbortError";
+      const completedAt = new Date().toISOString();
+      const errorMessage = wasAborted
+        ? "Agent call cancelled."
+        : labelForError(error);
+      updateAssistantAgentCall(
+        chatId,
+        assistantMessageId,
+        variantId,
+        agentCall.id,
+        (call) => ({
+          ...call,
+          status: wasAborted ? "cancelled" : "failed",
+          completedAt,
+          output: accumulatedOutput,
+          reasoning: accumulatedReasoning,
+          error: errorMessage,
+        }),
+      );
+      const toolResult = createAgentToolResult({
+        toolCall: visibleToolCall,
+        agentName,
+        output: errorMessage,
+        isError: true,
+      });
+      return {
+        agentCall: {
+          ...agentCall,
+          status: wasAborted ? "cancelled" : "failed",
+          completedAt,
+          output: accumulatedOutput,
+          reasoning: accumulatedReasoning,
+          error: errorMessage,
+        },
+        toolResult,
+      };
+    }
+  }
+
   async function runAssistantVariant({
     chatId,
     contextMessages,
@@ -816,6 +1482,7 @@ export function useChatGeneration({
     providerForRun,
     toolsForRun,
     activeSkillNamesForRun,
+    oneShotAgentNames = [],
   }: {
     chatId: string;
     contextMessages: ChatMessage[];
@@ -826,6 +1493,7 @@ export function useChatGeneration({
     providerForRun: ProviderConfig;
     toolsForRun: LoadedToolInfo[];
     activeSkillNamesForRun: string[];
+    oneShotAgentNames?: string[];
   }) {
     const controller = new AbortController();
     generationRefs.current[chatId] = {
@@ -849,49 +1517,60 @@ export function useChatGeneration({
     let accumulatedReasoning = "";
     let accumulatedReasoningMetadata: ChatReasoningMetadata | undefined;
     let currentActiveSkillNames = [...new Set(activeSkillNamesForRun)];
+    const forcedAgentRequests = oneShotAgentNames.map((agentName) => ({
+      agentName,
+      task: userMessage,
+    }));
+    let forcedAgentResultPrompt = "";
 
     const appendToolCallsToVariant = (toolCalls: ChatToolCall[]) => {
       toolCallsForContext = [...toolCallsForContext, ...toolCalls];
-      const toolSteps: ChatAssistantProcessStep[] = toolCalls.map(
-        (toolCall) => {
-          if (toolCall.function.name === ASK_USER_TOOL_NAME) {
-            try {
-              return {
-                id: createId(),
-                type: "user_input" as const,
-                status: "waiting" as const,
-                toolCall,
-                request: parseAskUserRequestFromToolCall(toolCall),
-              };
-            } catch {
-              // Keep invalid ask_user calls visible as failed tool executions once
-              // executeToolCall returns the validation error.
-            }
-          }
+      const toolSteps: ChatAssistantProcessStep[] = [];
 
-          if (toolCall.function.name === CHECKLIST_WRITE_TOOL_NAME) {
-            try {
-              return {
-                id: createId(),
-                type: "checklist" as const,
-                status: "pending" as const,
-                toolCall,
-                request: parseChecklistWriteRequestFromToolCall(toolCall),
-              };
-            } catch {
-              // Keep invalid checklist_write calls visible as failed tool executions once
-              // executeToolCall returns the validation error.
-            }
-          }
+      for (const toolCall of toolCalls) {
+        if (toolCall.function.name === CALL_AGENT_TOOL_NAME) {
+          continue;
+        }
 
-          return {
-            id: createId(),
-            type: "tool_execution" as const,
-            status: "pending" as const,
-            toolCall,
-          };
-        },
-      );
+        if (toolCall.function.name === ASK_USER_TOOL_NAME) {
+          try {
+            toolSteps.push({
+              id: createId(),
+              type: "user_input" as const,
+              status: "waiting" as const,
+              toolCall,
+              request: parseAskUserRequestFromToolCall(toolCall),
+            });
+            continue;
+          } catch {
+            // Keep invalid ask_user calls visible as failed tool executions once
+            // executeToolCall returns the validation error.
+          }
+        }
+
+        if (toolCall.function.name === CHECKLIST_WRITE_TOOL_NAME) {
+          try {
+            toolSteps.push({
+              id: createId(),
+              type: "checklist" as const,
+              status: "pending" as const,
+              toolCall,
+              request: parseChecklistWriteRequestFromToolCall(toolCall),
+            });
+            continue;
+          } catch {
+            // Keep invalid checklist_write calls visible as failed tool executions once
+            // executeToolCall returns the validation error.
+          }
+        }
+
+        toolSteps.push({
+          id: createId(),
+          type: "tool_execution" as const,
+          status: "pending" as const,
+          toolCall,
+        });
+      }
 
       updateAssistantVariant(
         chatId,
@@ -906,10 +1585,12 @@ export function useChatGeneration({
       );
 
       return new Map(
-        toolCalls.map(
-          (toolCall, index) =>
-            [toolCall.id, toolSteps[index]?.id ?? toolCall.id] as const,
-        ),
+        toolCalls.map((toolCall) => {
+          const step = toolSteps.find(
+            (item) => "toolCall" in item && item.toolCall.id === toolCall.id,
+          );
+          return [toolCall.id, step?.id ?? toolCall.id] as const;
+        }),
       );
     };
 
@@ -924,6 +1605,7 @@ export function useChatGeneration({
             (variant.processSteps ?? []).map((step) => {
               if (
                 step.type !== "tool_execution" &&
+                step.type !== "agent_call" &&
                 step.type !== "user_input" &&
                 step.type !== "checklist"
               ) {
@@ -931,6 +1613,13 @@ export function useChatGeneration({
               }
 
               if (step.toolCall.id !== toolResult.toolCallId) return step;
+
+              if (step.type === "agent_call") {
+                return {
+                  ...step,
+                  status: toolResult.isError ? "failed" : "complete",
+                };
+              }
 
               return {
                 ...step,
@@ -971,6 +1660,30 @@ export function useChatGeneration({
 
     const bufferKey = getStreamBufferKey(chatId, assistantMessageId, variantId);
 
+    const buildForcedAgentContextMessages = (): ChatMessage[] => {
+      const content = forcedAgentResultPrompt.trim();
+      if (!content) return [];
+
+      const createdAt = new Date().toISOString();
+      return [
+        {
+          id: createId(),
+          role: "assistant",
+          activeVariantIndex: 0,
+          createdAt,
+          variants: [
+            {
+              id: createId(),
+              content,
+              reasoning: "",
+              status: "done",
+              createdAt,
+            },
+          ],
+        },
+      ];
+    };
+
     const buildContinuationMessages = (): ChatMessage[] => [
       ...contextMessages,
       {
@@ -979,6 +1692,7 @@ export function useChatGeneration({
         content: userMessage,
         createdAt: new Date().toISOString(),
       },
+      ...buildForcedAgentContextMessages(),
       createContinuationAssistantMessage({
         assistantMessageId,
         variantId,
@@ -990,9 +1704,86 @@ export function useChatGeneration({
       }),
     ];
 
+    async function runForcedAgents() {
+      if (!forcedAgentRequests.length) return;
+
+      const forcedResults: ChatToolResult[] = [];
+      for (const request of forcedAgentRequests) {
+        const forcedToolCall = createSyntheticAgentToolCall(
+          request.agentName,
+          request.task,
+        );
+        const result = await runAgentCall({
+          chatId,
+          assistantMessageId,
+          variantId,
+          agentName: request.agentName,
+          task: request.task,
+          toolCall: forcedToolCall,
+          depth: 1,
+          parentProvider: providerForRun,
+          signal: controller.signal,
+          contextMessages,
+          userMessage,
+        });
+        const toolResult = {
+          ...result.toolResult,
+          toolCallId: forcedToolCall.id,
+        };
+        forcedResults.push(toolResult);
+        applyToolResultToVisibleStep(toolResult);
+        if (chatId === activeChatId) {
+          scheduleStickyScrollToBottom({ force: true, settleFrames: 5 });
+        }
+      }
+
+      forcedAgentResultPrompt = [
+        "Completed agent results for the user's request:",
+        ...forcedResults.map((result) => {
+          let agentName = result.toolName;
+          let output = result.content;
+
+          try {
+            const parsed = JSON.parse(result.content) as {
+              agentName?: unknown;
+              output?: unknown;
+            };
+            if (
+              typeof parsed.agentName === "string" &&
+              parsed.agentName.trim()
+            ) {
+              agentName = parsed.agentName.trim();
+            }
+            if (typeof parsed.output === "string") {
+              output = parsed.output;
+            }
+          } catch {
+            // Keep the raw tool result content.
+          }
+
+          const status = result.isError ? "failed" : "complete";
+          return `\nAgent ${agentName} (${status}):\n${output}`;
+        }),
+      ].join("\n");
+    }
+
     try {
-      let currentMessages = contextMessages;
-      let currentUserMessage: string | undefined = userMessage;
+      await runForcedAgents();
+      let currentMessages = forcedAgentRequests.length
+        ? [
+            ...contextMessages,
+            {
+              id: createId(),
+              role: "user" as const,
+              content: userMessage,
+              createdAt: new Date().toISOString(),
+            },
+            ...buildForcedAgentContextMessages(),
+          ]
+        : contextMessages;
+      let currentUserMessage: string | undefined = forcedAgentRequests.length
+        ? "Use the completed agent result above to answer the user's original request. Do not call that same agent again unless the user explicitly asks for another agent pass."
+        : userMessage;
       let lastStreamResult: StreamProviderChatResult | undefined;
 
       for (let toolRound = 0; toolRound <= MAX_TOOL_ROUNDS; toolRound += 1) {
@@ -1020,7 +1811,9 @@ export function useChatGeneration({
           messages: currentMessages,
           userMessage: currentUserMessage,
           signal: controller.signal,
-          tools: toolsForRun,
+          tools: forcedAgentRequests.length
+            ? toolsForRun.filter((tool) => tool.name !== CALL_AGENT_TOOL_NAME)
+            : toolsForRun,
           onContentDelta: (delta) => {
             accumulatedContent += delta;
             const assistantMessageStepId = ensureAssistantMessageProcessStep(
@@ -1136,14 +1929,47 @@ export function useChatGeneration({
 
         const toolResults = await Promise.all(
           toolCalls.map(async (toolCall) => {
-            const toolResult = await executeToolCall(toolCall, {
-              chatId,
-              assistantMessageId,
-              variantId,
-              stepId: toolStepIdsByToolCallId.get(toolCall.id) ?? toolCall.id,
-              signal: controller.signal,
-              activeSkillNames: currentActiveSkillNames,
-            });
+            const toolResult =
+              toolCall.function.name === CALL_AGENT_TOOL_NAME
+                ? await (async () => {
+                    try {
+                      const request =
+                        parseCallAgentRequestFromToolCall(toolCall);
+                      const agentResult = await runAgentCall({
+                        chatId,
+                        assistantMessageId,
+                        variantId,
+                        agentName: request.agentName,
+                        task: request.task,
+                        toolCall,
+                        depth: 1,
+                        parentProvider: providerForRun,
+                        signal: controller.signal,
+                        contextMessages,
+                        userMessage,
+                      });
+                      return {
+                        ...agentResult.toolResult,
+                        toolCallId: toolCall.id,
+                      };
+                    } catch (error) {
+                      return createAgentToolResult({
+                        toolCall,
+                        agentName: "unknown",
+                        output: labelForError(error),
+                        isError: true,
+                      });
+                    }
+                  })()
+                : await executeToolCall(toolCall, {
+                    chatId,
+                    assistantMessageId,
+                    variantId,
+                    stepId:
+                      toolStepIdsByToolCallId.get(toolCall.id) ?? toolCall.id,
+                    signal: controller.signal,
+                    activeSkillNames: currentActiveSkillNames,
+                  });
 
             applyToolResultToVisibleStep(toolResult);
 
@@ -1259,6 +2085,9 @@ export function useChatGeneration({
     const oneShotSkillNames = validateSkillMentions(userMessage);
     if (!oneShotSkillNames) return false;
 
+    const oneShotAgentNames = validateAgentMentions(userMessage);
+    if (!oneShotAgentNames) return false;
+
     const activeSkillNamesForRun = getActiveSkillNamesForRun(
       activeChat,
       oneShotSkillNames,
@@ -1319,6 +2148,7 @@ export function useChatGeneration({
       providerForRun,
       toolsForRun,
       activeSkillNamesForRun,
+      oneShotAgentNames,
     });
 
     return true;
@@ -1357,6 +2187,9 @@ export function useChatGeneration({
 
     const oneShotSkillNames = validateSkillMentions(userMessage);
     if (!oneShotSkillNames) return;
+
+    const oneShotAgentNames = validateAgentMentions(userMessage);
+    if (!oneShotAgentNames) return;
 
     const contextMessages = activeChat.messages.slice(0, userIndex);
     const retainedMessages = activeChat.messages.slice(0, userIndex + 1);
@@ -1410,6 +2243,7 @@ export function useChatGeneration({
       providerForRun,
       toolsForRun,
       activeSkillNamesForRun,
+      oneShotAgentNames,
     });
   }
 
@@ -1512,6 +2346,9 @@ export function useChatGeneration({
     const oneShotSkillNames = validateSkillMentions(userMessage);
     if (!oneShotSkillNames) return;
 
+    const oneShotAgentNames = validateAgentMentions(userMessage);
+    if (!oneShotAgentNames) return;
+
     const userIndex = activeChat.messages.findIndex(
       (message) => message.id === messageId && message.role === "user",
     );
@@ -1580,6 +2417,7 @@ export function useChatGeneration({
       providerForRun,
       toolsForRun,
       activeSkillNamesForRun,
+      oneShotAgentNames,
     });
   }
 

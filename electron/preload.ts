@@ -119,6 +119,14 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
     return ipcRenderer.invoke("storage:skills-settings:save", value);
   },
 
+  loadAgentsSettings() {
+    return ipcRenderer.invoke("storage:agents-settings:load");
+  },
+
+  saveAgentsSettings(value: unknown) {
+    return ipcRenderer.invoke("storage:agents-settings:save", value);
+  },
+
   loadAppSettings() {
     return ipcRenderer.invoke("storage:app-settings:load");
   },
@@ -181,6 +189,34 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
 
   openSkillsFolder() {
     return ipcRenderer.invoke("storage:skills:open-folder");
+  },
+
+  loadAgents() {
+    return ipcRenderer.invoke("storage:agents:load");
+  },
+
+  saveAgent(agent: unknown) {
+    return ipcRenderer.invoke("storage:agent:save", agent);
+  },
+
+  deleteAgent(agentId: unknown) {
+    return ipcRenderer.invoke("storage:agent:delete", agentId);
+  },
+
+  importAgents() {
+    return ipcRenderer.invoke("storage:agents:import");
+  },
+
+  exportAgent(agent: unknown) {
+    return ipcRenderer.invoke("storage:agent:export", agent);
+  },
+
+  exportAgents(agents: unknown) {
+    return ipcRenderer.invoke("storage:agents:export", agents);
+  },
+
+  openAgentsFolder() {
+    return ipcRenderer.invoke("storage:agents:open-folder");
   },
 });
 

@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Bot,
   Edit3,
   Loader2,
   MessageSquareText,
@@ -63,6 +64,7 @@ type ChatSidebarProps = {
   onOpenProviders: () => void;
   onOpenTools: () => void;
   onOpenSkills: () => void;
+  onOpenAgents: () => void;
   onOpenSystemPrompt: () => void;
   onToggleAiTitleGeneration: (checked: boolean) => void;
   onSetTheme: (theme: "light" | "dark") => void;
@@ -90,6 +92,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onOpenProviders,
   onOpenTools,
   onOpenSkills,
+  onOpenAgents,
   onOpenSystemPrompt,
   onToggleAiTitleGeneration,
   onSetTheme,
@@ -227,6 +230,10 @@ export const ChatSidebar = memo(function ChatSidebar({
           <DropdownMenuItem onClick={onOpenSkills}>
             <BookOpen className="size-4" />
             Skills
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={onOpenAgents}>
+            <Bot className="size-4" />
+            Agents
           </DropdownMenuItem>
           <DropdownMenuItem onClick={onOpenSystemPrompt}>
             <MessageSquareText className="size-4" />

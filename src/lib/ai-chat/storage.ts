@@ -1,8 +1,12 @@
 import { defaultGenerationSettings, defaultProvider } from "./provider-presets";
 import { normalizeProviderForState, sortChatsByUpdatedAt } from "./chat-utils";
 import type {
+  AgentsSettings,
+  AgentExportResult,
+  AgentImportResult,
   AppSettings,
   ChatSession,
+  LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
@@ -27,6 +31,7 @@ const ACTIVE_CHAT_ID_KEY = "active-chat-id";
 const MODEL_CACHE_KEY_PREFIX = "provider-models:";
 const TOOLS_SETTINGS_KEY = "tools-settings";
 const SKILLS_SETTINGS_KEY = "skills-settings";
+const AGENTS_SETTINGS_KEY = "agents-settings";
 const APP_SETTINGS_KEY = "app-settings";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
@@ -62,6 +67,8 @@ type ChatForgeStorageApi = {
   saveToolsSettings: (value: ToolsSettings) => Promise<void>;
   loadSkillsSettings: () => Promise<SkillsSettings | undefined>;
   saveSkillsSettings: (value: SkillsSettings) => Promise<void>;
+  loadAgentsSettings: () => Promise<AgentsSettings | undefined>;
+  saveAgentsSettings: (value: AgentsSettings) => Promise<void>;
   loadAppSettings: () => Promise<AppSettings | undefined>;
   saveAppSettings: (value: AppSettings) => Promise<void>;
   loadTools: () => Promise<LoadedToolInfo[]>;
@@ -78,6 +85,13 @@ type ChatForgeStorageApi = {
   exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
   exportSkills: (skills: LoadedSkillInfo[]) => Promise<SkillExportResult>;
   openSkillsFolder: () => Promise<void>;
+  loadAgents: () => Promise<LoadedAgentInfo[]>;
+  saveAgent: (agent: LoadedAgentInfo) => Promise<LoadedAgentInfo>;
+  deleteAgent: (agentId: string) => Promise<void>;
+  importAgents: () => Promise<AgentImportResult>;
+  exportAgent: (agent: LoadedAgentInfo) => Promise<AgentExportResult>;
+  exportAgents: (agents: LoadedAgentInfo[]) => Promise<AgentExportResult>;
+  openAgentsFolder: () => Promise<void>;
   loadCachedProviderModels: (cacheKey: string) => Promise<string[]>;
   saveCachedProviderModels: (
     cacheKey: string,
@@ -188,6 +202,14 @@ function normalizeToolsSettings(
 function normalizeSkillsSettings(
   value: Partial<SkillsSettings> | undefined,
 ): SkillsSettings {
+  return {
+    enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
+  };
+}
+
+function normalizeAgentsSettings(
+  value: Partial<AgentsSettings> | undefined,
+): AgentsSettings {
   return {
     enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
   };
@@ -581,6 +603,33 @@ export async function saveSkillsSettings(value: SkillsSettings): Promise<void> {
   await legacySetSetting(SKILLS_SETTINGS_KEY, normalized);
 }
 
+export async function loadAgentsSettings(): Promise<AgentsSettings> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return normalizeAgentsSettings(await api.loadAgentsSettings());
+  }
+
+  return normalizeAgentsSettings(
+    await legacyGetSetting<AgentsSettings | undefined>(
+      AGENTS_SETTINGS_KEY,
+      undefined,
+    ),
+  );
+}
+
+export async function saveAgentsSettings(value: AgentsSettings): Promise<void> {
+  const normalized = normalizeAgentsSettings(value);
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.saveAgentsSettings(normalized);
+    return;
+  }
+
+  await legacySetSetting(AGENTS_SETTINGS_KEY, normalized);
+}
+
 export async function loadAppSettings(): Promise<AppSettings> {
   const api = await ensureJsonStorageReady();
 
@@ -760,6 +809,84 @@ export async function openSkillsFolder(): Promise<void> {
   }
 
   throw new Error("Opening the skills folder requires the Electron app.");
+}
+
+export async function loadAgents(): Promise<LoadedAgentInfo[]> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.loadAgents();
+  }
+
+  return [];
+}
+
+export async function saveAgent(
+  agent: LoadedAgentInfo,
+): Promise<LoadedAgentInfo> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.saveAgent(agent);
+  }
+
+  throw new Error("Agent storage requires the Electron app.");
+}
+
+export async function deleteAgent(agentId: string): Promise<void> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.deleteAgent(agentId);
+    return;
+  }
+
+  throw new Error("Agent storage requires the Electron app.");
+}
+
+export async function importAgents(): Promise<AgentImportResult> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.importAgents();
+  }
+
+  throw new Error("Agent import requires the Electron app.");
+}
+
+export async function exportAgent(
+  agent: LoadedAgentInfo,
+): Promise<AgentExportResult> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.exportAgent(agent);
+  }
+
+  throw new Error("Agent export requires the Electron app.");
+}
+
+export async function exportAgents(
+  agents: LoadedAgentInfo[],
+): Promise<AgentExportResult> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return api.exportAgents(agents);
+  }
+
+  throw new Error("Agent export requires the Electron app.");
+}
+
+export async function openAgentsFolder(): Promise<void> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.openAgentsFolder();
+    return;
+  }
+
+  throw new Error("Opening the agents folder requires the Electron app.");
 }
 
 export async function loadCachedProviderModels(

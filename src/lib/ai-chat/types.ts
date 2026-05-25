@@ -111,6 +111,45 @@ export type ChatToolResult = {
 
 export type ToolExecutionStatus = "pending" | "running" | "complete" | "failed";
 
+export type AgentContextMode = "task_only" | "full_chat";
+
+export type AgentCallStatus =
+  | "pending"
+  | "running"
+  | "complete"
+  | "failed"
+  | "cancelled";
+
+export type AgentTranscriptMessage = {
+  id: string;
+  role: "system" | "user" | "assistant" | "tool";
+  content: string;
+  name?: string;
+  createdAt: string;
+};
+
+export type ChatAgentCall = {
+  id: string;
+  agentId?: string;
+  agentName: string;
+  description?: string;
+  task: string;
+  status: AgentCallStatus;
+  contextMode: AgentContextMode;
+  depth: number;
+  startedAt: string;
+  completedAt?: string;
+  providerName?: string;
+  model?: string;
+  output: string;
+  reasoning?: string;
+  error?: string;
+  messages: AgentTranscriptMessage[];
+  toolCalls?: ChatToolCall[];
+  toolResults?: ChatToolResult[];
+  childAgentCalls: ChatAgentCall[];
+};
+
 export type AskUserOption = {
   id: string;
   label: string;
@@ -176,6 +215,13 @@ export type ChatAssistantProcessStep =
       status?: ToolExecutionStatus;
       toolCall: ChatToolCall;
       toolResult?: ChatToolResult;
+    }
+  | {
+      id: string;
+      type: "agent_call";
+      status?: AgentCallStatus;
+      toolCall: ChatToolCall;
+      agentCall: ChatAgentCall;
     }
   | {
       id: string;
@@ -247,6 +293,8 @@ export type ChatSession = {
   disabledToolNames?: string[];
   enabledSkillNames?: string[];
   disabledSkillNames?: string[];
+  enabledAgentNames?: string[];
+  disabledAgentNames?: string[];
   activeSkillNames?: string[];
 };
 
@@ -310,6 +358,23 @@ export type SkillDefinition = {
 
 export type LoadedSkillInfo = SkillDefinition;
 
+export type AgentDefinition = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  description: string;
+  instructions: string;
+  contextMode: AgentContextMode;
+  providerId?: string;
+  model?: string;
+  maxNestingDepth: number;
+  loadedSkillNames: string[];
+  allowedToolNames: string[];
+  allowedAgentNames: string[];
+};
+
+export type LoadedAgentInfo = AgentDefinition;
+
 export type ToolLoadError = {
   source: string;
   message: string;
@@ -342,6 +407,12 @@ export type SkillImportIssue = {
   message: string;
 };
 
+export type AgentImportIssue = {
+  source: string;
+  agentName?: string;
+  message: string;
+};
+
 export type SkillImportResult = {
   cancelled: boolean;
   imported: number;
@@ -357,6 +428,21 @@ export type SkillExportResult = {
   path?: string;
 };
 
+export type AgentImportResult = {
+  cancelled: boolean;
+  imported: number;
+  updated: number;
+  skipped: AgentImportIssue[];
+  invalid: AgentImportIssue[];
+  renamed: AgentImportIssue[];
+};
+
+export type AgentExportResult = {
+  cancelled: boolean;
+  exported: number;
+  path?: string;
+};
+
 export type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
@@ -366,6 +452,10 @@ export type ToolsSettings = {
 };
 
 export type SkillsSettings = {
+  enabled: boolean;
+};
+
+export type AgentsSettings = {
   enabled: boolean;
 };
 

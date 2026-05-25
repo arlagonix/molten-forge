@@ -10,7 +10,6 @@ import {
   MessageSquareText,
   MoreHorizontal,
   Plus,
-  RefreshCcw,
   Trash2,
   Upload,
   Wrench,
@@ -824,29 +823,6 @@ export const ToolsDialog = memo(function ToolsDialog({
     toolDraft,
   ]);
 
-  async function refreshTools(showToast = false) {
-    setIsLoadingTools(true);
-
-    try {
-      const tools = await loadTools();
-      onLoadedToolsChange(tools);
-      setToolLoadErrors([]);
-      if (showToast) {
-        showSuccess(
-          `Loaded ${tools.length} tool${tools.length === 1 ? "" : "s"}.`,
-        );
-      }
-    } catch (error) {
-      console.error("Failed to load tools:", error);
-      setToolLoadErrors([
-        { source: "Tools storage", message: labelForError(error) },
-      ]);
-      showError("Failed to load tools", labelForError(error));
-    } finally {
-      setIsLoadingTools(false);
-    }
-  }
-
   async function saveCurrentToolDraft() {
     if (!toolDraft) return;
     setIsSavingTool(true);
@@ -1179,16 +1155,6 @@ export const ToolsDialog = memo(function ToolsDialog({
                   >
                     <FolderOpen className="size-4" />
                     Open tools folder
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    disabled={isLoadingTools}
-                    onSelect={() => void refreshTools(true)}
-                  >
-                    <RefreshCcw
-                      className={cn("size-4", isLoadingTools && "animate-spin")}
-                    />
-                    Reload from app storage
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

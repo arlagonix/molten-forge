@@ -13,6 +13,7 @@ import { ComposerFooter } from "@/components/ai-chat/composer-footer";
 import { EmptyChatState } from "@/components/ai-chat/empty-chat-state";
 import { FindBar } from "@/components/ai-chat/find-bar";
 import { ToolExecutionBlock } from "@/components/ai-chat/tool-execution-block";
+import { AgentsDialog } from "@/components/agents-dialog";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { SystemPromptDialog } from "@/components/dialogs/system-prompt-dialog";
 import { ProviderSettingsDialog } from "@/components/provider-settings-dialog";
@@ -29,6 +30,7 @@ import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL,
   CHECKLIST_WRITE_TOOL_NAME,
+  DEFAULT_AGENTS_SETTINGS,
   DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
   WEB_FETCH_TOOL,
@@ -57,6 +59,8 @@ import {
 import {
   createEmptyChat,
   loadActiveChatId,
+  loadAgents,
+  loadAgentsSettings,
   loadAppSettings,
   loadChats,
   loadProvidersState,
@@ -66,6 +70,7 @@ import {
   loadTools,
   loadToolsSettings,
   saveActiveChatId,
+  saveAgentsSettings,
   saveAppSettings,
   saveChat,
   saveProvidersState,
@@ -80,6 +85,8 @@ import type {
   ChatSession,
   ChatToolCall,
   ChatToolResult,
+  AgentsSettings,
+  LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
@@ -165,11 +172,15 @@ export default function Home() {
   const [skillsSettings, setSkillsSettings] = useState<SkillsSettings>(
     DEFAULT_SKILLS_SETTINGS,
   );
+  const [agentsSettings, setAgentsSettings] = useState<AgentsSettings>(
+    DEFAULT_AGENTS_SETTINGS,
+  );
   const [appSettings, setAppSettings] = useState<AppSettings>({
     chatTitleGenerationMode: "local",
   });
   const [loadedTools, setLoadedTools] = useState<LoadedToolInfo[]>([]);
   const [loadedSkills, setLoadedSkills] = useState<LoadedSkillInfo[]>([]);
+  const [loadedAgents, setLoadedAgents] = useState<LoadedAgentInfo[]>([]);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
   const [initialComposerDrafts] = useState<Record<string, string>>(() =>
@@ -200,9 +211,12 @@ export default function Home() {
   const [chatToolSearchValue, setChatToolSearchValue] = useState("");
   const [isChatSkillPickerOpen, setIsChatSkillPickerOpen] = useState(false);
   const [chatSkillSearchValue, setChatSkillSearchValue] = useState("");
+  const [isChatAgentPickerOpen, setIsChatAgentPickerOpen] = useState(false);
+  const [chatAgentSearchValue, setChatAgentSearchValue] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -634,6 +648,80 @@ export default function Home() {
       })),
     [availableSkills],
   );
+  const availableAgents = useMemo(() => {
+    const byName = new Map<string, LoadedAgentInfo>();
+
+    for (const agent of loadedAgents) {
+      if (!isValidToolName(agent.name) || byName.has(agent.name)) continue;
+      byName.set(agent.name, agent);
+    }
+
+    return [...byName.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+  }, [loadedAgents]);
+
+  const availableAgentsByName = useMemo(() => {
+    return new Map(
+      availableAgents.map((agent) => [agent.name, agent] as const),
+    );
+  }, [availableAgents]);
+
+  const agentMentionOptions = useMemo(
+    () =>
+      availableAgents.map((agent) => ({
+        name: agent.name,
+        description: agent.description,
+      })),
+    [availableAgents],
+  );
+
+  const globallyEnabledAgentNames = useMemo(() => {
+    if (!agentsSettings.enabled) return new Set<string>();
+
+    return new Set(
+      availableAgents
+        .filter((agent) => agent.enabled)
+        .map((agent) => agent.name),
+    );
+  }, [agentsSettings.enabled, availableAgents]);
+
+  const activeChatEnabledAgentNames = useMemo(() => {
+    if (!activeChat) return [];
+
+    const chatEnabled = new Set(activeChat.enabledAgentNames ?? []);
+    const chatDisabled = new Set(activeChat.disabledAgentNames ?? []);
+
+    return availableAgents
+      .map((agent) => agent.name)
+      .filter(
+        (agentName) =>
+          !chatDisabled.has(agentName) &&
+          (globallyEnabledAgentNames.has(agentName) ||
+            chatEnabled.has(agentName)),
+      );
+  }, [
+    activeChat?.disabledAgentNames,
+    activeChat?.enabledAgentNames,
+    activeChat?.id,
+    availableAgents,
+    globallyEnabledAgentNames,
+  ]);
+
+  const visibleChatAgents = useMemo(() => {
+    const search = chatAgentSearchValue.trim().toLowerCase();
+
+    if (!search) return availableAgents;
+
+    return availableAgents.filter((agent) =>
+      `${agent.name} ${agent.description}`.toLowerCase().includes(search),
+    );
+  }, [availableAgents, chatAgentSearchValue]);
+
+  const agentDisplayKey = useMemo(
+    () => availableAgents.map((agent) => `${agent.name}:${agent.enabled ? 1 : 0}`).join("|"),
+    [availableAgents],
+  );
 
   const {
     chatScrollRef,
@@ -675,9 +763,11 @@ export default function Home() {
           loadedActiveChatId,
           loadedToolsSettings,
           loadedSkillsSettings,
+          loadedAgentsSettings,
           loadedAppSettings,
           loadedToolManifests,
           loadedSkillManifests,
+          loadedAgentManifests,
         ] = await Promise.all([
           loadProvidersState(),
           loadSystemPrompt(),
@@ -685,9 +775,11 @@ export default function Home() {
           loadActiveChatId(),
           loadToolsSettings(),
           loadSkillsSettings(),
+          loadAgentsSettings(),
           loadAppSettings(),
           loadTools(),
           loadSkills(),
+          loadAgents(),
         ]);
 
         if (cancelled) return;
@@ -726,9 +818,11 @@ export default function Home() {
         setSystemPrompt(loadedSystemPrompt);
         setToolsSettings(loadedToolsSettings);
         setSkillsSettings(loadedSkillsSettings);
+        setAgentsSettings(loadedAgentsSettings);
         setAppSettings(loadedAppSettings);
         setLoadedTools(loadedToolManifests);
         setLoadedSkills(loadedSkillManifests);
+        setLoadedAgents(loadedAgentManifests);
         savedChatSnapshotsRef.current = Object.fromEntries(
           nextChats.map((chat) => [chat.id, JSON.stringify(chat)]),
         );
@@ -821,6 +915,13 @@ export default function Home() {
       console.error("Failed to save skills settings:", error),
     );
   }, [skillsSettings]);
+
+  useEffect(() => {
+    if (!didHydrateRef.current) return;
+    saveAgentsSettings(agentsSettings).catch((error) =>
+      console.error("Failed to save agents settings:", error),
+    );
+  }, [agentsSettings]);
 
   useEffect(() => {
     if (!didHydrateRef.current) return;
@@ -1033,11 +1134,14 @@ export default function Home() {
     systemPrompt,
     toolsSettings,
     skillsSettings,
+    agentsSettings,
     chatTitleGenerationMode: appSettings.chatTitleGenerationMode,
     loadedTools,
     availableToolsByName,
     loadedSkills,
     availableSkillsByName,
+    loadedAgents,
+    availableAgentsByName,
     autoScrollEnabledRef,
     generatingChatIds,
     setGeneratingChatIds,
@@ -1183,6 +1287,7 @@ export default function Home() {
     branchChatFromMessage,
     toggleActiveChatTool,
     toggleActiveChatSkill,
+    toggleActiveChatAgent,
     renameChat,
     toggleChatPinned,
   } = useChatActions({
@@ -1190,9 +1295,11 @@ export default function Home() {
     activeChatId,
     availableTools,
     availableSkills,
+    availableAgents,
     chats,
     globallyEnabledToolNames,
     globallyEnabledSkillNames,
+    globallyEnabledAgentNames,
     isSending,
     messageElementRefs,
     setActiveChatId,
@@ -1379,6 +1486,7 @@ export default function Home() {
         onOpenProviders={() => setSettingsOpen(true)}
         onOpenTools={() => setToolsOpen(true)}
         onOpenSkills={() => setSkillsOpen(true)}
+        onOpenAgents={() => setAgentsOpen(true)}
         onOpenSystemPrompt={() => setSystemPromptOpen(true)}
         onToggleAiTitleGeneration={(checked) =>
           setAppSettings((currentSettings) => ({
@@ -1440,8 +1548,10 @@ export default function Home() {
                   collapsedThinkingStepIds={collapsedThinkingStepIds}
                   toolDisplayKey={toolDisplayKey}
                   skillDisplayKey={skillDisplayKey}
+                  agentDisplayKey={agentDisplayKey}
                   toolMentionOptions={toolMentionOptions}
                   skillMentionOptions={skillMentionOptions}
+                  agentMentionOptions={agentMentionOptions}
                   registerMessageElement={stableRegisterMessageElement}
                   renderToolExecutionBlock={stableRenderToolExecutionBlock}
                   canSubmitAskUserResponse={stableCanSubmitAskUserResponse}
@@ -1542,10 +1652,18 @@ export default function Home() {
               skillSearchValue={chatSkillSearchValue}
               onSkillSearchValueChange={setChatSkillSearchValue}
               onToggleSkill={toggleActiveChatSkill}
+              visibleChatAgents={visibleChatAgents}
+              selectedAgentNames={activeChatEnabledAgentNames}
+              isAgentPickerOpen={isChatAgentPickerOpen}
+              onAgentPickerOpenChange={setIsChatAgentPickerOpen}
+              agentSearchValue={chatAgentSearchValue}
+              onAgentSearchValueChange={setChatAgentSearchValue}
+              onToggleAgent={toggleActiveChatAgent}
             />
           }
           toolMentionOptions={toolMentionOptions}
           skillMentionOptions={skillMentionOptions}
+          agentMentionOptions={agentMentionOptions}
         />
       </section>
 
@@ -1571,6 +1689,20 @@ export default function Home() {
         loadedSkills={loadedSkills}
         onLoadedSkillsChange={setLoadedSkills}
         availableTools={availableTools}
+        showSuccess={stableShowSuccess}
+        showError={stableShowError}
+      />
+
+      <AgentsDialog
+        open={agentsOpen}
+        onOpenChange={setAgentsOpen}
+        agentsSettings={agentsSettings}
+        onAgentsSettingsChange={setAgentsSettings}
+        loadedAgents={loadedAgents}
+        onLoadedAgentsChange={setLoadedAgents}
+        availableTools={availableTools.filter((tool) => !isBuiltInToolName(tool.name))}
+        availableSkills={availableSkills}
+        providers={providers}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />

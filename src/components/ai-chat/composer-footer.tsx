@@ -1,4 +1,4 @@
-import { BookOpen, Check, ChevronsUpDown, Lock, Wrench } from "lucide-react";
+import { BookOpen, Bot, Check, ChevronsUpDown, Lock, Wrench } from "lucide-react";
 import { memo } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { providerDisplayName, providerLabel } from "@/lib/ai-chat/chat-utils";
 import type {
+  LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
@@ -67,6 +68,13 @@ type ComposerFooterProps = {
   skillSearchValue: string;
   onSkillSearchValueChange: (value: string) => void;
   onToggleSkill: (skillName: string) => void;
+  visibleChatAgents: LoadedAgentInfo[];
+  selectedAgentNames: string[];
+  isAgentPickerOpen: boolean;
+  onAgentPickerOpenChange: (open: boolean) => void;
+  agentSearchValue: string;
+  onAgentSearchValueChange: (value: string) => void;
+  onToggleAgent: (agentName: string) => void;
 };
 
 export const ComposerFooter = memo(function ComposerFooter({
@@ -95,10 +103,18 @@ export const ComposerFooter = memo(function ComposerFooter({
   skillSearchValue,
   onSkillSearchValueChange,
   onToggleSkill,
+  visibleChatAgents,
+  selectedAgentNames,
+  isAgentPickerOpen,
+  onAgentPickerOpenChange,
+  agentSearchValue,
+  onAgentSearchValueChange,
+  onToggleAgent,
 }: ComposerFooterProps) {
   const selectedNames = new Set(selectedToolNames);
   const selectedSkillNameSet = new Set(selectedSkillNames);
   const activeSkillNameSet = new Set(activeSkillNames);
+  const selectedAgentNameSet = new Set(selectedAgentNames);
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -348,6 +364,88 @@ export const ComposerFooter = memo(function ComposerFooter({
                 </CommandGroup>
               ) : (
                 <CommandEmpty>No skills found.</CommandEmpty>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
+      <Popover
+        open={isAgentPickerOpen}
+        onOpenChange={(open) => {
+          onAgentPickerOpenChange(open);
+          if (!open) onAgentSearchValueChange("");
+        }}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            role="combobox"
+            disabled={!activeChatExists || isSending}
+            aria-expanded={isAgentPickerOpen}
+            className="h-9 shrink-0 justify-between gap-2  px-3 text-left font-normal"
+            title={
+              isSending
+                ? "Wait until this chat finishes generating"
+                : "Select agents available to the model in this chat"
+            }
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <Bot className="size-4 shrink-0 opacity-70" />
+            </span>
+            <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="w-[min(24rem,calc(100vw-2rem))]  p-0"
+        >
+          <Command shouldFilter={false}>
+            <CommandInput
+              value={agentSearchValue}
+              onValueChange={onAgentSearchValueChange}
+              placeholder="Search agents..."
+            />
+            <CommandList>
+              {visibleChatAgents.length > 0 ? (
+                <CommandGroup heading="Available agents">
+                  {visibleChatAgents.map((agent) => {
+                    const isSelected = selectedAgentNameSet.has(agent.name);
+
+                    return (
+                      <CommandItem
+                        key={agent.name}
+                        value={`${agent.name} ${agent.description}`}
+                        onSelect={() => onToggleAgent(agent.name)}
+                        className="min-w-0 cursor-pointer items-start gap-2"
+                        title={agent.description}
+                      >
+                        <Switch
+                          checked={isSelected}
+                          tabIndex={-1}
+                          onClick={(event) => event.stopPropagation()}
+                          onCheckedChange={() => onToggleAgent(agent.name)}
+                          className="mt-0.5 shrink-0 cursor-pointer"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex min-w-0 items-center gap-1.5">
+                            <span className="min-w-0 truncate font-medium">
+                              {agent.name}
+                            </span>
+                          </div>
+                          {agent.description && (
+                            <div className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                              {agent.description}
+                            </div>
+                          )}
+                        </div>
+                      </CommandItem>
+                    );
+                  })}
+                </CommandGroup>
+              ) : (
+                <CommandEmpty>No agents found.</CommandEmpty>
               )}
             </CommandList>
           </Command>

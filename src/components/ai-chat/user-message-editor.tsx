@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Bot,
   Lock,
   Save as SaveIcon,
   Send,
@@ -22,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { TooltipIconButton } from "./tooltip-icon-button";
 
 type ActiveMention = {
-  type: "tool" | "skill";
+  type: "tool" | "skill" | "agent";
   startIndex: number;
   endIndex: number;
   query: string;
@@ -40,13 +41,14 @@ function findActiveMention(
   cursorIndex: number,
 ): ActiveMention | null {
   const prefix = content.slice(0, cursorIndex);
-  const match = /(^|\s)@(tool|skill):?([A-Za-z0-9_-]*)$/.exec(prefix);
+  const match = /(^|\s)@(tool|skill|agent):?([A-Za-z0-9_-]*)$/.exec(prefix);
 
   if (!match) return null;
 
   const fullMatch = match[0] ?? "";
   const leadingWhitespace = match[1] ?? "";
-  const type = match[2] === "skill" ? "skill" : "tool";
+  const type =
+    match[2] === "skill" ? "skill" : match[2] === "agent" ? "agent" : "tool";
   const query = match[3] ?? "";
   const startIndex = cursorIndex - fullMatch.length + leadingWhitespace.length;
 
@@ -165,6 +167,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   disabled,
   toolMentionOptions = [],
   skillMentionOptions = [],
+  agentMentionOptions = [],
   onCancel,
   onSave,
   onSubmit,
@@ -173,6 +176,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   disabled: boolean;
   toolMentionOptions?: ToolMentionOption[];
   skillMentionOptions?: ToolMentionOption[];
+  agentMentionOptions?: ToolMentionOption[];
   onCancel: () => void;
   onSave: (content: string) => void | Promise<void>;
   onSubmit: (content: string) => void | Promise<void>;
@@ -193,7 +197,11 @@ export const UserMessageEditor = memo(function UserMessageEditor({
     if (!activeMention || disabled) return [];
 
     const options =
-      activeMention.type === "skill" ? skillMentionOptions : toolMentionOptions;
+      activeMention.type === "skill"
+        ? skillMentionOptions
+        : activeMention.type === "agent"
+          ? agentMentionOptions
+          : toolMentionOptions;
     const query = activeMention.query.trim().toLowerCase();
 
     return options
@@ -205,7 +213,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
           : true,
       )
       .slice(0, 12);
-  }, [activeMention, disabled, skillMentionOptions, toolMentionOptions]);
+  }, [activeMention, agentMentionOptions, disabled, skillMentionOptions, toolMentionOptions]);
 
   const isMentionMenuOpen = Boolean(activeMention && mentionSuggestions.length);
 
@@ -225,8 +233,12 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   function applyMentionSuggestion(name: string) {
     if (!activeMention) return;
 
-    const mentionText = `@${activeMention.type}:${name}`;
-    const nextContent = `${content.slice(0, activeMention.startIndex)}${mentionText}${content.slice(activeMention.endIndex)}`;
+    const suffix = content.slice(activeMention.endIndex);
+    const shouldAddTrailingSpace = suffix.length === 0 || !/^\s/.test(suffix);
+    const mentionText = `@${activeMention.type}:${name}${
+      shouldAddTrailingSpace ? " " : ""
+    }`;
+    const nextContent = `${content.slice(0, activeMention.startIndex)}${mentionText}${suffix}`;
     const nextCursorPosition = activeMention.startIndex + mentionText.length;
 
     setContent(nextContent);
@@ -298,7 +310,11 @@ export const UserMessageEditor = memo(function UserMessageEditor({
               {mentionSuggestions.map((option, index) => {
                 const isSelected = index === selectedMentionSuggestionIndex;
                 const Icon =
-                  activeMention?.type === "skill" ? BookOpen : Wrench;
+                  activeMention?.type === "skill"
+                    ? BookOpen
+                    : activeMention?.type === "agent"
+                      ? Bot
+                      : Wrench;
 
                 return (
                   <button
