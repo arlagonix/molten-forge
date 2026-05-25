@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  ChatReasoningMetadata,
   ChatTokenUsage,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -34,6 +35,7 @@ type AiToolCall = {
 type AiStreamDeltaEvent =
   | { type: "content"; delta: string }
   | { type: "reasoning"; delta: string }
+  | { type: "reasoning_metadata"; delta: ChatReasoningMetadata }
   | { type: "raw"; data: unknown };
 
 type AiStreamResult = {
@@ -41,6 +43,7 @@ type AiStreamResult = {
   finishReason?: string;
   content?: string;
   reasoning?: string;
+  reasoningMetadata?: ChatReasoningMetadata;
   toolCalls?: AiToolCall[];
 };
 

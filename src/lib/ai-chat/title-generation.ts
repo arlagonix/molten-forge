@@ -82,9 +82,7 @@ function buildManualTitleContext(messages: ChatMessage[]) {
 }
 
 function buildTitleUserMessage(content: string) {
-  return `/no_think
-
-Return only a short title. Do not explain. Do not think step by step.
+  return `Generate a very short title for the content below:
 
 ${content}`;
 }

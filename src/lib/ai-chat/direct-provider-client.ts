@@ -1,6 +1,7 @@
 import type {
   ApiChatMessage,
   ChatMessage,
+  ChatReasoningMetadata,
   ChatTokenUsage,
   ChatToolCall,
   ChatToolResult,
@@ -9,6 +10,7 @@ import type {
   ProviderGenerationSettings,
 } from "./types";
 import { defaultGenerationSettings } from "./provider-presets";
+import { mergeReasoningMetadata } from "./chat-utils";
 
 function getActiveAssistantContent(message: ChatMessage) {
   if (message.role !== "assistant") return message.content;
@@ -34,6 +36,36 @@ function getDeltaText(value: unknown): string {
       .join("");
   }
   return "";
+}
+
+function getReasoningDetails(value: unknown): unknown[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  return Array.isArray(value) ? value : [value];
+}
+
+function readReasoningMetadataDelta(
+  data: unknown,
+): ChatReasoningMetadata | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const choices = "choices" in data ? data.choices : undefined;
+  if (!Array.isArray(choices)) return undefined;
+  const delta = choices[0]?.delta;
+  if (!delta || typeof delta !== "object") return undefined;
+
+  const reasoningContent =
+    getDeltaText(
+      "reasoning_content" in delta ? delta.reasoning_content : undefined,
+    ) || getDeltaText("reasoning" in delta ? delta.reasoning : undefined);
+  const reasoningDetails = getReasoningDetails(
+    "reasoning_details" in delta ? delta.reasoning_details : undefined,
+  );
+
+  if (!reasoningContent && !reasoningDetails?.length) return undefined;
+
+  return {
+    ...(reasoningContent ? { reasoningContent } : {}),
+    ...(reasoningDetails?.length ? { reasoningDetails } : {}),
+  };
 }
 
 function readContentDelta(data: unknown): string {
@@ -104,10 +136,12 @@ function getActiveAssistantVariant(message: ChatMessage) {
 }
 
 function buildApiMessages({
+  provider,
   systemPrompt,
   messages,
   userMessage,
 }: {
+  provider: ProviderConfig;
   systemPrompt: string;
   messages: ChatMessage[];
   userMessage?: string;
@@ -127,9 +161,23 @@ function buildApiMessages({
     const variant = getActiveAssistantVariant(message);
     if (!variant) continue;
 
+    const reasoningMetadata = variant.reasoningMetadata;
+    const legacyReasoningContent =
+      variant.toolCalls?.length &&
+      variant.reasoning &&
+      modelLooksReasoningCapable(provider.model)
+        ? variant.reasoning
+        : undefined;
+    const reasoningContent =
+      reasoningMetadata?.reasoningContent ?? legacyReasoningContent;
+
     apiMessages.push({
       role: "assistant",
       content: variant.content,
+      ...(reasoningContent ? { reasoning_content: reasoningContent } : {}),
+      ...(reasoningMetadata?.reasoningDetails?.length
+        ? { reasoning_details: reasoningMetadata.reasoningDetails }
+        : {}),
       ...(variant.toolCalls?.length ? { tool_calls: variant.toolCalls } : {}),
     });
 
@@ -239,7 +287,12 @@ function buildPayload({
 
   return {
     model: provider.model,
-    messages: buildApiMessages({ systemPrompt, messages, userMessage }),
+    messages: buildApiMessages({
+      provider,
+      systemPrompt,
+      messages,
+      userMessage,
+    }),
     stream,
     ...(tools?.length
       ? {
@@ -518,6 +571,7 @@ export type StreamProviderChatResult = {
   finishReason?: string;
   content?: string;
   reasoning?: string;
+  reasoningMetadata?: ChatReasoningMetadata;
   toolCalls?: ChatToolCall[];
 };
 
@@ -556,6 +610,8 @@ export async function streamProviderChat({
 
   let streamedContent = "";
   let streamedReasoning = "";
+  let reasoningMetadata: ChatReasoningMetadata | undefined;
+  let receivedReasoningMetadataEvent = false;
 
   const emitContentDelta = (delta: string) => {
     streamedContent += delta;
@@ -597,7 +653,18 @@ export async function streamProviderChat({
         tagParser.push(event.delta);
       } else if (event.type === "reasoning") {
         emitReasoningDelta(event.delta);
+      } else if (event.type === "reasoning_metadata") {
+        receivedReasoningMetadataEvent = true;
+        reasoningMetadata = mergeReasoningMetadata(
+          reasoningMetadata,
+          event.delta,
+        );
       } else if (event.type === "raw") {
+        reasoningMetadata = mergeReasoningMetadata(
+          reasoningMetadata,
+          readReasoningMetadataDelta(event.data),
+        );
+
         const reasoningDelta = readReasoningDelta(event.data);
         if (reasoningDelta) emitReasoningDelta(reasoningDelta);
 
@@ -641,11 +708,17 @@ export async function streamProviderChat({
       emitReasoningDelta(finalReasoning);
     }
 
+    reasoningMetadata = mergeReasoningMetadata(
+      reasoningMetadata,
+      receivedReasoningMetadataEvent ? undefined : result.reasoningMetadata,
+    );
+
     return {
       usage: result.usage ?? undefined,
       finishReason: result.finishReason ?? undefined,
       content: finalContent || undefined,
       reasoning: finalReasoning || undefined,
+      reasoningMetadata,
       toolCalls: result.toolCalls ?? undefined,
     };
   } catch (error) {

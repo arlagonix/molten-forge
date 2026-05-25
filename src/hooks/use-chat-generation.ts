@@ -5,6 +5,7 @@ import {
   createId,
   isAutoTitledChat,
   labelForError,
+  mergeReasoningMetadata,
   titleFromMessage,
 } from "@/lib/ai-chat/chat-utils";
 import { generateTitleFromFirstExchange } from "@/lib/ai-chat/title-generation";
@@ -55,6 +56,7 @@ import type {
   AskUserResponse,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
+  ChatReasoningMetadata,
   ChatTitleGenerationMode,
   ChatMessage,
   ChatSession,
@@ -845,6 +847,7 @@ export function useChatGeneration({
     let toolResultsForContext: ChatToolResult[] = [];
     let accumulatedContent = "";
     let accumulatedReasoning = "";
+    let accumulatedReasoningMetadata: ChatReasoningMetadata | undefined;
     let currentActiveSkillNames = [...new Set(activeSkillNamesForRun)];
 
     const appendToolCallsToVariant = (toolCalls: ChatToolCall[]) => {
@@ -981,6 +984,7 @@ export function useChatGeneration({
         variantId,
         accumulatedContent,
         accumulatedReasoning,
+        accumulatedReasoningMetadata,
         toolCalls: toolCallsForContext,
         toolResults: toolResultsForContext,
       }),
@@ -1078,6 +1082,26 @@ export function useChatGeneration({
         });
 
         lastStreamResult = streamResult;
+        accumulatedReasoningMetadata = mergeReasoningMetadata(
+          accumulatedReasoningMetadata,
+          streamResult.reasoningMetadata,
+        );
+
+        if (streamResult.reasoningMetadata) {
+          updateAssistantVariant(
+            chatId,
+            assistantMessageId,
+            variantId,
+            (variant) => ({
+              ...variant,
+              reasoningMetadata: mergeReasoningMetadata(
+                variant.reasoningMetadata,
+                streamResult.reasoningMetadata,
+              ),
+            }),
+            { touch: false },
+          );
+        }
 
         flushBufferedAssistantVariant(bufferKey);
 

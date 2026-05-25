@@ -4,7 +4,7 @@ import { lookup } from "node:dns/promises";
 import { existsSync, promises as fs } from "node:fs";
 import { isIP } from "node:net";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const APP_ROOT = path.join(__dirname, "..");
@@ -48,6 +48,11 @@ type ChatTokenUsage = {
   totalTokens?: number;
 };
 
+type ChatReasoningMetadata = {
+  reasoningContent?: string;
+  reasoningDetails?: unknown[];
+};
+
 type ToolCall = {
   id: string;
   type: "function";
@@ -64,6 +69,7 @@ type StreamResult = {
   finishReason?: string;
   content?: string;
   reasoning?: string;
+  reasoningMetadata?: ChatReasoningMetadata;
   toolCalls?: ToolCall[];
 };
 
@@ -210,7 +216,7 @@ const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 const WEB_FETCH_TOOL_NAME = "web_fetch";
 const WEB_FETCH_TIMEOUT_MS = 15_000;
 const WEB_FETCH_MAX_RESPONSE_BYTES = 2_000_000;
-const WEB_FETCH_MAX_RETURN_CHARS = 20_000;
+const WEB_FETCH_MAX_RETURN_CHARS = 100_000;
 const WEB_FETCH_MAX_REDIRECTS = 5;
 const WEB_FETCH_ALLOWED_CONTENT_TYPES = new Set([
   "",
@@ -352,6 +358,60 @@ function getDeltaText(value: unknown): string {
       .join("");
   }
   return "";
+}
+
+function getReasoningDetails(value: unknown): unknown[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  return Array.isArray(value) ? value : [value];
+}
+
+function mergeReasoningMetadata(
+  current?: ChatReasoningMetadata,
+  delta?: ChatReasoningMetadata,
+): ChatReasoningMetadata | undefined {
+  if (!delta?.reasoningContent && !delta?.reasoningDetails?.length) {
+    return current;
+  }
+
+  const reasoningContent = `${current?.reasoningContent ?? ""}${
+    delta.reasoningContent ?? ""
+  }`;
+  const reasoningDetails = [
+    ...(current?.reasoningDetails ?? []),
+    ...(delta.reasoningDetails ?? []),
+  ];
+
+  if (!reasoningContent && reasoningDetails.length === 0) return undefined;
+
+  return {
+    ...(reasoningContent ? { reasoningContent } : {}),
+    ...(reasoningDetails.length ? { reasoningDetails } : {}),
+  };
+}
+
+function readReasoningMetadataDelta(
+  data: unknown,
+): ChatReasoningMetadata | undefined {
+  if (!data || typeof data !== "object") return undefined;
+  const choices = "choices" in data ? data.choices : undefined;
+  if (!Array.isArray(choices)) return undefined;
+  const delta = choices[0]?.delta;
+  if (!delta || typeof delta !== "object") return undefined;
+
+  const reasoningContent =
+    getDeltaText(
+      "reasoning_content" in delta ? delta.reasoning_content : undefined,
+    ) || getDeltaText("reasoning" in delta ? delta.reasoning : undefined);
+  const reasoningDetails = getReasoningDetails(
+    "reasoning_details" in delta ? delta.reasoning_details : undefined,
+  );
+
+  if (!reasoningContent && !reasoningDetails?.length) return undefined;
+
+  return {
+    ...(reasoningContent ? { reasoningContent } : {}),
+    ...(reasoningDetails?.length ? { reasoningDetails } : {}),
+  };
 }
 
 function readContentDelta(data: unknown): string {
@@ -819,7 +879,6 @@ async function runCommandTool(
   });
 }
 
-
 function parseWebFetchArgs(args: unknown) {
   if (!isPlainObject(args)) {
     throw new Error("web_fetch arguments must be a JSON object.");
@@ -912,7 +971,9 @@ async function assertFetchablePublicUrl(url: URL) {
 
   if (isIP(hostname)) {
     if (isBlockedIpAddress(hostname)) {
-      throw new Error("web_fetch blocks local, private, and reserved IP addresses.");
+      throw new Error(
+        "web_fetch blocks local, private, and reserved IP addresses.",
+      );
     }
     return;
   }
@@ -921,10 +982,13 @@ async function assertFetchablePublicUrl(url: URL) {
   try {
     addresses = await lookup(hostname, { all: true, verbatim: true });
   } catch (error) {
-    throw new Error(`web_fetch could not resolve host ${hostname}: ${getErrorMessage(error)}`);
+    throw new Error(
+      `web_fetch could not resolve host ${hostname}: ${getErrorMessage(error)}`,
+    );
   }
 
-  if (!addresses.length) throw new Error(`web_fetch could not resolve host ${hostname}.`);
+  if (!addresses.length)
+    throw new Error(`web_fetch could not resolve host ${hostname}.`);
 
   for (const address of addresses) {
     if (isBlockedIpAddress(address.address)) {
@@ -1001,7 +1065,11 @@ async function fetchWebUrl(startUrl: URL) {
   let currentUrl = new URL(startUrl.toString());
   currentUrl.hash = "";
 
-  for (let redirectCount = 0; redirectCount <= WEB_FETCH_MAX_REDIRECTS; redirectCount += 1) {
+  for (
+    let redirectCount = 0;
+    redirectCount <= WEB_FETCH_MAX_REDIRECTS;
+    redirectCount += 1
+  ) {
     await assertFetchablePublicUrl(currentUrl);
 
     const controller = new AbortController();
@@ -1031,17 +1099,24 @@ async function fetchWebUrl(startUrl: URL) {
 
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("location");
-      if (!location) throw new Error(`web_fetch redirect from ${currentUrl} had no Location header.`);
+      if (!location)
+        throw new Error(
+          `web_fetch redirect from ${currentUrl} had no Location header.`,
+        );
       currentUrl = new URL(location, currentUrl);
       currentUrl.hash = "";
       continue;
     }
 
     if (!response.ok) {
-      throw new Error(`web_fetch received HTTP ${response.status} from ${currentUrl}.`);
+      throw new Error(
+        `web_fetch received HTTP ${response.status} from ${currentUrl}.`,
+      );
     }
 
-    const contentType = normalizeContentType(response.headers.get("content-type"));
+    const contentType = normalizeContentType(
+      response.headers.get("content-type"),
+    );
     if (!isAllowedWebFetchContentType(contentType)) {
       throw new Error(
         `web_fetch cannot read content type ${contentType || "unknown"}.`,
@@ -1056,7 +1131,9 @@ async function fetchWebUrl(startUrl: URL) {
     };
   }
 
-  throw new Error(`web_fetch followed too many redirects. Maximum is ${WEB_FETCH_MAX_REDIRECTS}.`);
+  throw new Error(
+    `web_fetch followed too many redirects. Maximum is ${WEB_FETCH_MAX_REDIRECTS}.`,
+  );
 }
 
 function decodeHtmlCodePoint(value: string, radix: number) {
@@ -1087,7 +1164,10 @@ function decodeHtmlEntities(value: string) {
     .replace(/&#(\d+);/g, (_match, decimal: string) =>
       decodeHtmlCodePoint(decimal, 10),
     )
-    .replace(/&([a-z]+);/gi, (match, name: string) => namedEntities[name.toLowerCase()] ?? match);
+    .replace(
+      /&([a-z]+);/gi,
+      (match, name: string) => namedEntities[name.toLowerCase()] ?? match,
+    );
 }
 
 function normalizeExtractedText(value: string) {
@@ -1140,7 +1220,11 @@ function findPreviousHeadingStart(html: string, index: number) {
   return previous;
 }
 
-function findNextSectionEnd(html: string, startIndex: number, headingLevel: number) {
+function findNextSectionEnd(
+  html: string,
+  startIndex: number,
+  headingLevel: number,
+) {
   const headingPattern = /<h([1-6])\b[^>]*>/gi;
   headingPattern.lastIndex = startIndex + 1;
 
@@ -3008,6 +3092,7 @@ ipcMain.handle(
 
     let usage: ChatTokenUsage | undefined;
     let finishReason: string | undefined;
+    let finalReasoningMetadata: ChatReasoningMetadata | undefined;
     const streamedToolCalls = new Map<number, ToolCall>();
 
     try {
@@ -3051,6 +3136,19 @@ ipcMain.handle(
         if (eventFinishReason) finishReason = eventFinishReason;
 
         mergeToolCallDelta(streamedToolCalls, data);
+
+        const reasoningMetadataDelta = readReasoningMetadataDelta(data);
+        if (reasoningMetadataDelta) {
+          finalReasoningMetadata = mergeReasoningMetadata(
+            finalReasoningMetadata,
+            reasoningMetadataDelta,
+          );
+
+          event.sender.send(`ai:stream-delta:${streamId}`, {
+            type: "reasoning_metadata",
+            delta: reasoningMetadataDelta,
+          });
+        }
 
         const reasoningDelta = readReasoningDelta(data);
         if (reasoningDelta) {
@@ -3123,6 +3221,7 @@ ipcMain.handle(
         finishReason,
         content: finalContent,
         reasoning: finalReasoning,
+        reasoningMetadata: finalReasoningMetadata,
         toolCalls: [...streamedToolCalls.values()].filter(
           (toolCall) => toolCall.id && toolCall.function.name,
         ),
@@ -3134,6 +3233,7 @@ ipcMain.handle(
           finishReason: finishReason ?? "cancelled",
           content: "",
           reasoning: "",
+          reasoningMetadata: finalReasoningMetadata,
           toolCalls: [],
         };
       }

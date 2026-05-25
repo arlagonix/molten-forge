@@ -8,6 +8,7 @@ import type {
   ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatMessage,
+  ChatReasoningMetadata,
   ChatToolCall,
   ProviderConfig,
 } from "@/lib/ai-chat/types";
@@ -294,6 +295,7 @@ export function createContinuationAssistantMessage({
   variantId,
   accumulatedContent,
   accumulatedReasoning,
+  accumulatedReasoningMetadata,
   toolCalls,
   toolResults,
 }: {
@@ -301,6 +303,7 @@ export function createContinuationAssistantMessage({
   variantId: string;
   accumulatedContent: string;
   accumulatedReasoning: string;
+  accumulatedReasoningMetadata?: ChatReasoningMetadata;
   toolCalls: ChatToolCall[];
   toolResults: ChatAssistantVariant["toolResults"];
 }): Extract<ChatMessage, { role: "assistant" }> {
@@ -314,6 +317,7 @@ export function createContinuationAssistantMessage({
         id: variantId,
         content: accumulatedContent,
         reasoning: accumulatedReasoning,
+        reasoningMetadata: accumulatedReasoningMetadata,
         status: "streaming",
         createdAt: new Date().toISOString(),
         toolCalls,

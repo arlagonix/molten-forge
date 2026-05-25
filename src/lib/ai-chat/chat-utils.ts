@@ -3,6 +3,7 @@ import type {
   ChatAssistantMessage,
   ChatAssistantVariant,
   ChatMessage,
+  ChatReasoningMetadata,
   ChatSession,
   ChatTitleMode,
   ChatTokenUsage,
@@ -23,6 +24,30 @@ export function labelForError(error: unknown) {
 
 export function providerDisplayName(provider: Pick<ProviderConfig, "name">) {
   return provider.name.trim() || "New provider";
+}
+
+export function mergeReasoningMetadata(
+  current?: ChatReasoningMetadata,
+  delta?: ChatReasoningMetadata,
+): ChatReasoningMetadata | undefined {
+  if (!delta?.reasoningContent && !delta?.reasoningDetails?.length) {
+    return current;
+  }
+
+  const reasoningContent = `${current?.reasoningContent ?? ""}${
+    delta.reasoningContent ?? ""
+  }`;
+  const reasoningDetails = [
+    ...(current?.reasoningDetails ?? []),
+    ...(delta.reasoningDetails ?? []),
+  ];
+
+  if (!reasoningContent && reasoningDetails.length === 0) return undefined;
+
+  return {
+    ...(reasoningContent ? { reasoningContent } : {}),
+    ...(reasoningDetails.length ? { reasoningDetails } : {}),
+  };
 }
 
 export function normalizeProviderModels(models: string[]) {

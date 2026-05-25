@@ -344,7 +344,7 @@
   }
 
   .chat-markdown li {
-    @apply mb-1;
+    @apply my-2;
   }
 
   .chat-markdown-compact li {

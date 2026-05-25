@@ -55,6 +55,13 @@ export type ChatTokenUsage = {
   totalTokens?: number;
 };
 
+export type ChatReasoningMetadata = {
+  /** Raw text reasoning metadata that providers may require to be passed back. */
+  reasoningContent?: string;
+  /** Raw structured reasoning metadata. Preserve order and shape exactly. */
+  reasoningDetails?: unknown[];
+};
+
 export type ChatMessageMetrics = {
   startedAt: string;
   completedAt?: string;
@@ -192,6 +199,7 @@ export type ChatAssistantVariant = {
   id: string;
   content: string;
   reasoning?: string;
+  reasoningMetadata?: ChatReasoningMetadata;
   status?: ChatMessageStatus;
   createdAt: string;
   metrics?: ChatMessageMetrics;
@@ -252,6 +260,8 @@ export type ApiChatMessage =
   | {
       role: "assistant";
       content: string;
+      reasoning_content?: string;
+      reasoning_details?: unknown[];
       tool_calls?: ApiToolCall[];
     }
   | {
