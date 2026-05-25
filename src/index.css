@@ -677,6 +677,44 @@
     height: auto;
   }
 
+  .chat-markdown .chat-code-mermaid-interactive {
+    @apply relative block h-full min-h-0 w-full min-w-0 overflow-hidden p-0;
+  }
+
+  .chat-markdown .chat-code-mermaid-controls {
+    @apply absolute right-3 top-3 z-30 flex items-center gap-1 border border-border bg-background/95 p-1 shadow-md backdrop-blur;
+  }
+
+  .chat-markdown .chat-code-mermaid-zoom-label {
+    @apply min-w-12 px-1 text-center font-mono text-xs text-muted-foreground tabular-nums;
+  }
+
+  .chat-markdown .chat-code-mermaid-viewport {
+    @apply absolute inset-0 h-full min-h-0 w-full min-w-0 overflow-hidden bg-background;
+    cursor: grab;
+    touch-action: none;
+  }
+
+  .chat-markdown .chat-code-mermaid-viewport-dragging,
+  .chat-markdown .chat-code-mermaid-viewport:active {
+    cursor: grabbing;
+  }
+
+  .chat-markdown .chat-code-mermaid-transform {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+
+  .chat-markdown .chat-code-mermaid-interactive svg {
+    display: block;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+  }
+
   .chat-code-preview-fullscreen .chat-code-html-preview,
   .chat-code-fullscreen-preview .chat-code-html-preview,
   .chat-markdown .chat-code-html-preview {

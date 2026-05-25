@@ -1306,8 +1306,6 @@ export function useChatGeneration({
           : chat.titleMode,
       messages: nextMessages,
       activeSkillNames: activeSkillNamesForRun,
-      providerId: providerForRun.id,
-      model: providerForRun.model,
       updatedAt: responseStartedAt,
     }));
 
@@ -1397,8 +1395,6 @@ export function useChatGeneration({
         };
       }),
       activeSkillNames: activeSkillNamesForRun,
-      providerId: providerForRun.id,
-      model: providerForRun.model,
       updatedAt: responseStartedAt,
     }));
 
@@ -1478,8 +1474,6 @@ export function useChatGeneration({
         assistantMessage,
       ],
       activeSkillNames: activeSkillNamesForRun,
-      providerId: providerForRun.id,
-      model: providerForRun.model,
       updatedAt: responseStartedAt,
     }));
 
@@ -1573,8 +1567,6 @@ export function useChatGeneration({
         userIndex === 0 && isAutoTitledChat(chat) ? "auto" : chat.titleMode,
       messages: nextMessages,
       activeSkillNames: activeSkillNamesForRun,
-      providerId: providerForRun.id,
-      model: providerForRun.model,
       updatedAt: responseStartedAt,
     }));
 

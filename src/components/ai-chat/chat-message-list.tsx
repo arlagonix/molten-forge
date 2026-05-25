@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Copy,
+  GitBranch,
   Info,
   Pencil,
   RefreshCcw,
@@ -100,6 +101,7 @@ type ChatMessageListProps = {
     messageId: string,
     content: string,
   ) => void | Promise<void>;
+  onBranchFromMessage: (messageId: string) => void | Promise<void>;
   onRegenerateAssistantMessage: (messageId: string) => void | Promise<void>;
   onContinueAssistantMessage: (messageId: string) => void | Promise<void>;
   onStartEditingUserMessage: (messageId: string) => void;
@@ -587,6 +589,7 @@ const ChatMessageItem = memo(
     onCloseMessageContextMenu,
     onCopyLinkHref,
     onCopyMessageContent,
+    onBranchFromMessage,
     onRegenerateAssistantMessage,
     onContinueAssistantMessage,
     onStartEditingUserMessage,
@@ -638,7 +641,7 @@ const ChatMessageItem = memo(
       <div
         ref={registerMessageElement(message.id)}
         data-message-id={message.id}
-        className="grid min-w-0 max-w-full gap-2"
+        className="group/message grid min-w-0 max-w-full gap-2"
       >
         {message.role === "assistant" && hasVisibleProcessSteps && (
           <div className="grid gap-2">
@@ -958,6 +961,18 @@ const ChatMessageItem = memo(
                         ? "Copy answer"
                         : "Copy message"}
                   </button>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                    disabled={isSending || isMessageStreaming}
+                    onClick={() => {
+                      void onBranchFromMessage(message.id);
+                      onCloseMessageContextMenu();
+                    }}
+                  >
+                    <GitBranch className="size-4" />
+                    Branch from here
+                  </button>
                   {message.role === "assistant" && (
                     <>
                       <button
@@ -1022,7 +1037,18 @@ const ChatMessageItem = memo(
         )}
 
         {message.role === "user" && editingMessageId !== message.id && (
-          <div className="flex justify-end gap-1.5 text-sm leading-5 text-muted-foreground">
+          <div className="flex justify-end gap-1.5 text-sm leading-5 text-muted-foreground opacity-0 transition-opacity focus-within:opacity-100 group-hover/message:opacity-100">
+            <TooltipIconButton
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              label="Branch from here"
+              onClick={() => onBranchFromMessage(message.id)}
+              disabled={isSending}
+            >
+              <GitBranch className="size-3" />
+            </TooltipIconButton>
+
             <TooltipIconButton
               type="button"
               variant="ghost"
@@ -1090,7 +1116,7 @@ const ChatMessageItem = memo(
                 )}
               </div>
 
-              <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <div className="flex flex-wrap items-center justify-end gap-1.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/message:opacity-100">
                 {variantCount > 1 && (
                   <div className="flex items-center gap-1">
                     <TooltipIconButton
@@ -1164,6 +1190,17 @@ const ChatMessageItem = memo(
                     )}
                   </PopoverContent>
                 </Popover>
+
+                <TooltipIconButton
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  label="Branch from here"
+                  onClick={() => onBranchFromMessage(message.id)}
+                  disabled={isSending || isMessageStreaming}
+                >
+                  <GitBranch className="size-3" />
+                </TooltipIconButton>
 
                 <TooltipIconButton
                   type="button"

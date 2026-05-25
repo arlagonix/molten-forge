@@ -27,19 +27,15 @@ import type {
 } from "@/lib/ai-chat/types";
 
 export function resolveProviderForChat({
-  chat,
-  providers,
   activeProvider,
 }: {
   chat: ChatSession;
   providers: ProviderConfig[];
   activeProvider: ProviderConfig;
 }) {
-  const provider =
-    providers.find((item) => item.id === chat.providerId) ?? activeProvider;
-  const model = chat.model?.trim() || getProviderFallbackModel(provider);
+  const model = activeProvider.model?.trim() || getProviderFallbackModel(activeProvider);
 
-  return normalizeProviderForState({ ...provider, model });
+  return normalizeProviderForState({ ...activeProvider, model });
 }
 
 export function validateProviderForGeneration(providerForRun: ProviderConfig) {

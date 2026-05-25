@@ -8,7 +8,7 @@ import {
   saveChat,
 } from "@/lib/ai-chat/storage";
 import {
-  getProviderFallbackModel,
+  getActiveVariant,
   isAutoTitledChat,
   normalizeManualChatTitle,
   sortChatsByUpdatedAt,
@@ -19,13 +19,11 @@ import type {
   ChatSession,
   LoadedSkillInfo,
   LoadedToolInfo,
-  ProviderConfig,
 } from "@/lib/ai-chat/types";
 
 export function useChatActions({
   activeChat,
   activeChatId,
-  activeProvider,
   availableTools,
   availableSkills,
   chats,
@@ -49,7 +47,6 @@ export function useChatActions({
 }: {
   activeChat?: ChatSession;
   activeChatId?: string;
-  activeProvider: ProviderConfig;
   availableTools: LoadedToolInfo[];
   availableSkills: LoadedSkillInfo[];
   chats: ChatSession[];
@@ -191,11 +188,7 @@ export function useChatActions({
   }
 
   async function createNewChat() {
-    const chat = {
-      ...createEmptyChat(),
-      providerId: activeProvider.id,
-      model: getProviderFallbackModel(activeProvider),
-    };
+    const chat = createEmptyChat();
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
     setEditingMessageId(null);
@@ -240,15 +233,7 @@ export function useChatActions({
       chats.filter((chat) => chat.id !== chatId),
     );
     const nextChats =
-      remainingChats.length > 0
-        ? remainingChats
-        : [
-            {
-              ...createEmptyChat(),
-              providerId: activeProvider.id,
-              model: getProviderFallbackModel(activeProvider),
-            },
-          ];
+      remainingChats.length > 0 ? remainingChats : [createEmptyChat()];
     const nextActiveId =
       activeChatId === chatId
         ? nextChats[0].id
@@ -265,6 +250,80 @@ export function useChatActions({
       await saveActiveChatId(nextActiveId);
     } catch (error) {
       console.error("Failed to delete chat:", error);
+    }
+  }
+
+  function cloneMessagesForBranch(messages: ChatMessage[], messageId: string) {
+    const messageIndex = messages.findIndex((message) => message.id === messageId);
+    if (messageIndex < 0) return undefined;
+
+    return messages.slice(0, messageIndex + 1).map((message) => {
+      if (message.role === "user") return { ...message };
+
+      const activeVariant = getActiveVariant(message);
+      return {
+        ...message,
+        variants: activeVariant ? [{ ...activeVariant }] : [],
+        activeVariantIndex: 0,
+      };
+    });
+  }
+
+  async function branchChatFromMessage(messageId: string) {
+    if (!activeChat) return;
+
+    if (isChatGenerating(activeChat.id)) {
+      showInfo("Wait until generation finishes before branching messages.");
+      return;
+    }
+
+    const branchedMessages = cloneMessagesForBranch(
+      activeChat.messages,
+      messageId,
+    );
+
+    if (!branchedMessages?.length) {
+      showError("Could not find the message to branch from.");
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const baseTitle = normalizeManualChatTitle(activeChat.title) || "New chat";
+    const chat: ChatSession = {
+      ...createEmptyChat(),
+      title: `${baseTitle} (branch)`,
+      titleMode: "manual",
+      messages: branchedMessages,
+      enabledToolNames: activeChat.enabledToolNames
+        ? [...activeChat.enabledToolNames]
+        : undefined,
+      disabledToolNames: activeChat.disabledToolNames
+        ? [...activeChat.disabledToolNames]
+        : undefined,
+      enabledSkillNames: activeChat.enabledSkillNames
+        ? [...activeChat.enabledSkillNames]
+        : undefined,
+      disabledSkillNames: activeChat.disabledSkillNames
+        ? [...activeChat.disabledSkillNames]
+        : undefined,
+      activeSkillNames: activeChat.activeSkillNames
+        ? [...activeChat.activeSkillNames]
+        : undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setChats((currentChats) => [chat, ...currentChats]);
+    setActiveChatId(chat.id);
+    setEditingMessageId(null);
+    resetChatScrollState();
+
+    try {
+      await saveChat(chat);
+      await saveActiveChatId(chat.id);
+      showSuccess("Branch created.");
+    } catch (error) {
+      console.error("Failed to save branched chat:", error);
     }
   }
 
@@ -379,6 +438,7 @@ export function useChatActions({
     switchChat,
     clearCurrentChat,
     removeChat,
+    branchChatFromMessage,
     toggleActiveChatTool,
     toggleActiveChatSkill,
     renameChat,

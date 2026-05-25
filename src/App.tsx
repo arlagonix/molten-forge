@@ -345,6 +345,40 @@ export default function Home() {
     setFindBarOpen(false);
   }
 
+  useEffect(() => {
+    if (!findBarOpen) return;
+
+    function handleFindNavigationShortcut(event: KeyboardEvent) {
+      if (event.defaultPrevented) return;
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeFindBar();
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        event.stopPropagation();
+        findNextMatch(!event.shiftKey);
+        return;
+      }
+
+      if (event.key === "F3") {
+        event.preventDefault();
+        event.stopPropagation();
+        findNextMatch(!event.shiftKey);
+      }
+    }
+
+    document.addEventListener("keydown", handleFindNavigationShortcut);
+
+    return () => {
+      document.removeEventListener("keydown", handleFindNavigationShortcut);
+    };
+  }, [closeFindBar, findBarOpen, findNextMatch]);
+
   function focusDraftTextarea() {
     chatComposerRef.current?.focus();
   }
@@ -393,11 +427,8 @@ export default function Home() {
     ) ?? providers[0];
   const messages = activeChat?.messages ?? [];
   const hasMessages = messages.length > 0;
-  const activeChatProvider =
-    providers.find((provider) => provider.id === activeChat?.providerId) ??
-    activeProvider;
-  const activeChatModel =
-    activeChat?.model?.trim() || getProviderFallbackModel(activeChatProvider);
+  const activeChatProvider = activeProvider;
+  const activeChatModel = getProviderFallbackModel(activeChatProvider);
   const isSending = activeChat
     ? generatingChatIds.includes(activeChat.id)
     : false;
@@ -413,12 +444,6 @@ export default function Home() {
     for (const message of assistantMessages) {
       if (message.role !== "assistant") continue;
       const variant = message.variants[message.activeVariantIndex];
-      if (
-        variant?.metrics?.model &&
-        variant.metrics.model !== activeChatModel
-      ) {
-        continue;
-      }
       const usage = variant?.metrics?.tokenUsage;
       const usedTokens = usage?.promptTokens ?? usage?.totalTokens;
       if (usedTokens !== undefined && Number.isFinite(usedTokens)) {
@@ -675,25 +700,11 @@ export default function Home() {
         )
           ? loadedProvidersState.activeProviderId
           : normalizedProviders[0].id;
-        const fallbackProvider =
-          normalizedProviders.find(
-            (provider) => provider.id === fallbackProviderId,
-          ) ?? normalizedProviders[0];
-
-        let nextChats = loadedChats.map((chat) => ({
-          ...chat,
-          providerId: chat.providerId ?? fallbackProviderId,
-          model:
-            chat.model?.trim() || getProviderFallbackModel(fallbackProvider),
-        }));
+        let nextChats = loadedChats;
         let nextActiveChatId = loadedActiveChatId;
 
         if (nextChats.length === 0) {
-          const chat = {
-            ...createEmptyChat(),
-            providerId: fallbackProviderId,
-            model: getProviderFallbackModel(fallbackProvider),
-          };
+          const chat = createEmptyChat();
           nextChats = [chat];
           nextActiveChatId = chat.id;
           await saveChat(chat);
@@ -728,11 +739,7 @@ export default function Home() {
       } catch (error) {
         console.error("Failed to load app data from IndexedDB:", error);
         const fallbackProvider = normalizeProviderForState(defaultProvider);
-        const fallbackChat = {
-          ...createEmptyChat(),
-          providerId: fallbackProvider.id,
-          model: getProviderFallbackModel(fallbackProvider),
-        };
+        const fallbackChat = createEmptyChat();
         savedChatSnapshotsRef.current = {
           [fallbackChat.id]: JSON.stringify(fallbackChat),
         };
@@ -1128,30 +1135,11 @@ export default function Home() {
           : currentState.activeProviderId,
     }));
 
-    setChats((currentChats) =>
-      currentChats.map((chat) =>
-        chat.providerId === providerId
-          ? {
-              ...chat,
-              providerId: fallbackProvider.id,
-              model: getProviderFallbackModel(fallbackProvider),
-            }
-          : chat,
-      ),
-    );
   }
 
   function selectActiveChatProviderModel(providerId: string, model: string) {
     const normalizedModel = model.trim();
     if (!normalizedModel) return;
-
-    if (activeChat) {
-      updateChat(activeChat.id, (chat) => ({
-        ...chat,
-        providerId,
-        model: normalizedModel,
-      }));
-    }
 
     setProvidersState((currentState) => ({
       ...currentState,
@@ -1192,6 +1180,7 @@ export default function Home() {
     switchChat,
     clearCurrentChat,
     removeChat,
+    branchChatFromMessage,
     toggleActiveChatTool,
     toggleActiveChatSkill,
     renameChat,
@@ -1199,7 +1188,6 @@ export default function Home() {
   } = useChatActions({
     activeChat,
     activeChatId,
-    activeProvider,
     availableTools,
     availableSkills,
     chats,
@@ -1321,6 +1309,7 @@ export default function Home() {
   );
   const stableCopyLinkHref = useStableCallback(copyLinkHref);
   const stableCopyMessageContent = useStableCallback(copyMessageContent);
+  const stableBranchChatFromMessage = useStableCallback(branchChatFromMessage);
   const stableRegenerateAssistantMessage = useStableCallback(
     regenerateAssistantMessage,
   );
@@ -1460,6 +1449,7 @@ export default function Home() {
                   onCloseMessageContextMenu={stableCloseMessageContextMenu}
                   onCopyLinkHref={stableCopyLinkHref}
                   onCopyMessageContent={stableCopyMessageContent}
+                  onBranchFromMessage={stableBranchChatFromMessage}
                   onRegenerateAssistantMessage={
                     stableRegenerateAssistantMessage
                   }

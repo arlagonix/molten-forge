@@ -18,6 +18,7 @@ type RenderablePreviewProps = {
   source: string;
   language?: string;
   className?: string;
+  interactive?: boolean;
 };
 
 type CodeBlockSourceViewProps = {
@@ -36,11 +37,18 @@ export function RenderablePreview({
   source,
   language,
   className,
+  interactive = false,
 }: RenderablePreviewProps) {
   const kind = getRenderableCodeBlockKind(language);
 
   if (kind === "mermaid") {
-    return <MermaidPreview source={source} className={className} />;
+    return (
+      <MermaidPreview
+        source={source}
+        className={className}
+        interactive={interactive}
+      />
+    );
   }
 
   if (kind === "html") {
@@ -97,7 +105,7 @@ export function CodeBlockPreviewDialog({
       </DialogDescription>
       <DialogContent
         showCloseButton={false}
-        className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none max-w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 data-[state=closed]:animate-none data-[state=closed]:opacity-0 sm:max-w-6xl"
+        className="flex h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-h-none max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(70vw,1440px)] data-[state=closed]:animate-none data-[state=closed]:opacity-0"
       >
         <div className="chat-markdown h-full min-h-0 overflow-hidden">
           {open ? children : null}

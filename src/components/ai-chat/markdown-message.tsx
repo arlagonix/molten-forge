@@ -416,6 +416,7 @@ function CodeBlockFrame({
             source={payload}
             language={language}
             className={isFullscreen ? "h-full min-h-0" : undefined}
+            interactive={isFullscreen}
           />
         </div>
       ) : (
@@ -440,6 +441,9 @@ function CodeBlock({
   const [copied, setCopied] = React.useState(false);
   const [wrapped, setWrapped] = React.useState(true);
   const [displayMode, setDisplayMode] = React.useState<CodeBlockDisplayMode>("code");
+  const [fullscreenDisplayMode, setFullscreenDisplayMode] =
+    React.useState<CodeBlockDisplayMode>("code");
+  const [fullscreenWrapped, setFullscreenWrapped] = React.useState(true);
   const [fullscreenOpen, setFullscreenOpen] = React.useState(false);
   const code = React.Children.toArray(children).map(textFromNode).join("");
   const language = languageFromNode(children);
@@ -483,6 +487,22 @@ function CodeBlock({
     setWrapped((value) => !value);
   }
 
+  function openFullscreen() {
+    setFullscreenDisplayMode(displayMode);
+    setFullscreenWrapped(wrapped);
+    setFullscreenOpen(true);
+  }
+
+  function toggleFullscreenDisplayMode() {
+    setFullscreenDisplayMode((mode) =>
+      mode === "preview" ? "code" : "preview",
+    );
+  }
+
+  function toggleFullscreenWrapped() {
+    setFullscreenWrapped((value) => !value);
+  }
+
   return (
     <>
       <CodeBlockFrame
@@ -497,7 +517,7 @@ function CodeBlock({
         wrapped={wrapped}
         onCopyCode={copyCode}
         onDownloadCode={downloadCode}
-        onFullscreenClick={() => setFullscreenOpen(true)}
+        onFullscreenClick={openFullscreen}
         onToggleDisplayMode={toggleDisplayMode}
         onToggleWrapped={toggleWrapped}
       >
@@ -512,17 +532,17 @@ function CodeBlock({
           copied={copied}
           canPreview={canPreview}
           displayLanguage={displayLanguage}
-          displayMode={displayMode}
+          displayMode={fullscreenDisplayMode}
           isFullscreen
           language={language}
           payload={payload}
           suggestedFilename={suggestedFilename}
-          wrapped={wrapped}
+          wrapped={fullscreenWrapped}
           onCopyCode={copyCode}
           onDownloadCode={downloadCode}
           onFullscreenClick={() => setFullscreenOpen(false)}
-          onToggleDisplayMode={toggleDisplayMode}
-          onToggleWrapped={toggleWrapped}
+          onToggleDisplayMode={toggleFullscreenDisplayMode}
+          onToggleWrapped={toggleFullscreenWrapped}
         >
           {children}
         </CodeBlockFrame>
