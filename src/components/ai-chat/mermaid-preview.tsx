@@ -251,10 +251,26 @@ export function MermaidPreview({
           theme: theme === "dark" ? "dark" : "default",
         });
 
-        const result = await mermaid.render(id, trimmedSource);
+        const renderContainer = document.createElement("div");
+        renderContainer.setAttribute("aria-hidden", "true");
+        renderContainer.style.position = "fixed";
+        renderContainer.style.left = "0";
+        renderContainer.style.top = "0";
+        renderContainer.style.width = "0";
+        renderContainer.style.height = "0";
+        renderContainer.style.overflow = "hidden";
+        renderContainer.style.pointerEvents = "none";
+        renderContainer.style.visibility = "hidden";
+        document.body.appendChild(renderContainer);
 
-        if (!cancelled) {
-          setSvg(interactive ? normalizeSvgForInteractive(result.svg) : result.svg);
+        try {
+          const result = await mermaid.render(id, trimmedSource, renderContainer);
+
+          if (!cancelled) {
+            setSvg(interactive ? normalizeSvgForInteractive(result.svg) : result.svg);
+          }
+        } finally {
+          renderContainer.remove();
         }
       } catch (caughtError) {
         if (!cancelled) {

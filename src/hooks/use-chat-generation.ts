@@ -17,6 +17,7 @@ import {
   LOAD_SKILL_TOOL_NAME,
   createAgentToolResult,
   createCallAgentTool,
+  createChecklistWriteToolResult,
   parseCallAgentRequestFromToolCall,
   parseAskUserRequestFromToolCall,
   parseChecklistWriteRequestFromToolCall,
@@ -1041,12 +1042,12 @@ export function useChatGeneration({
 
   function getAgentTools(agent: LoadedAgentInfo, depth: number) {
     const allowedToolNames = new Set(agent.allowedToolNames ?? []);
-    const tools = loadedTools.filter(
-      (tool) =>
-        tool.enabled &&
-        allowedToolNames.has(tool.name) &&
-        availableToolsByName.has(tool.name),
-    );
+    const tools = [...allowedToolNames]
+      .map((toolName) => availableToolsByName.get(toolName))
+      .filter((tool): tool is LoadedToolInfo => {
+        if (!tool) return false;
+        return tool.enabled && tool.name !== CALL_AGENT_TOOL_NAME;
+      });
 
     const allowedAgentNames = new Set(agent.allowedAgentNames ?? []);
     const nextAgents = globalEnabledAgents.filter(
@@ -1338,6 +1339,23 @@ export function useChatGeneration({
             }
 
             try {
+              if (childToolCall.function.name === ASK_USER_TOOL_NAME) {
+                return {
+                  toolCallId: childToolCall.id,
+                  toolName: ASK_USER_TOOL_NAME,
+                  content:
+                    "ask_user is not supported inside agent calls. Return the best result you can without asking the user directly.",
+                  isError: true,
+                } satisfies ChatToolResult;
+              }
+
+              if (childToolCall.function.name === CHECKLIST_WRITE_TOOL_NAME) {
+                return createChecklistWriteToolResult(
+                  childToolCall,
+                  parseChecklistWriteRequestFromToolCall(childToolCall),
+                );
+              }
+
               const args = childToolCall.function.arguments.trim()
                 ? JSON.parse(childToolCall.function.arguments)
                 : {};

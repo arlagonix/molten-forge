@@ -3,6 +3,7 @@
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { AgentsDialog } from "@/components/agents-dialog";
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -13,10 +14,10 @@ import { ComposerFooter } from "@/components/ai-chat/composer-footer";
 import { EmptyChatState } from "@/components/ai-chat/empty-chat-state";
 import { FindBar } from "@/components/ai-chat/find-bar";
 import { ToolExecutionBlock } from "@/components/ai-chat/tool-execution-block";
-import { AgentsDialog } from "@/components/agents-dialog";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { SystemPromptDialog } from "@/components/dialogs/system-prompt-dialog";
 import { ProviderSettingsDialog } from "@/components/provider-settings-dialog";
+import { SettingsDialog } from "@/components/settings-dialog";
 import { SkillsDialog } from "@/components/skills-dialog";
 import { ToolsDialog } from "@/components/tools-dialog";
 import { Button } from "@/components/ui/button";
@@ -80,12 +81,12 @@ import {
 } from "@/lib/ai-chat/storage";
 import { generateTitleFromChatContext } from "@/lib/ai-chat/title-generation";
 import type {
+  AgentsSettings,
   AppSettings,
   ChatMessage,
   ChatSession,
   ChatToolCall,
   ChatToolResult,
-  AgentsSettings,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -177,6 +178,7 @@ export default function Home() {
   );
   const [appSettings, setAppSettings] = useState<AppSettings>({
     chatTitleGenerationMode: "local",
+    fontFamily: "sans",
   });
   const [loadedTools, setLoadedTools] = useState<LoadedToolInfo[]>([]);
   const [loadedSkills, setLoadedSkills] = useState<LoadedSkillInfo[]>([]);
@@ -214,6 +216,7 @@ export default function Home() {
   const [isChatAgentPickerOpen, setIsChatAgentPickerOpen] = useState(false);
   const [chatAgentSearchValue, setChatAgentSearchValue] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
@@ -250,6 +253,10 @@ export default function Home() {
   useEffect(() => {
     document.title = APP_TITLE;
   }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.chatFont = appSettings.fontFamily;
+  }, [appSettings.fontFamily]);
 
   useEffect(() => {
     return window.chatForgeFind?.onFoundInPage((result) => {
@@ -719,7 +726,10 @@ export default function Home() {
   }, [availableAgents, chatAgentSearchValue]);
 
   const agentDisplayKey = useMemo(
-    () => availableAgents.map((agent) => `${agent.name}:${agent.enabled ? 1 : 0}`).join("|"),
+    () =>
+      availableAgents
+        .map((agent) => `${agent.name}:${agent.enabled ? 1 : 0}`)
+        .join("|"),
     [availableAgents],
   );
 
@@ -873,7 +883,7 @@ export default function Home() {
       if (event.code === "Delete") {
         event.preventDefault();
         event.stopPropagation();
-        void clearCurrentChat();
+        if (activeChatId) void clearChat(activeChatId);
       }
     }
 
@@ -1238,7 +1248,6 @@ export default function Home() {
           ? fallbackProvider.id
           : currentState.activeProviderId,
     }));
-
   }
 
   function selectActiveChatProviderModel(providerId: string, model: string) {
@@ -1265,7 +1274,7 @@ export default function Home() {
         saveSystemPrompt(systemPrompt),
       ]);
       showSuccess("Providers saved.");
-      setSettingsOpen(false);
+      setProviderSettingsOpen(false);
     } catch (error) {
       console.error("Failed to save providers:", error);
       showError("Failed to save providers", labelForError(error));
@@ -1282,7 +1291,7 @@ export default function Home() {
     stopGeneration,
     createNewChat,
     switchChat,
-    clearCurrentChat,
+    clearChat,
     removeChat,
     branchChatFromMessage,
     toggleActiveChatTool,
@@ -1457,8 +1466,13 @@ export default function Home() {
 
   if (!mounted) {
     return (
-      <main className="flex h-dvh items-center justify-center bg-background text-muted-foreground">
-        Loading...
+      <main className="flex h-dvh items-center justify-center bg-background text-foreground">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <div
+            className="chat-forge-loading-text text-muted-foreground"
+            aria-label="Loading app data"
+          />
+        </div>
       </main>
     );
   }
@@ -1472,10 +1486,8 @@ export default function Home() {
         groupedChats={groupedChatList.groups}
         activeChatId={activeChat?.id}
         isCollapsed={isSidebarCollapsed}
-        chatTitleGenerationMode={appSettings.chatTitleGenerationMode}
         generatingChatIds={generatingChatIds}
         titleGenerationChatIds={titleGenerationChatIds}
-        resolvedTheme={resolvedTheme}
         onCollapsedChange={setIsSidebarCollapsed}
         onSwitchChat={switchChat}
         onRenameChat={stableRenameChat}
@@ -1483,19 +1495,8 @@ export default function Home() {
         onGenerateChatTitle={stableGenerateChatTitle}
         onRemoveChat={removeChat}
         onCreateNewChat={createNewChat}
-        onOpenProviders={() => setSettingsOpen(true)}
-        onOpenTools={() => setToolsOpen(true)}
-        onOpenSkills={() => setSkillsOpen(true)}
-        onOpenAgents={() => setAgentsOpen(true)}
-        onOpenSystemPrompt={() => setSystemPromptOpen(true)}
-        onToggleAiTitleGeneration={(checked) =>
-          setAppSettings((currentSettings) => ({
-            ...currentSettings,
-            chatTitleGenerationMode: checked ? "ai" : "local",
-          }))
-        }
-        onSetTheme={setTheme}
-        onClearCurrentChat={clearCurrentChat}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onClearChat={clearChat}
       />
 
       <section className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] bg-background px-4">
@@ -1533,7 +1534,7 @@ export default function Home() {
               )}
             >
               {!hasMessages ? (
-                <EmptyChatState onOpenProviders={() => setSettingsOpen(true)} />
+                <EmptyChatState onOpenProviders={() => setProviderSettingsOpen(true)} />
               ) : (
                 <ChatMessageList
                   messages={messages}
@@ -1667,9 +1668,35 @@ export default function Home() {
         />
       </section>
 
-      <ProviderSettingsDialog
+      <SettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
+        chatTitleGenerationMode={appSettings.chatTitleGenerationMode}
+        appFontFamily={appSettings.fontFamily}
+        resolvedTheme={resolvedTheme}
+        onToggleAiTitleGeneration={(checked) =>
+          setAppSettings((currentSettings) => ({
+            ...currentSettings,
+            chatTitleGenerationMode: checked ? "ai" : "local",
+          }))
+        }
+        onSetTheme={setTheme}
+        onSetAppFontFamily={(fontFamily) =>
+          setAppSettings((currentSettings) => ({
+            ...currentSettings,
+            fontFamily,
+          }))
+        }
+        onOpenProviders={() => setProviderSettingsOpen(true)}
+        onOpenTools={() => setToolsOpen(true)}
+        onOpenSkills={() => setSkillsOpen(true)}
+        onOpenAgents={() => setAgentsOpen(true)}
+        onOpenSystemPrompt={() => setSystemPromptOpen(true)}
+      />
+
+      <ProviderSettingsDialog
+        open={providerSettingsOpen}
+        onOpenChange={setProviderSettingsOpen}
         providers={providers}
         activeProvider={activeProvider}
         onProvidersStateChange={handleProvidersStateChange}
@@ -1700,7 +1727,7 @@ export default function Home() {
         onAgentsSettingsChange={setAgentsSettings}
         loadedAgents={loadedAgents}
         onLoadedAgentsChange={setLoadedAgents}
-        availableTools={availableTools.filter((tool) => !isBuiltInToolName(tool.name))}
+        availableTools={availableTools}
         availableSkills={availableSkills}
         providers={providers}
         showSuccess={stableShowSuccess}

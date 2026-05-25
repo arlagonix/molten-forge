@@ -36,6 +36,7 @@ const APP_SETTINGS_KEY = "app-settings";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
+  fontFamily: "sans",
 };
 
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
@@ -221,6 +222,7 @@ export function normalizeAppSettings(
   return {
     chatTitleGenerationMode:
       value?.chatTitleGenerationMode === "ai" ? "ai" : "local",
+    fontFamily: value?.fontFamily === "mono" ? "mono" : "sans",
   };
 }
 

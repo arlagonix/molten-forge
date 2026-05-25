@@ -839,15 +839,18 @@ export const AgentsDialog = memo(function AgentsDialog({
                           </PopoverTrigger>
                           <PopoverContent
                             align="start"
-                            className="w-[min(var(--radix-popover-trigger-width),24rem)] p-0"
+                            className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0"
                           >
-                            <Command shouldFilter={false}>
+                            <Command shouldFilter={false} className="h-auto max-h-[min(24rem,var(--radix-popover-content-available-height))] overflow-hidden">
                               <CommandInput
                                 value={modelSearch}
                                 onValueChange={setModelSearch}
                                 placeholder="Search models..."
                               />
-                              <CommandList>
+                              <CommandList
+                                className="max-h-80 overflow-y-auto overscroll-contain chat-message-scrollbar"
+                                onWheelCapture={(event) => event.stopPropagation()}
+                              >
                                 <CommandGroup heading="Default">
                                   <CommandItem
                                     value="Use current chat model"
@@ -963,8 +966,8 @@ export const AgentsDialog = memo(function AgentsDialog({
                               <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
                             </Button>
                           </PopoverTrigger>
-                          <PopoverContent align="start" className="w-[min(var(--radix-popover-trigger-width),32rem)] p-0">
-                            <div className="grid max-h-[24rem] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+                          <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0">
+                            <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
                               <div className="border-b p-2">
                                 <Input
                                   value={loadedSkillSearch}
@@ -973,7 +976,10 @@ export const AgentsDialog = memo(function AgentsDialog({
                                   className="h-9"
                                 />
                               </div>
-                              <div className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar">
+                              <div
+                                className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
+                                onWheelCapture={(event) => event.stopPropagation()}
+                              >
                                 {visibleLoadedSkills.length > 0 ? (
                                   visibleLoadedSkills.map((skill) => {
                                     const checked = agentDraft.loadedSkillNames.includes(skill.name);
@@ -1066,12 +1072,15 @@ export const AgentsDialog = memo(function AgentsDialog({
                                 <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent align="start" className="w-[min(var(--radix-popover-trigger-width),32rem)] p-0">
-                              <div className="grid max-h-[24rem] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+                            <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0">
+                              <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
                                 <div className="border-b p-2">
                                   <Input value={toolSearch} onChange={(event) => setToolSearch(event.target.value)} placeholder="Search tools..." className="h-9" />
                                 </div>
-                                <div className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar">
+                                <div
+                                className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
+                                onWheelCapture={(event) => event.stopPropagation()}
+                              >
                                   {visibleTools.length > 0 ? (
                                     visibleTools.map((tool) => {
                                       const checked = agentDraft.allowedToolNames.includes(tool.name);
@@ -1165,12 +1174,15 @@ export const AgentsDialog = memo(function AgentsDialog({
                                 <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
                               </Button>
                             </PopoverTrigger>
-                            <PopoverContent align="start" className="w-[min(var(--radix-popover-trigger-width),32rem)] p-0">
-                              <div className="grid max-h-[24rem] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+                            <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0">
+                              <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
                                 <div className="border-b p-2">
                                   <Input value={agentSearch} onChange={(event) => setAgentSearch(event.target.value)} placeholder="Search agents..." className="h-9" />
                                 </div>
-                                <div className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar">
+                                <div
+                                className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
+                                onWheelCapture={(event) => event.stopPropagation()}
+                              >
                                   {visibleAgents.length > 0 ? (
                                     visibleAgents.map((agent) => {
                                       const checked = agentDraft.allowedAgentNames.includes(agent.name);

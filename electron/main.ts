@@ -162,6 +162,7 @@ type AgentsSettings = {
 
 type AppSettings = {
   chatTitleGenerationMode: "local" | "ai";
+  fontFamily: "sans" | "mono";
 };
 
 type ToolLoadError = {
@@ -258,6 +259,7 @@ const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
 };
 const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
+  fontFamily: "sans",
 };
 const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 const WEB_FETCH_TOOL_NAME = "web_fetch";
@@ -573,6 +575,7 @@ function normalizeAppSettings(value: unknown): AppSettings {
   return {
     chatTitleGenerationMode:
       value.chatTitleGenerationMode === "ai" ? "ai" : "local",
+    fontFamily: value.fontFamily === "mono" ? "mono" : "sans",
   };
 }
 

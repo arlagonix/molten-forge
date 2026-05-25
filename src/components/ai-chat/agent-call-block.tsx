@@ -26,8 +26,6 @@ export const AgentCallBlock = memo(function AgentCallBlock({
 }) {
   const [expandedOpen, setExpandedOpen] = useState(false);
   const effectiveStatus = getEffectiveStatus(agentCall, status);
-  const description = agentCall.description?.trim() || "No description.";
-
   return (
     <article className="flex min-w-0 max-w-full justify-start">
       <div className="w-full min-w-0 max-w-full overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
@@ -48,9 +46,6 @@ export const AgentCallBlock = memo(function AgentCallBlock({
               ) : null}
             </div>
 
-            <div className="mt-2 text-sm normal-case leading-5 tracking-normal text-muted-foreground/85">
-              {description}
-            </div>
             {agentCall.error ? (
               <div className="mt-2 flex items-start gap-2 border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-destructive">
                 <CircleAlert className="mt-0.5 size-3.5 shrink-0" />

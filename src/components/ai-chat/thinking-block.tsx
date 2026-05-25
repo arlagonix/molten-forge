@@ -155,6 +155,7 @@ export function ThinkingBlock({
         <button
           type="button"
           className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onMouseDown={(event) => event.preventDefault()}
           onClick={onToggleCollapsed}
           aria-expanded={!isCollapsed}
           aria-controls={`${id}-thinking-content`}

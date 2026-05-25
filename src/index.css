@@ -35,8 +35,10 @@
     "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
     "Liberation Mono", "Courier New", monospace;
 
-  --font-sans: var(--font-jetbrains-mono);
-  --font-mono: var(--font-jetbrains-mono);
+  --app-font-sans: var(--font-ibm-plex-sans);
+  --app-font-mono: var(--font-ibm-plex-mono);
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
 
   --background: oklch(0.955 0.004 95);
   --foreground: oklch(0.24 0.01 95);
@@ -85,6 +87,11 @@
   --radius: 0.5rem;
 }
 
+:root[data-chat-font="mono"] {
+  --app-font-sans: var(--font-jetbrains-mono);
+  --app-font-mono: var(--font-jetbrains-mono);
+}
+
 .dark {
   --background: #1e1e1e;
   --foreground: #cccccc;
@@ -123,8 +130,8 @@
 }
 
 @theme inline {
-  --font-sans: var(--font-ibm-plex-sans);
-  --font-mono: var(--font-ibm-plex-mono);
+  --font-sans: var(--app-font-sans);
+  --font-mono: var(--app-font-mono);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -206,6 +213,25 @@
   .chat-message-scrollbar::-webkit-scrollbar-thumb {
     border-radius: 999px;
     background-color: color-mix(in oklab, currentColor 22%, transparent);
+  }
+
+
+  @keyframes chat-forge-loading-fade {
+    to {
+      opacity: 0;
+    }
+  }
+
+  .chat-forge-loading-text {
+    font-weight: 700;
+    font-family: var(--font-sans);
+    font-size: 30px;
+    line-height: 1.25;
+    animation: chat-forge-loading-fade 1s linear infinite alternate;
+  }
+
+  .chat-forge-loading-text::before {
+    content: "Loading...";
   }
 
   @keyframes generating-gradient-slide {
@@ -646,6 +672,8 @@
 
   .chat-markdown .chat-code-preview {
     @apply min-h-36 w-full overflow-auto bg-background/40 p-3;
+    contain: layout paint;
+    scrollbar-gutter: stable both-edges;
   }
 
   .chat-markdown .chat-code-preview-fullscreen {
@@ -667,7 +695,8 @@
   .chat-code-preview-fullscreen .chat-code-mermaid-preview,
   .chat-code-fullscreen-preview .chat-code-mermaid-preview,
   .chat-markdown .chat-code-mermaid-preview {
-    @apply flex min-h-36 w-full items-center justify-center overflow-auto  bg-background p-3;
+    @apply flex min-h-36 w-full min-w-0 items-center justify-center overflow-hidden bg-background p-3;
+    contain: layout paint;
   }
 
   .chat-code-preview-fullscreen .chat-code-mermaid-preview svg,

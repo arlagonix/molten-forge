@@ -1,10 +1,6 @@
 import {
-  BookOpen,
-  Bot,
   Edit3,
   Loader2,
-  MessageSquareText,
-  Moon,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -14,16 +10,13 @@ import {
   Search,
   Settings,
   Sparkles,
-  Sun,
   Trash2,
-  Wrench,
   X,
 } from "lucide-react";
 import type { UIEvent as ReactUIEvent } from "react";
 import { memo, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import type { ChatSession, ChatTitleGenerationMode } from "@/lib/ai-chat/types";
+import type { ChatSession } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
 const CHAT_LIST_BATCH_SIZE = 40;
@@ -50,10 +43,8 @@ type ChatSidebarProps = {
   groupedChats: ChatSidebarGroup[];
   activeChatId?: string;
   isCollapsed: boolean;
-  chatTitleGenerationMode: ChatTitleGenerationMode;
   generatingChatIds: string[];
   titleGenerationChatIds: string[];
-  resolvedTheme: "light" | "dark";
   onCollapsedChange: (isCollapsed: boolean) => void;
   onSwitchChat: (chatId: string) => void;
   onRenameChat: (chatId: string, title: string) => void;
@@ -61,14 +52,8 @@ type ChatSidebarProps = {
   onGenerateChatTitle: (chatId: string) => void;
   onRemoveChat: (chatId: string) => void;
   onCreateNewChat: () => void;
-  onOpenProviders: () => void;
-  onOpenTools: () => void;
-  onOpenSkills: () => void;
-  onOpenAgents: () => void;
-  onOpenSystemPrompt: () => void;
-  onToggleAiTitleGeneration: (checked: boolean) => void;
-  onSetTheme: (theme: "light" | "dark") => void;
-  onClearCurrentChat: () => void;
+  onOpenSettings: () => void;
+  onClearChat: (chatId: string) => void;
 };
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -78,10 +63,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   groupedChats,
   activeChatId,
   isCollapsed,
-  chatTitleGenerationMode,
   generatingChatIds,
   titleGenerationChatIds,
-  resolvedTheme,
   onCollapsedChange,
   onSwitchChat,
   onRenameChat,
@@ -89,14 +72,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   onGenerateChatTitle,
   onRemoveChat,
   onCreateNewChat,
-  onOpenProviders,
-  onOpenTools,
-  onOpenSkills,
-  onOpenAgents,
-  onOpenSystemPrompt,
-  onToggleAiTitleGeneration,
-  onSetTheme,
-  onClearCurrentChat,
+  onOpenSettings,
+  onClearChat,
 }: ChatSidebarProps) {
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -195,87 +172,18 @@ export const ChatSidebar = memo(function ChatSidebar({
     cancelRenamingChat();
   }
 
-  function renderAppOptionsMenu(triggerClassName?: string) {
+  function renderSettingsButton(triggerClassName?: string) {
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={triggerClassName}
-            title="Settings"
-          >
-            <Settings className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          className=""
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            window.requestAnimationFrame(() => {
-              (document.activeElement as HTMLElement | null)?.blur();
-            });
-          }}
-        >
-          <DropdownMenuItem onClick={onOpenProviders}>
-            <Settings className="size-4" />
-            Providers
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onOpenTools}>
-            <Wrench className="size-4" />
-            Tools
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onOpenSkills}>
-            <BookOpen className="size-4" />
-            Skills
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onOpenAgents}>
-            <Bot className="size-4" />
-            Agents
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={onOpenSystemPrompt}>
-            <MessageSquareText className="size-4" />
-            System prompt
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="text-foreground"
-            onSelect={(event) => {
-              event.preventDefault();
-              onToggleAiTitleGeneration(chatTitleGenerationMode !== "ai");
-            }}
-          >
-            <Checkbox
-              checked={chatTitleGenerationMode === "ai"}
-              onCheckedChange={(checked) =>
-                onToggleAiTitleGeneration(checked === true)
-              }
-              onClick={(event) => event.stopPropagation()}
-              onPointerDown={(event) => event.stopPropagation()}
-              className="cursor-pointer border-foreground/55 bg-background opacity-100 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground [&_svg]:!text-primary-foreground"
-            />
-            Generate title
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() =>
-              onSetTheme(resolvedTheme === "dark" ? "light" : "dark")
-            }
-          >
-            {resolvedTheme === "dark" ? (
-              <Sun className="size-4" />
-            ) : (
-              <Moon className="size-4" />
-            )}
-            {resolvedTheme === "dark" ? "Light theme" : "Dark theme"}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onClearCurrentChat}>
-            <Trash2 className="size-4" />
-            <span className="flex-1">Clear current chat</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className={triggerClassName}
+        onClick={onOpenSettings}
+        title="Settings"
+      >
+        <Settings className="size-4" />
+      </Button>
     );
   }
 
@@ -397,6 +305,18 @@ export const ChatSidebar = memo(function ChatSidebar({
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem
+                disabled={
+                  chat.messages.length === 0 && !chat.activeSkillNames?.length
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClearChat(chat.id);
+                }}
+              >
+                <Trash2 className="size-4" />
+                Clear chat
+              </DropdownMenuItem>
+              <DropdownMenuItem
                 variant="destructive"
                 onClick={(event) => {
                   event.stopPropagation();
@@ -455,7 +375,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               </h1>
             </div>
 
-            {renderAppOptionsMenu("shrink-0 ")}
+            {renderSettingsButton("shrink-0 ")}
           </div>
         </div>
 
@@ -541,7 +461,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           >
             <Plus className="size-4" />
           </Button>
-          {renderAppOptionsMenu("")}
+          {renderSettingsButton("")}
         </div>
       ) : null}
     </>

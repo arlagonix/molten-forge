@@ -1,5 +1,5 @@
 import { Bot, CircleAlert, Maximize2 } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 
 import type { RenderAgentToolExecutionBlock } from "@/components/ai-chat/agent-call-utils";
 import { AgentStatusInline } from "@/components/ai-chat/agent-status-inline";
@@ -51,7 +51,7 @@ function MiniChatMessage({
             : "w-full px-0 py-1 text-card-foreground shadow-xs",
         )}
       >
-        <MarkdownMessage content={content} className="chat-markdown-compact" />
+        <MarkdownMessage content={content} />
       </div>
     </article>
   );
@@ -65,7 +65,7 @@ function FallbackToolCallBlock({
 }) {
   return (
     <article className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden border bg-muted/25 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
           <span className="truncate">{toolCall.function.name}</span>
         </div>
@@ -108,12 +108,10 @@ function ChildAgentBlock({
   renderToolExecutionBlock?: RenderAgentToolExecutionBlock;
 }) {
   const [open, setOpen] = useState(false);
-  const description = child.description?.trim() || "No description.";
-
   return (
     <>
       <article className="flex min-w-0 max-w-full justify-start">
-        <div className="w-full min-w-0 max-w-full overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+        <div className="w-full min-w-0 max-w-full overflow-hidden border bg-muted/25 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
           <div className="flex min-w-0 items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
@@ -129,9 +127,6 @@ function ChildAgentBlock({
                     </span>
                   </>
                 ) : null}
-              </div>
-              <div className="mt-2 text-sm normal-case leading-5 tracking-normal text-muted-foreground/85">
-                {description}
               </div>
             </div>
             <Button
@@ -168,34 +163,52 @@ export const AgentTranscriptDialog = memo(function AgentTranscriptDialog({
   agentCall: ChatAgentCall;
   renderToolExecutionBlock?: RenderAgentToolExecutionBlock;
 }) {
-  const [thinkingCollapsed, setThinkingCollapsed] = useState(
-    () => agentCall.status !== "running" && agentCall.status !== "pending",
-  );
   const visibleToolCalls = agentCall.toolCalls ?? [];
   const visibleToolResults = agentCall.toolResults ?? [];
+  const hasRuntimeAfterThinking =
+    agentCall.output.trim().length > 0 ||
+    visibleToolCalls.length > 0 ||
+    (agentCall.childAgentCalls ?? []).length > 0 ||
+    (agentCall.status !== "running" && agentCall.status !== "pending");
+  const isThinkingActive =
+    (agentCall.status === "running" || agentCall.status === "pending") &&
+    !hasRuntimeAfterThinking;
+  const [thinkingCollapsed, setThinkingCollapsed] = useState(
+    () => !isThinkingActive,
+  );
+  const [thinkingCompletedAt, setThinkingCompletedAt] = useState<
+    string | undefined
+  >(() => (isThinkingActive ? undefined : agentCall.completedAt));
+  const wasThinkingActiveRef = useRef(isThinkingActive);
 
   useEffect(() => {
-    if (agentCall.status === "running" || agentCall.status === "pending") {
-      return;
+    const wasThinkingActive = wasThinkingActiveRef.current;
+
+    if (wasThinkingActive && !isThinkingActive) {
+      setThinkingCollapsed(true);
+      setThinkingCompletedAt(new Date().toISOString());
+    } else if (!wasThinkingActive && isThinkingActive) {
+      setThinkingCollapsed(false);
+      setThinkingCompletedAt(undefined);
     }
 
-    setThinkingCollapsed(true);
-  }, [agentCall.status]);
+    wasThinkingActiveRef.current = isThinkingActive;
+  }, [isThinkingActive]);
 
-  const thinkingStatus =
-    agentCall.status === "running" || agentCall.status === "pending"
-      ? "in_progress"
-      : "complete";
+  const thinkingStatus = isThinkingActive ? "in_progress" : "complete";
+  const effectiveThinkingCompletedAt = isThinkingActive
+    ? undefined
+    : (thinkingCompletedAt ?? agentCall.completedAt);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[86vh] max-w-4xl flex-col overflow-hidden p-0 text-base leading-6">
+      <DialogContent className="agent-transcript-dialog flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col overflow-hidden p-0 text-base leading-6">
         <AgentModalHeader agentCall={agentCall} />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 chat-message-scrollbar">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-base leading-6 chat-message-scrollbar">
           <div className="grid gap-4">
             {agentCall.error ? (
-              <div className="flex items-start gap-2 border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <div className="flex items-start gap-2 border border-destructive/30 bg-destructive/10 px-3 py-2 text-base text-destructive">
                 <CircleAlert className="mt-0.5 size-4 shrink-0" />
                 <span>{agentCall.error}</span>
               </div>
@@ -209,8 +222,8 @@ export const AgentTranscriptDialog = memo(function AgentTranscriptDialog({
                 content={agentCall.reasoning}
                 status={thinkingStatus}
                 startedAt={agentCall.startedAt}
-                completedAt={agentCall.completedAt}
-                isStreaming={agentCall.status === "running"}
+                completedAt={effectiveThinkingCompletedAt}
+                isStreaming={isThinkingActive}
                 isCollapsed={thinkingCollapsed}
                 flushVersion={0}
                 forceInstant
@@ -255,7 +268,7 @@ export const AgentTranscriptDialog = memo(function AgentTranscriptDialog({
             !agentCall.reasoning?.trim() &&
             visibleToolCalls.length === 0 &&
             (agentCall.childAgentCalls ?? []).length === 0 ? (
-              <div className="border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
+              <div className="border bg-muted/35 px-3 py-2 text-base text-muted-foreground">
                 {agentCall.status === "running" ||
                 agentCall.status === "pending"
                   ? "Waiting for agent output..."

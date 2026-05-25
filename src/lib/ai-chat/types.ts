@@ -275,8 +275,11 @@ export type ChatTitleMode = "auto" | "manual";
 
 export type ChatTitleGenerationMode = "local" | "ai";
 
+export type AppFontFamily = "sans" | "mono";
+
 export type AppSettings = {
   chatTitleGenerationMode: ChatTitleGenerationMode;
+  fontFamily: AppFontFamily;
 };
 
 export type ChatSession = {

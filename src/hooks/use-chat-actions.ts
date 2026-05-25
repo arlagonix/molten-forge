@@ -214,13 +214,11 @@ export function useChatActions({
     resetChatScrollState();
   }
 
-  async function clearCurrentChat() {
-    if (!activeChat) return;
-
-    if (isChatGenerating(activeChat.id)) stopChatGeneration(activeChat.id);
+  async function clearChat(chatId: string) {
+    if (isChatGenerating(chatId)) stopChatGeneration(chatId);
 
     const now = new Date().toISOString();
-    updateChat(activeChat.id, (chat) => ({
+    updateChat(chatId, (chat) => ({
       ...chat,
       title: "New chat",
       titleMode: "auto",
@@ -487,7 +485,7 @@ export function useChatActions({
     stopGeneration,
     createNewChat,
     switchChat,
-    clearCurrentChat,
+    clearChat,
     removeChat,
     branchChatFromMessage,
     toggleActiveChatTool,
