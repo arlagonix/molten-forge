@@ -4,6 +4,7 @@ import {
   ChevronRight,
   ListTodo,
   MessageSquareText,
+  ShieldCheck,
   Square,
   X,
 } from "lucide-react";
@@ -20,6 +21,8 @@ import type {
   AskUserRequest,
   AskUserResponse,
   ChecklistWriteRequest,
+  FileToolApprovalRequest,
+  FileToolApprovalResponse,
   ToolExecutionStatus,
   UserInputStatus,
 } from "@/lib/ai-chat/types";
@@ -72,6 +75,16 @@ function formatUserInputStatus(status: UserInputStatus | undefined) {
   if (status === "cancelled") return "Cancelled";
   if (status === "failed") return "Failed";
   return "Waiting";
+}
+
+function formatFileApprovalHeaderStatus(
+  status: UserInputStatus,
+  response?: FileToolApprovalResponse,
+) {
+  if (status === "waiting") return "Waiting";
+  if (status === "complete") return response?.approved ? "Approved" : undefined;
+  if (status === "failed") return "Failed";
+  return undefined;
 }
 
 export const AskUserBlock = memo(function AskUserBlock({
@@ -964,6 +977,150 @@ export const AskUserBlock = memo(function AskUserBlock({
                     renderReadOnlyQuestion(question),
                   )}
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </article>
+  );
+});
+
+export const FileToolApprovalBlock = memo(function FileToolApprovalBlock({
+  id,
+  request,
+  response,
+  status,
+  canSubmit,
+  isCollapsed,
+  onToggleCollapsed,
+  onSubmit,
+  onLayoutChange,
+}: {
+  id: string;
+  request: FileToolApprovalRequest;
+  response?: FileToolApprovalResponse;
+  status?: UserInputStatus;
+  canSubmit: boolean;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+  onSubmit: (response: FileToolApprovalResponse) => void;
+  onLayoutChange?: () => void;
+}) {
+  const effectiveStatus = status ?? "waiting";
+  const isWaiting = effectiveStatus === "waiting";
+
+  useLayoutEffect(() => {
+    onLayoutChange?.();
+  }, [effectiveStatus, isCollapsed, onLayoutChange, response]);
+
+  function submitApproval(approved: boolean) {
+    if (!canSubmit || !isWaiting) return;
+    onSubmit({ approved, answeredAt: new Date().toISOString() });
+  }
+
+  const approvalStatusText = formatFileApprovalHeaderStatus(
+    effectiveStatus,
+    response,
+  );
+
+  return (
+    <article key={id} className="flex min-w-0 max-w-full justify-start">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+        <button
+          type="button"
+          className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={onToggleCollapsed}
+          aria-expanded={!isCollapsed}
+        >
+          <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2">
+              <ShieldCheck className="size-3.5 shrink-0" />
+              <span className="truncate">File approval</span>
+              {approvalStatusText && (
+                <>
+                  <span className="text-muted-foreground/60">•</span>
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1",
+                      effectiveStatus === "complete" &&
+                        "text-green-600 dark:text-green-400",
+                      effectiveStatus === "waiting" &&
+                        "text-amber-600 dark:text-amber-400",
+                      effectiveStatus === "failed" &&
+                        "text-red-600 dark:text-red-400",
+                    )}
+                  >
+                    {effectiveStatus === "complete" ? (
+                      <Check className="size-3.5" />
+                    ) : effectiveStatus === "waiting" ? (
+                      <Spinner className="size-3.5" />
+                    ) : (
+                      <X className="size-3.5" />
+                    )}
+                    {approvalStatusText}
+                  </span>
+                </>
+              )}
+              <span className="text-muted-foreground/60">•</span>
+              <span className="truncate font-mono normal-case tracking-normal text-muted-foreground/80">
+                {request.toolName}
+              </span>
+            </div>
+            {isCollapsed ? (
+              <ChevronRight className="size-3.5 shrink-0" />
+            ) : (
+              <ChevronDown className="size-3.5 shrink-0" />
+            )}
+          </div>
+        </button>
+
+        {!isCollapsed && (
+          <div className="mt-3 grid gap-3">
+            <div className="grid gap-1.5 text-sm leading-5 text-muted-foreground/85">
+              {request.description?.trim() && (
+                <div>{request.description.trim()}</div>
+              )}
+              <div className="min-w-0 text-sm">
+                <span className="text-muted-foreground">Path: </span>
+                <span className="font-mono text-muted-foreground/85 [overflow-wrap:anywhere]">
+                  {request.path}
+                </span>
+              </div>
+            </div>
+
+            {isWaiting && canSubmit && (
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className=""
+                  onClick={() => submitApproval(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className=""
+                  onClick={() => submitApproval(true)}
+                >
+                  Approve
+                </Button>
+              </div>
+            )}
+
+            {isWaiting && !canSubmit && (
+              <div className=" border border-dashed bg-muted/30 px-3 py-2 text-sm leading-5 text-muted-foreground">
+                This approval request is no longer connected to an active
+                generation. Regenerate the response to ask again.
+              </div>
+            )}
+
+            {response && effectiveStatus !== "waiting" && (
+              <div className="text-sm leading-5 text-muted-foreground">
+                File operation {response.approved ? "approved" : "cancelled"}.
               </div>
             )}
           </div>

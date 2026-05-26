@@ -8,6 +8,7 @@ import type {
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
+  ChatWorkspaceRoot,
   ToolCommandResult,
   SkillExportResult,
   SkillImportResult,
@@ -137,10 +138,23 @@ declare global {
 
 declare global {
   interface Window {
+    chatForgeWorkspace?: {
+      selectFolder: () => Promise<
+        | { cancelled: true }
+        | { cancelled: false; path: string; name: string }
+      >;
+      openFolder: (folderPath: string) => Promise<void>;
+    };
+  }
+}
+
+declare global {
+  interface Window {
     chatForgeTools?: {
       execute: (request: {
         name: string;
         args: unknown;
+        workspaceRoots?: ChatWorkspaceRoot[];
       }) => Promise<ToolCommandResult>;
       test: (request: {
         tool: LoadedToolInfo;

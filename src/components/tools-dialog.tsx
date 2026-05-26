@@ -78,6 +78,124 @@ const BUILTIN_LOAD_SKILL_TOOL_NAME = "load_skill";
 const BUILTIN_LOAD_SKILL_TOOL_ID = "builtin-load-skill";
 const BUILTIN_WEB_FETCH_TOOL_NAME = "web_fetch";
 const BUILTIN_WEB_FETCH_TOOL_ID = "builtin-web-fetch";
+const BUILTIN_FILE_READ_TOOL_NAME = "file_read";
+const BUILTIN_FILE_FIND_TOOL_NAME = "file_find";
+const BUILTIN_FILE_SEARCH_TEXT_TOOL_NAME = "file_search_text";
+const BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME = "file_replace_text";
+const BUILTIN_FILE_CREATE_TOOL_NAME = "file_create";
+const BUILTIN_FILE_DELETE_TOOL_NAME = "file_delete";
+const BUILTIN_FILE_TOOL_NAMES = [
+  BUILTIN_FILE_READ_TOOL_NAME,
+  BUILTIN_FILE_FIND_TOOL_NAME,
+  BUILTIN_FILE_SEARCH_TEXT_TOOL_NAME,
+  BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME,
+  BUILTIN_FILE_CREATE_TOOL_NAME,
+  BUILTIN_FILE_DELETE_TOOL_NAME,
+];
+const BUILTIN_FILE_TOOL_META = [
+  {
+    id: "builtin-file-read",
+    name: BUILTIN_FILE_READ_TOOL_NAME,
+    setting: "fileReadEnabled" as const,
+    description: "Reads UTF-8 text files inside approved workspace folders.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        rootId: { type: "string" },
+        maxChars: { type: "number" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    id: "builtin-file-find",
+    name: BUILTIN_FILE_FIND_TOOL_NAME,
+    setting: "fileFindEnabled" as const,
+    description: "Finds files or folders by name/path inside approved workspace folders.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        query: { type: "string" },
+        rootId: { type: "string" },
+        include: { type: "array", items: { type: "string" } },
+        exclude: { type: "array", items: { type: "string" } },
+        maxResults: { type: "number" },
+      },
+    },
+  },
+  {
+    id: "builtin-file-search-text",
+    name: BUILTIN_FILE_SEARCH_TEXT_TOOL_NAME,
+    setting: "fileSearchTextEnabled" as const,
+    description: "Searches text file contents inside approved workspace folders.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        query: { type: "string" },
+        rootId: { type: "string" },
+        include: { type: "array", items: { type: "string" } },
+        exclude: { type: "array", items: { type: "string" } },
+        caseSensitive: { type: "boolean" },
+        maxResults: { type: "number" },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    id: "builtin-file-replace-text",
+    name: BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME,
+    setting: "fileReplaceTextEnabled" as const,
+    description: "Replaces exact text in a workspace file after user confirmation. Disabled by default.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        rootId: { type: "string" },
+        oldText: { type: "string" },
+        newText: { type: "string" },
+        expectedReplacements: { type: "number" },
+      },
+      required: ["path", "oldText", "newText"],
+    },
+  },
+  {
+    id: "builtin-file-create",
+    name: BUILTIN_FILE_CREATE_TOOL_NAME,
+    setting: "fileCreateEnabled" as const,
+    description: "Creates a new UTF-8 text file in a workspace folder after user confirmation.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        rootId: { type: "string" },
+        content: { type: "string" },
+        createParents: { type: "boolean" },
+      },
+      required: ["path", "content"],
+    },
+  },
+  {
+    id: "builtin-file-delete",
+    name: BUILTIN_FILE_DELETE_TOOL_NAME,
+    setting: "fileDeleteEnabled" as const,
+    description: "Moves a workspace file to the operating system Trash after user confirmation. Disabled by default.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        rootId: { type: "string" },
+      },
+      required: ["path"],
+    },
+  },
+];
 const BUILTIN_ASK_USER_TOOL_DESCRIPTION =
   "Pauses the assistant so it can ask focused clarification questions, including single-choice, multi-select, and text answers, then resumes the same response.";
 const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
@@ -620,10 +738,11 @@ function validateToolDraft(tool: LoadedToolInfo) {
     tool.name === BUILTIN_ASK_USER_TOOL_NAME ||
     tool.name === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
     tool.name === BUILTIN_LOAD_SKILL_TOOL_NAME ||
-    tool.name === BUILTIN_WEB_FETCH_TOOL_NAME
+    tool.name === BUILTIN_WEB_FETCH_TOOL_NAME ||
+    BUILTIN_FILE_TOOL_NAMES.includes(tool.name)
   ) {
     throw new Error(
-      `${tool.name} is a built-in tool name and cannot be used by a custom command tool.`,
+      `${tool.name} is a built-in tool name and cannot be used by a custom tool.`,
     );
   }
   if (!tool.description) throw new Error("Tool description is required.");
@@ -711,24 +830,39 @@ export const ToolsDialog = memo(function ToolsDialog({
     selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME;
   const isWebFetchToolSelected =
     selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME;
+  const selectedFileToolInfo = BUILTIN_FILE_TOOL_META.find(
+    (tool) => tool.name === selectedToolName,
+  );
   const selectedTool = useMemo(
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 4;
+  const totalToolsCount = loadedTools.length + 10;
   const enabledToolsCount = useMemo(
     () =>
       loadedTools.filter((tool) => tool.enabled).length +
       (toolsSettings.askUserEnabled ? 1 : 0) +
       (toolsSettings.checklistWriteEnabled ? 1 : 0) +
       (toolsSettings.loadSkillEnabled ? 1 : 0) +
-      (toolsSettings.webFetchEnabled ? 1 : 0),
+      (toolsSettings.webFetchEnabled ? 1 : 0) +
+      (toolsSettings.fileReadEnabled ? 1 : 0) +
+      (toolsSettings.fileFindEnabled ? 1 : 0) +
+      (toolsSettings.fileSearchTextEnabled ? 1 : 0) +
+      (toolsSettings.fileReplaceTextEnabled ? 1 : 0) +
+      (toolsSettings.fileCreateEnabled ? 1 : 0) +
+      (toolsSettings.fileDeleteEnabled ? 1 : 0),
     [
       loadedTools,
       toolsSettings.askUserEnabled,
       toolsSettings.checklistWriteEnabled,
       toolsSettings.loadSkillEnabled,
       toolsSettings.webFetchEnabled,
+      toolsSettings.fileReadEnabled,
+      toolsSettings.fileFindEnabled,
+      toolsSettings.fileSearchTextEnabled,
+      toolsSettings.fileReplaceTextEnabled,
+      toolsSettings.fileCreateEnabled,
+      toolsSettings.fileDeleteEnabled,
     ],
   );
   const currentToolTestState = toolDraft
@@ -757,7 +891,8 @@ export const ToolsDialog = memo(function ToolsDialog({
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
       selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
       selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
-      selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME
+      selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME ||
+      Boolean(selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName))
     ) {
       return;
     }
@@ -775,7 +910,8 @@ export const ToolsDialog = memo(function ToolsDialog({
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
       selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
       selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
-      selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME
+      selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME ||
+      Boolean(selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName))
     ) {
       setToolDraft(null);
       return;
@@ -1056,7 +1192,7 @@ export const ToolsDialog = memo(function ToolsDialog({
         <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
           <DialogTitle>Tools</DialogTitle>
           <DialogDescription>
-            Define local command tools, choose which ones are available to the
+            Define custom tools, choose which ones are available to the
             model, and test them before use.
           </DialogDescription>
         </DialogHeader>
@@ -1075,7 +1211,7 @@ export const ToolsDialog = memo(function ToolsDialog({
             <div
               role="button"
               tabIndex={0}
-              className="mb-3 flex cursor-pointer items-center justify-between gap-3  border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="mb-3 flex cursor-pointer items-center justify-between gap-3  border bg-background px-3 py-2 text-base outline-none"
               onClick={() =>
                 onToolsSettingsChange((current) => ({
                   ...current,
@@ -1161,12 +1297,16 @@ export const ToolsDialog = memo(function ToolsDialog({
             </div>
 
             <div className="grid gap-1.5">
+              <Label className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Built-in tools
+              </Label>
+
               <div
                 key={BUILTIN_ASK_USER_TOOL_ID}
                 role="button"
                 tabIndex={0}
                 className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
                   isAskUserToolSelected
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1211,7 +1351,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 role="button"
                 tabIndex={0}
                 className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
                   isChecklistWriteToolSelected
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1258,7 +1398,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 role="button"
                 tabIndex={0}
                 className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
                   isLoadSkillToolSelected
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1305,7 +1445,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                 role="button"
                 tabIndex={0}
                 className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
                   isWebFetchToolSelected
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1347,13 +1487,66 @@ export const ToolsDialog = memo(function ToolsDialog({
                 />
               </div>
 
+              {BUILTIN_FILE_TOOL_META.map((fileTool) => {
+                const isSelected = selectedToolName === fileTool.name;
+                const checked = toolsSettings[fileTool.setting];
+
+                return (
+                  <div
+                    key={fileTool.id}
+                    role="button"
+                    tabIndex={0}
+                    className={cn(
+                      "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
+                      isSelected
+                        ? "border-primary/30 bg-accent text-accent-foreground"
+                        : "border-transparent hover:border-border hover:bg-muted/60",
+                    )}
+                    onClick={() => setSelectedToolName(fileTool.name)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedToolName(fileTool.name);
+                      }
+                    }}
+                  >
+                    <FolderOpen className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
+                        <span className="truncate">{fileTool.name}</span>
+                        <Lock className="size-3 shrink-0 text-muted-foreground" />
+                      </div>
+                    </div>
+                    <Switch
+                      checked={checked}
+                      onClick={(event) => event.stopPropagation()}
+                      onCheckedChange={(nextChecked) =>
+                        onToolsSettingsChange((current) => ({
+                          ...current,
+                          [fileTool.setting]: nextChecked,
+                        }))
+                      }
+                      className="mt-0.5 shrink-0 cursor-pointer"
+                      title={checked ? `Disable ${fileTool.name}` : `Enable ${fileTool.name}`}
+                    />
+                  </div>
+                );
+              })}
+
+              <div className="mt-3 flex items-center gap-2 px-1">
+                <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Custom tools
+                </Label>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+
               {loadedTools.map((tool) => (
                 <div
                   key={tool.id}
                   role="button"
                   tabIndex={0}
                   className={cn(
-                    "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
                     selectedTool?.id === tool.id
                       ? "border-primary/30 bg-accent text-accent-foreground"
                       : "border-transparent hover:border-border hover:bg-muted/60",
@@ -1405,7 +1598,7 @@ export const ToolsDialog = memo(function ToolsDialog({
 
               {loadedTools.length === 0 && (
                 <div className=" border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
-                  No custom command tools configured.
+                  No custom tools configured.
                 </div>
               )}
             </div>
@@ -1587,7 +1780,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                         <p>
                           Availability is controlled by this built-in tool
                           switch, Skills settings, and the chat skill picker.
-                          Custom command tool settings do not affect it.
+                          Custom tool settings do not affect it.
                         </p>
                       </div>
                     </div>
@@ -1657,6 +1850,58 @@ export const ToolsDialog = memo(function ToolsDialog({
                           null,
                           2,
                         ),
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : selectedFileToolInfo ? (
+              <>
+                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
+                  <div className="flex w-full items-center justify-between gap-4">
+                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                      Built-in tool
+                    </Label>
+                    <span className="inline-flex shrink-0 items-center gap-1  border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                      <Lock className="size-3.5" />
+                      Locked
+                    </span>
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                  <div className="grid gap-5 pb-1">
+                    <div className="grid gap-1">
+                      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <FolderOpen className="size-5 text-muted-foreground" />
+                        {selectedFileToolInfo.name}
+                      </h3>
+                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
+                        {selectedFileToolInfo.description}
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2  border bg-muted/20 p-3">
+                      <Label>Behavior</Label>
+                      <div className="grid gap-2 text-base leading-6 text-muted-foreground">
+                        <p>
+                          File tools are only sent to the model when the current
+                          chat has at least one approved workspace folder. Paths
+                          are resolved inside those roots and cannot escape via
+                          absolute paths, relative paths, or symlinks.
+                        </p>
+                        <p>
+                          Reads and searches run directly. file_replace_text, file_create,
+                          and file_delete ask for user confirmation before writing. file_delete
+                          moves files to the operating system Trash.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Parameters JSON schema</Label>
+                      {renderJsonCodeBlock(
+                        JSON.stringify(selectedFileToolInfo.parameters, null, 2),
                       )}
                     </div>
                   </div>

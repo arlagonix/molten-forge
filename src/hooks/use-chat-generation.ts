@@ -21,7 +21,9 @@ import {
   parseCallAgentRequestFromToolCall,
   parseAskUserRequestFromToolCall,
   parseChecklistWriteRequestFromToolCall,
+  parseFileToolApprovalRequestFromToolCall,
   parseSkillMentionNames,
+  requiresFileToolApproval,
 } from "@/lib/ai-chat/builtin-tools";
 import { streamProviderChat } from "@/lib/ai-chat/direct-provider-client";
 import type { StreamProviderChatResult } from "@/lib/ai-chat/direct-provider-client";
@@ -64,6 +66,7 @@ import {
 import type {
   AgentsSettings,
   AskUserResponse,
+  FileToolApprovalResponse,
   ChatAgentCall,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
@@ -71,6 +74,7 @@ import type {
   ChatTitleGenerationMode,
   ChatMessage,
   ChatSession,
+  ChatWorkspaceRoot,
   ChatToolCall,
   ChatToolResult,
   LoadedAgentInfo,
@@ -248,6 +252,7 @@ export function useChatGeneration({
   executeExternalTool: (
     toolName: string,
     args: unknown,
+    context?: { workspaceRoots?: ChatWorkspaceRoot[] },
   ) => Promise<ToolCommandResult>;
   showError: (message: string, description?: string) => void;
 }) {
@@ -518,6 +523,58 @@ export function useChatGeneration({
     );
   }
 
+  function updateAssistantFileApprovalStepStatus(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    stepId: string,
+    status: UserInputStatus,
+  ) {
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: (variant.processSteps ?? []).map((step) =>
+          step.id === stepId && step.type === "file_approval"
+            ? { ...step, status }
+            : step,
+        ),
+      }),
+      { touch: false },
+    );
+  }
+
+  function completeAssistantFileApprovalStep(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    stepId: string,
+    response: FileToolApprovalResponse,
+    toolResult: ChatToolResult,
+  ) {
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: (variant.processSteps ?? []).map((step) =>
+          step.id === stepId && step.type === "file_approval"
+            ? {
+                ...step,
+                status: "complete",
+                response,
+                toolResult,
+              }
+            : step,
+        ),
+      }),
+      { touch: false },
+    );
+  }
+
   function abortChatGeneration(chatId: string) {
     generationRefs.current[chatId]?.controller.abort();
   }
@@ -525,12 +582,14 @@ export function useChatGeneration({
   const {
     executeToolCall,
     submitAskUserResponse,
+    submitFileToolApprovalResponse,
     cancelAskUserRequest,
     canSubmitAskUserResponse,
   } = useToolExecution({
     activeChatId,
     loadedTools,
     availableSkillsByName,
+    workspaceRoots: activeChat?.workspaceRoots ?? [],
     modelSelectableSkillNames: activeChat
       ? getEnabledSkillsForChat({
           chat: activeChat,
@@ -550,8 +609,10 @@ export function useChatGeneration({
     executeExternalTool,
     abortChatGeneration,
     completeAssistantUserInputStep,
+    completeAssistantFileApprovalStep,
     updateAssistantToolStepStatus,
     updateAssistantUserInputStepStatus,
+    updateAssistantFileApprovalStepStatus,
     scheduleStickyScrollToBottom,
     showError,
     labelError: labelForError,
@@ -1356,12 +1417,47 @@ export function useChatGeneration({
                 );
               }
 
+              const childWorkspaceRoots =
+                chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [];
+
+              if (requiresFileToolApproval(childToolCall.function.name)) {
+                const approvalStepId = createId();
+                appendAssistantProcessSteps(
+                  chatId,
+                  assistantMessageId,
+                  variantId,
+                  [
+                    {
+                      id: approvalStepId,
+                      type: "file_approval" as const,
+                      status: "waiting" as const,
+                      toolCall: childToolCall,
+                      request: parseFileToolApprovalRequestFromToolCall(
+                        childToolCall,
+                        childWorkspaceRoots,
+                      ),
+                    },
+                  ],
+                );
+
+                return await executeToolCall(childToolCall, {
+                  chatId,
+                  assistantMessageId,
+                  variantId,
+                  stepId: approvalStepId,
+                  signal,
+                  activeSkillNames: agent.loadedSkillNames ?? [],
+                  workspaceRoots: childWorkspaceRoots,
+                });
+              }
+
               const args = childToolCall.function.arguments.trim()
                 ? JSON.parse(childToolCall.function.arguments)
                 : {};
               const execution = await executeExternalTool(
                 childToolCall.function.name,
                 args,
+                { workspaceRoots: childWorkspaceRoots },
               );
               return {
                 toolCallId: childToolCall.id,
@@ -1566,6 +1662,25 @@ export function useChatGeneration({
           }
         }
 
+        if (requiresFileToolApproval(toolCall.function.name)) {
+          try {
+            toolSteps.push({
+              id: createId(),
+              type: "file_approval" as const,
+              status: "waiting" as const,
+              toolCall,
+              request: parseFileToolApprovalRequestFromToolCall(
+                toolCall,
+                chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [],
+              ),
+            });
+            continue;
+          } catch {
+            // Keep invalid file approval calls visible as failed tool executions once
+            // executeToolCall returns the validation error.
+          }
+        }
+
         if (toolCall.function.name === CHECKLIST_WRITE_TOOL_NAME) {
           try {
             toolSteps.push({
@@ -1625,6 +1740,7 @@ export function useChatGeneration({
                 step.type !== "tool_execution" &&
                 step.type !== "agent_call" &&
                 step.type !== "user_input" &&
+                step.type !== "file_approval" &&
                 step.type !== "checklist"
               ) {
                 return step;
@@ -2457,6 +2573,7 @@ export function useChatGeneration({
     stopChatGeneration,
     isChatGenerating,
     submitAskUserResponse,
+    submitFileToolApprovalResponse,
     cancelAskUserRequest,
     canSubmitAskUserResponse,
   };

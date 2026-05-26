@@ -318,6 +318,9 @@ export function useChatActions({
       activeSkillNames: activeChat.activeSkillNames
         ? [...activeChat.activeSkillNames]
         : undefined,
+      workspaceRoots: activeChat.workspaceRoots
+        ? activeChat.workspaceRoots.map((root) => ({ ...root }))
+        : undefined,
       createdAt: now,
       updatedAt: now,
     };

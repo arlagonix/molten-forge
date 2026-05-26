@@ -3,8 +3,11 @@ import type {
   AskUserQuestionType,
   AskUserRequest,
   AskUserResponse,
+  FileToolApprovalRequest,
+  FileToolApprovalResponse,
   ChatToolCall,
   ChatToolResult,
+  ChatWorkspaceRoot,
   ChecklistItem,
   ChecklistWriteRequest,
   LoadedAgentInfo,
@@ -21,6 +24,12 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   checklistWriteEnabled: true,
   loadSkillEnabled: true,
   webFetchEnabled: false,
+  fileReadEnabled: true,
+  fileFindEnabled: true,
+  fileSearchTextEnabled: true,
+  fileReplaceTextEnabled: false,
+  fileCreateEnabled: true,
+  fileDeleteEnabled: false,
 };
 
 export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
@@ -35,6 +44,20 @@ export const ASK_USER_TOOL_NAME = "ask_user";
 export const CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
 export const LOAD_SKILL_TOOL_NAME = "load_skill";
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
+export const FILE_READ_TOOL_NAME = "file_read";
+export const FILE_FIND_TOOL_NAME = "file_find";
+export const FILE_SEARCH_TEXT_TOOL_NAME = "file_search_text";
+export const FILE_REPLACE_TEXT_TOOL_NAME = "file_replace_text";
+export const FILE_CREATE_TOOL_NAME = "file_create";
+export const FILE_DELETE_TOOL_NAME = "file_delete";
+export const FILE_TOOL_NAMES = [
+  FILE_READ_TOOL_NAME,
+  FILE_FIND_TOOL_NAME,
+  FILE_SEARCH_TEXT_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL_NAME,
+  FILE_CREATE_TOOL_NAME,
+  FILE_DELETE_TOOL_NAME,
+] as const;
 export const CALL_AGENT_TOOL_NAME = "call_agent";
 export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
 
@@ -195,6 +218,232 @@ export const WEB_FETCH_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
+export const FILE_READ_TOOL: LoadedToolInfo = {
+  id: "builtin-file-read",
+  name: FILE_READ_TOOL_NAME,
+  enabled: true,
+  description:
+    "Read a UTF-8 text file from one of the chat workspace folders. Use relative paths whenever possible. The tool cannot read outside approved workspace roots.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: "string",
+        description:
+          "File path to read. Prefer a path relative to the workspace root.",
+      },
+      rootId: {
+        type: "string",
+        description:
+          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+      },
+      maxChars: {
+        type: "number",
+        description:
+          "Optional maximum returned characters. Large files are truncated automatically.",
+      },
+    },
+    required: ["path"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const FILE_FIND_TOOL: LoadedToolInfo = {
+  id: "builtin-file-find",
+  name: FILE_FIND_TOOL_NAME,
+  enabled: true,
+  description:
+    "Find files or folders by name/path inside the chat workspace. Use this before reading when you do not know the exact path.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      query: {
+        type: "string",
+        description:
+          "Case-insensitive text to match against file and folder names or relative paths. Omit or use an empty string to list top-level entries.",
+      },
+      rootId: {
+        type: "string",
+        description:
+          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+      },
+      include: {
+        type: "array",
+        description:
+          "Optional file extensions to include, such as .ts or .tsx.",
+        items: { type: "string" },
+      },
+      exclude: {
+        type: "array",
+        description:
+          "Optional relative path/name fragments to skip in addition to default excludes.",
+        items: { type: "string" },
+      },
+      maxResults: { type: "number" },
+    },
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const FILE_SEARCH_TEXT_TOOL: LoadedToolInfo = {
+  id: "builtin-file-search-text",
+  name: FILE_SEARCH_TEXT_TOOL_NAME,
+  enabled: true,
+  description:
+    "Search text file contents inside the chat workspace and return matching paths, line numbers, and snippets. Uses plain substring search, not regex.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      query: {
+        type: "string",
+        description: "Plain text to search for in files.",
+      },
+      rootId: {
+        type: "string",
+        description:
+          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+      },
+      include: {
+        type: "array",
+        description:
+          "Optional file extensions to include, such as .ts or .tsx.",
+        items: { type: "string" },
+      },
+      exclude: {
+        type: "array",
+        description:
+          "Optional relative path/name fragments to skip in addition to default excludes.",
+        items: { type: "string" },
+      },
+      caseSensitive: { type: "boolean" },
+      maxResults: { type: "number" },
+    },
+    required: ["query"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const FILE_REPLACE_TEXT_TOOL: LoadedToolInfo = {
+  id: "builtin-file-replace-text",
+  name: FILE_REPLACE_TEXT_TOOL_NAME,
+  enabled: true,
+  description:
+    "Replace exact text in a UTF-8 text file inside the chat workspace. Requires user confirmation before writing. Use only after reading the target file or matching context.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: "string",
+        description:
+          "File path to update. Prefer a path relative to the workspace root.",
+      },
+      rootId: {
+        type: "string",
+        description:
+          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+      },
+      oldText: {
+        type: "string",
+        description: "Exact text currently present in the file.",
+      },
+      newText: {
+        type: "string",
+        description: "Replacement text to write.",
+      },
+      expectedReplacements: {
+        type: "number",
+        description:
+          "Optional exact number of replacements expected. The tool fails if the count differs.",
+      },
+    },
+    required: ["path", "oldText", "newText"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const FILE_CREATE_TOOL: LoadedToolInfo = {
+  id: "builtin-file-create",
+  name: FILE_CREATE_TOOL_NAME,
+  enabled: true,
+  description:
+    "Create a new UTF-8 text file inside the chat workspace. Requires user confirmation before writing and fails if the file already exists.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: "string",
+        description:
+          "New file path to create. Prefer a path relative to the workspace root.",
+      },
+      rootId: {
+        type: "string",
+        description:
+          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+      },
+      content: {
+        type: "string",
+        description: "UTF-8 text content to write to the new file.",
+      },
+      createParents: {
+        type: "boolean",
+        description:
+          "Whether to create missing parent folders inside the workspace root. Defaults to false.",
+      },
+    },
+    required: ["path", "content"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const FILE_DELETE_TOOL: LoadedToolInfo = {
+  id: "builtin-file-delete",
+  name: FILE_DELETE_TOOL_NAME,
+  enabled: true,
+  description:
+    "Move a workspace file to the operating system Trash. Requires user confirmation and only deletes files, not folders.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: "string",
+        description:
+          "File path to move to Trash. Prefer a path relative to the workspace root.",
+      },
+      rootId: {
+        type: "string",
+        description:
+          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+      },
+    },
+    required: ["path"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
 export function createCallAgentTool(agents: LoadedAgentInfo[]): LoadedToolInfo | null {
   const enabledAgents = agents
     .filter((agent) => agent.enabled)
@@ -287,8 +536,193 @@ export function isBuiltInToolName(toolName: string) {
     toolName === CHECKLIST_WRITE_TOOL_NAME ||
     toolName === LOAD_SKILL_TOOL_NAME ||
     toolName === WEB_FETCH_TOOL_NAME ||
+    toolName === FILE_READ_TOOL_NAME ||
+    toolName === FILE_FIND_TOOL_NAME ||
+    toolName === FILE_SEARCH_TEXT_TOOL_NAME ||
+    toolName === FILE_REPLACE_TEXT_TOOL_NAME ||
+    toolName === FILE_CREATE_TOOL_NAME ||
+    toolName === FILE_DELETE_TOOL_NAME ||
     toolName === CALL_AGENT_TOOL_NAME
   );
+}
+
+export function isFileToolName(toolName: string) {
+  return FILE_TOOL_NAMES.includes(toolName as (typeof FILE_TOOL_NAMES)[number]);
+}
+
+export function requiresFileToolApproval(toolName: string) {
+  return (
+    toolName === FILE_REPLACE_TEXT_TOOL_NAME ||
+    toolName === FILE_CREATE_TOOL_NAME ||
+    toolName === FILE_DELETE_TOOL_NAME
+  );
+}
+
+export function getFileToolApprovalAction(toolName: string) {
+  if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) return "replacement";
+  if (toolName === FILE_CREATE_TOOL_NAME) return "creation";
+  if (toolName === FILE_DELETE_TOOL_NAME) return "deletion";
+  return "operation";
+}
+
+function readFileToolPath(args: unknown) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    return "unknown file";
+  }
+
+  const value = (args as Record<string, unknown>).path;
+  return typeof value === "string" && value.trim() ? value.trim() : "unknown file";
+}
+
+function readFileToolRootId(args: unknown) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    return undefined;
+  }
+
+  const value = (args as Record<string, unknown>).rootId;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isAbsoluteLikePath(value: string) {
+  return (
+    /^[/\\]/.test(value) ||
+    /^[a-zA-Z]:[/\\]/.test(value) ||
+    /^\\\\[^\\]+\\[^\\]+/.test(value)
+  );
+}
+
+function joinWorkspacePath(rootPath: string, requestedPath: string) {
+  const trimmedRoot = rootPath.replace(/[\\/]+$/, "");
+  const trimmedPath = requestedPath.replace(/^[\\/]+/, "");
+  const separator = /\\|^[a-zA-Z]:/.test(rootPath) ? "\\" : "/";
+  return `${trimmedRoot}${separator}${trimmedPath}`;
+}
+
+function resolveFileToolDisplayPath(
+  requestedPath: string,
+  rootId: string | undefined,
+  workspaceRoots?: ChatWorkspaceRoot[],
+) {
+  if (!requestedPath || requestedPath === "unknown file") return requestedPath;
+  if (isAbsoluteLikePath(requestedPath)) return requestedPath;
+
+  const roots = workspaceRoots ?? [];
+  const root = rootId
+    ? roots.find((candidate) => candidate.id === rootId)
+    : roots.length === 1
+      ? roots[0]
+      : undefined;
+
+  return root ? joinWorkspacePath(root.path, requestedPath) : requestedPath;
+}
+
+export function createFileToolApprovalRequest(
+  toolName: string,
+  args: unknown,
+  workspaceRoots?: ChatWorkspaceRoot[],
+): FileToolApprovalRequest {
+  const requestedPath = readFileToolPath(args);
+  const rootId = readFileToolRootId(args);
+  const filePath = resolveFileToolDisplayPath(
+    requestedPath,
+    rootId,
+    workspaceRoots,
+  );
+  const source = args && typeof args === "object" && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : {};
+
+  if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) {
+    const oldText = typeof source.oldText === "string" ? source.oldText : "";
+    const newText = typeof source.newText === "string" ? source.newText : "";
+
+    return {
+      title: "Approve workspace file edit",
+      description: "The model wants to replace text in an approved workspace file.",
+      toolName,
+      action: "replacement",
+      path: filePath,
+      details: [
+        { label: "Old text length", value: String(oldText.length) },
+        { label: "New text length", value: String(newText.length) },
+        { label: "Scope", value: "Approved workspace folders only" },
+      ],
+    };
+  }
+
+  if (toolName === FILE_CREATE_TOOL_NAME) {
+    const content = typeof source.content === "string" ? source.content : "";
+    const createParents = source.createParents === true;
+
+    return {
+      title: "Approve workspace file creation",
+      description: "The model wants to create a file in an approved workspace folder.",
+      toolName,
+      action: "creation",
+      path: filePath,
+      details: [
+        { label: "Content length", value: String(content.length) },
+        { label: "Create parent folders", value: createParents ? "Yes" : "No" },
+        { label: "Scope", value: "Approved workspace folders only" },
+      ],
+    };
+  }
+
+  if (toolName === FILE_DELETE_TOOL_NAME) {
+    return {
+      title: "Approve workspace file deletion",
+      description: "The model wants to move a workspace file to Trash. Folders are not deleted.",
+      toolName,
+      action: "deletion",
+      path: filePath,
+      details: [
+        { label: "Deletion mode", value: "Move to Trash" },
+        { label: "Scope", value: "Approved workspace folders only" },
+      ],
+    };
+  }
+
+  return {
+    title: "Approve workspace file operation",
+    description: "The model wants to run a workspace file operation.",
+    toolName,
+    action: "operation",
+    path: filePath,
+    details: [{ label: "Scope", value: "Approved workspace folders only" }],
+  };
+}
+
+export function parseFileToolApprovalRequestFromToolCall(
+  toolCall: ChatToolCall,
+  workspaceRoots?: ChatWorkspaceRoot[],
+) {
+  return createFileToolApprovalRequest(
+    toolCall.function.name,
+    parseToolArgumentsText(toolCall.function.arguments || "{}"),
+    workspaceRoots,
+  );
+}
+
+export function isFileToolApprovalResponseApproved(
+  response: FileToolApprovalResponse,
+) {
+  return response.approved;
+}
+
+export function createCancelledFileToolResult(
+  toolCall: ChatToolCall,
+  action = getFileToolApprovalAction(toolCall.function.name),
+): ChatToolResult {
+  return {
+    toolCallId: toolCall.id,
+    toolName: toolCall.function.name,
+    content: JSON.stringify(
+      { ok: false, cancelled: true, message: `User cancelled file ${action}.` },
+      null,
+      2,
+    ),
+    isError: true,
+  };
 }
 
 export function compareToolsByDisplayOrder(

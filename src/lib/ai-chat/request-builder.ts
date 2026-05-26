@@ -12,6 +12,18 @@ import {
   LOAD_SKILL_TOOL_NAME,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
+  FILE_READ_TOOL,
+  FILE_READ_TOOL_NAME,
+  FILE_FIND_TOOL,
+  FILE_FIND_TOOL_NAME,
+  FILE_SEARCH_TEXT_TOOL,
+  FILE_SEARCH_TEXT_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL,
+  FILE_REPLACE_TEXT_TOOL_NAME,
+  FILE_CREATE_TOOL,
+  FILE_CREATE_TOOL_NAME,
+  FILE_DELETE_TOOL,
+  FILE_DELETE_TOOL_NAME,
   createLoadSkillTool,
   isValidToolName,
   parseAgentMentionNames,
@@ -95,7 +107,13 @@ export function getGlobalEnabledTools({
           tool.name !== ASK_USER_TOOL_NAME &&
           tool.name !== CHECKLIST_WRITE_TOOL_NAME &&
           tool.name !== LOAD_SKILL_TOOL_NAME &&
-          tool.name !== WEB_FETCH_TOOL_NAME,
+          tool.name !== WEB_FETCH_TOOL_NAME &&
+          tool.name !== FILE_READ_TOOL_NAME &&
+          tool.name !== FILE_FIND_TOOL_NAME &&
+          tool.name !== FILE_SEARCH_TEXT_TOOL_NAME &&
+          tool.name !== FILE_REPLACE_TEXT_TOOL_NAME &&
+          tool.name !== FILE_CREATE_TOOL_NAME &&
+          tool.name !== FILE_DELETE_TOOL_NAME,
       )
     : [];
 
@@ -105,6 +123,12 @@ export function getGlobalEnabledTools({
     ...(toolsSettings.askUserEnabled ? [ASK_USER_TOOL] : []),
     ...(toolsSettings.checklistWriteEnabled ? [CHECKLIST_WRITE_TOOL] : []),
     ...(toolsSettings.webFetchEnabled ? [WEB_FETCH_TOOL] : []),
+    ...(toolsSettings.fileReadEnabled ? [FILE_READ_TOOL] : []),
+    ...(toolsSettings.fileFindEnabled ? [FILE_FIND_TOOL] : []),
+    ...(toolsSettings.fileSearchTextEnabled ? [FILE_SEARCH_TEXT_TOOL] : []),
+    ...(toolsSettings.fileReplaceTextEnabled ? [FILE_REPLACE_TEXT_TOOL] : []),
+    ...(toolsSettings.fileCreateEnabled ? [FILE_CREATE_TOOL] : []),
+    ...(toolsSettings.fileDeleteEnabled ? [FILE_DELETE_TOOL] : []),
     ...enabledCommandTools,
   ];
 }
@@ -138,6 +162,15 @@ export function getEnabledToolsForChat({
   for (const toolName of oneShotToolNames) {
     const tool = availableToolsByName.get(toolName);
     if (tool && !byName.has(tool.name)) byName.set(tool.name, tool);
+  }
+
+  if (!chat.workspaceRoots?.length) {
+    byName.delete(FILE_READ_TOOL_NAME);
+    byName.delete(FILE_FIND_TOOL_NAME);
+    byName.delete(FILE_SEARCH_TEXT_TOOL_NAME);
+    byName.delete(FILE_REPLACE_TEXT_TOOL_NAME);
+    byName.delete(FILE_CREATE_TOOL_NAME);
+    byName.delete(FILE_DELETE_TOOL_NAME);
   }
 
   return [...byName.values()];

@@ -182,6 +182,29 @@ export type AskUserResponse = {
   answeredAt: string;
 };
 
+export type FileToolApprovalAction =
+  | "replacement"
+  | "creation"
+  | "deletion"
+  | "operation";
+
+export type FileToolApprovalRequest = {
+  title: string;
+  description?: string;
+  toolName: string;
+  action: FileToolApprovalAction;
+  path: string;
+  details?: {
+    label: string;
+    value: string;
+  }[];
+};
+
+export type FileToolApprovalResponse = {
+  approved: boolean;
+  answeredAt: string;
+};
+
 export type UserInputStatus = "waiting" | "complete" | "cancelled" | "failed";
 
 export type ThinkingStatus = "waiting" | "in_progress" | "complete";
@@ -234,6 +257,15 @@ export type ChatAssistantProcessStep =
     }
   | {
       id: string;
+      type: "file_approval";
+      status?: UserInputStatus;
+      toolCall: ChatToolCall;
+      request: FileToolApprovalRequest;
+      response?: FileToolApprovalResponse;
+      toolResult?: ChatToolResult;
+    }
+  | {
+      id: string;
       type: "checklist";
       status?: ToolExecutionStatus;
       toolCall: ChatToolCall;
@@ -282,6 +314,13 @@ export type AppSettings = {
   fontFamily: AppFontFamily;
 };
 
+export type ChatWorkspaceRoot = {
+  id: string;
+  name: string;
+  path: string;
+  createdAt: string;
+};
+
 export type ChatSession = {
   id: string;
   title: string;
@@ -299,6 +338,7 @@ export type ChatSession = {
   enabledAgentNames?: string[];
   disabledAgentNames?: string[];
   activeSkillNames?: string[];
+  workspaceRoots?: ChatWorkspaceRoot[];
 };
 
 export type ApiToolCall = ChatToolCall;
@@ -452,6 +492,12 @@ export type ToolsSettings = {
   checklistWriteEnabled: boolean;
   loadSkillEnabled: boolean;
   webFetchEnabled: boolean;
+  fileReadEnabled: boolean;
+  fileFindEnabled: boolean;
+  fileSearchTextEnabled: boolean;
+  fileReplaceTextEnabled: boolean;
+  fileCreateEnabled: boolean;
+  fileDeleteEnabled: boolean;
 };
 
 export type SkillsSettings = {

@@ -197,6 +197,30 @@ function normalizeToolsSettings(
       typeof value?.webFetchEnabled === "boolean"
         ? value.webFetchEnabled
         : false,
+    fileReadEnabled:
+      typeof value?.fileReadEnabled === "boolean"
+        ? value.fileReadEnabled
+        : true,
+    fileFindEnabled:
+      typeof value?.fileFindEnabled === "boolean"
+        ? value.fileFindEnabled
+        : true,
+    fileSearchTextEnabled:
+      typeof value?.fileSearchTextEnabled === "boolean"
+        ? value.fileSearchTextEnabled
+        : true,
+    fileReplaceTextEnabled:
+      typeof value?.fileReplaceTextEnabled === "boolean"
+        ? value.fileReplaceTextEnabled
+        : false,
+    fileCreateEnabled:
+      typeof value?.fileCreateEnabled === "boolean"
+        ? value.fileCreateEnabled
+        : true,
+    fileDeleteEnabled:
+      typeof value?.fileDeleteEnabled === "boolean"
+        ? value.fileDeleteEnabled
+        : false,
   };
 }
 

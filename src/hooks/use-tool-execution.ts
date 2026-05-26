@@ -4,17 +4,24 @@ import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
+  isFileToolName,
+  requiresFileToolApproval,
   createAskUserToolResult,
+  createCancelledFileToolResult,
   createChecklistWriteToolResult,
+  isFileToolApprovalResponseApproved,
   parseAskUserRequestFromToolCall,
   parseChecklistWriteRequestFromToolCall,
+  parseFileToolApprovalRequestFromToolCall,
 } from "@/lib/ai-chat/builtin-tools";
 import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import type {
   AskUserRequest,
   AskUserResponse,
+  FileToolApprovalResponse,
   ChatToolCall,
   ChatToolResult,
+  ChatWorkspaceRoot,
   LoadedSkillInfo,
   LoadedToolInfo,
   ToolCommandResult,
@@ -22,19 +29,23 @@ import type {
   UserInputStatus,
 } from "@/lib/ai-chat/types";
 
-type PendingAskUserRequest = {
+type PendingUserInputRequest = {
+  kind: "ask_user" | "file_tool_approval";
   chatId: string;
   assistantMessageId: string;
   variantId: string;
   stepId: string;
+  toolCall: ChatToolCall;
   resolve: (result: ChatToolResult) => void;
   reject: (error: unknown) => void;
   cleanup: () => void;
+  workspaceRoots?: ChatWorkspaceRoot[];
 };
 
 export function useToolExecution({
   activeChatId,
   loadedTools,
+  workspaceRoots,
   availableSkillsByName,
   modelSelectableSkillNames,
   activeSkillNames,
@@ -42,8 +53,10 @@ export function useToolExecution({
   executeExternalTool,
   abortChatGeneration,
   completeAssistantUserInputStep,
+  completeAssistantFileApprovalStep,
   updateAssistantToolStepStatus,
   updateAssistantUserInputStepStatus,
+  updateAssistantFileApprovalStepStatus,
   scheduleStickyScrollToBottom,
   showError,
   labelError,
@@ -51,6 +64,7 @@ export function useToolExecution({
 }: {
   activeChatId?: string;
   loadedTools: LoadedToolInfo[];
+  workspaceRoots: ChatWorkspaceRoot[];
   availableSkillsByName: Map<string, LoadedSkillInfo>;
   modelSelectableSkillNames: string[];
   activeSkillNames: string[];
@@ -58,6 +72,7 @@ export function useToolExecution({
   executeExternalTool: (
     toolName: string,
     args: unknown,
+    context?: { workspaceRoots?: ChatWorkspaceRoot[] },
   ) => Promise<ToolCommandResult>;
   abortChatGeneration: (chatId: string) => void;
   completeAssistantUserInputStep: (
@@ -66,6 +81,14 @@ export function useToolExecution({
     variantId: string,
     stepId: string,
     response: AskUserResponse,
+    toolResult: ChatToolResult,
+  ) => void;
+  completeAssistantFileApprovalStep: (
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    stepId: string,
+    response: FileToolApprovalResponse,
     toolResult: ChatToolResult,
   ) => void;
   updateAssistantToolStepStatus: (
@@ -82,6 +105,13 @@ export function useToolExecution({
     stepId: string,
     status: UserInputStatus,
   ) => void;
+  updateAssistantFileApprovalStepStatus: (
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    stepId: string,
+    status: UserInputStatus,
+  ) => void;
   scheduleStickyScrollToBottom: (options?: {
     force?: boolean;
     settleFrames?: number;
@@ -90,8 +120,8 @@ export function useToolExecution({
   labelError: (error: unknown) => string;
   askUserSettleFrames: number;
 }) {
-  const pendingAskUserRequestsRef = useRef<
-    Record<string, PendingAskUserRequest>
+  const pendingUserInputRequestsRef = useRef<
+    Record<string, PendingUserInputRequest>
   >({});
 
   async function executeAskUserToolCall(
@@ -110,7 +140,7 @@ export function useToolExecution({
       let settled = false;
 
       const cleanup = () => {
-        delete pendingAskUserRequestsRef.current[toolCall.id];
+        delete pendingUserInputRequestsRef.current[toolCall.id];
         options.signal?.removeEventListener("abort", abortHandler);
       };
 
@@ -141,7 +171,9 @@ export function useToolExecution({
         );
       };
 
-      pendingAskUserRequestsRef.current[toolCall.id] = {
+      pendingUserInputRequestsRef.current[toolCall.id] = {
+        kind: "ask_user",
+        toolCall,
         chatId: options.chatId,
         assistantMessageId: options.assistantMessageId,
         variantId: options.variantId,
@@ -173,6 +205,87 @@ export function useToolExecution({
   ): Promise<ChatToolResult> {
     const request = parseChecklistWriteRequestFromToolCall(toolCall);
     return createChecklistWriteToolResult(toolCall, request);
+  }
+
+  async function executeFileToolCallWithApproval(
+    toolCall: ChatToolCall,
+    options: {
+      chatId: string;
+      assistantMessageId: string;
+      variantId: string;
+      stepId: string;
+      signal?: AbortSignal;
+      workspaceRoots?: ChatWorkspaceRoot[];
+    },
+  ): Promise<ChatToolResult> {
+    parseFileToolApprovalRequestFromToolCall(
+      toolCall,
+      options.workspaceRoots ?? workspaceRoots,
+    );
+
+    return new Promise<ChatToolResult>((resolve, reject) => {
+      let settled = false;
+
+      const cleanup = () => {
+        delete pendingUserInputRequestsRef.current[toolCall.id];
+        options.signal?.removeEventListener("abort", abortHandler);
+      };
+
+      const settleResolve = (result: ChatToolResult) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+
+      const settleReject = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+
+      const abortHandler = () => {
+        updateAssistantFileApprovalStepStatus(
+          options.chatId,
+          options.assistantMessageId,
+          options.variantId,
+          options.stepId,
+          "cancelled",
+        );
+        settleReject(
+          new DOMException("Generation was cancelled.", "AbortError"),
+        );
+      };
+
+      pendingUserInputRequestsRef.current[toolCall.id] = {
+        kind: "file_tool_approval",
+        toolCall,
+        chatId: options.chatId,
+        assistantMessageId: options.assistantMessageId,
+        variantId: options.variantId,
+        stepId: options.stepId,
+        workspaceRoots: options.workspaceRoots ?? workspaceRoots,
+        resolve: settleResolve,
+        reject: settleReject,
+        cleanup,
+      };
+
+      updateAssistantFileApprovalStepStatus(
+        options.chatId,
+        options.assistantMessageId,
+        options.variantId,
+        options.stepId,
+        "waiting",
+      );
+
+      if (options.signal?.aborted) {
+        abortHandler();
+        return;
+      }
+
+      options.signal?.addEventListener("abort", abortHandler, { once: true });
+    });
   }
 
   async function executeLoadSkillToolCall(
@@ -246,6 +359,7 @@ export function useToolExecution({
       stepId: string;
       signal?: AbortSignal;
       activeSkillNames?: string[];
+      workspaceRoots?: ChatWorkspaceRoot[];
     },
   ): Promise<ChatToolResult> {
     const toolName = toolCall.function.name;
@@ -268,12 +382,24 @@ export function useToolExecution({
         );
       }
 
+      if (requiresFileToolApproval(toolName)) {
+        return await executeFileToolCallWithApproval(toolCall, options);
+      }
+
       const argsText = toolCall.function.arguments.trim() || "{}";
       const args = JSON.parse(argsText);
+
       const result = await runQueuedTool(
         toolName,
         tool,
-        () => executeExternalTool(toolName, args),
+        () =>
+          executeExternalTool(
+            toolName,
+            args,
+            isFileToolName(toolName)
+              ? { workspaceRoots: options.workspaceRoots ?? workspaceRoots }
+              : undefined,
+          ),
         (status) =>
           updateAssistantToolStepStatus(
             options.chatId,
@@ -305,14 +431,19 @@ export function useToolExecution({
     }
   }
 
-  function submitAskUserResponse(
+  async function submitAskUserResponse(
     toolCall: ChatToolCall,
     request: AskUserRequest,
     response: AskUserResponse,
   ) {
-    const pendingRequest = pendingAskUserRequestsRef.current[toolCall.id];
+    const pendingRequest = pendingUserInputRequestsRef.current[toolCall.id];
     if (!pendingRequest) {
       showError("This input request is no longer active.");
+      return;
+    }
+
+    if (pendingRequest.kind !== "ask_user") {
+      showError("This input request does not accept custom answers.");
       return;
     }
 
@@ -335,14 +466,91 @@ export function useToolExecution({
     }
   }
 
+  async function submitFileToolApprovalResponse(
+    toolCall: ChatToolCall,
+    response: FileToolApprovalResponse,
+  ) {
+    const pendingRequest = pendingUserInputRequestsRef.current[toolCall.id];
+    if (!pendingRequest) {
+      showError("This approval request is no longer active.");
+      return;
+    }
+
+    if (pendingRequest.kind !== "file_tool_approval") {
+      showError("This approval request does not match the active input.");
+      return;
+    }
+
+    try {
+      let toolResult: ChatToolResult;
+
+      if (!isFileToolApprovalResponseApproved(response)) {
+        toolResult = createCancelledFileToolResult(toolCall);
+      } else {
+        const argsText = toolCall.function.arguments.trim() || "{}";
+        const args = JSON.parse(argsText);
+        const execution = await executeExternalTool(toolCall.function.name, args, {
+          workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,
+        });
+
+        toolResult = {
+          toolCallId: toolCall.id,
+          toolName: execution.toolName || toolCall.function.name,
+          content: execution.content,
+          isError: execution.timedOut || execution.exitCode !== 0,
+          execution: execution.execution,
+        };
+      }
+
+      completeAssistantFileApprovalStep(
+        pendingRequest.chatId,
+        pendingRequest.assistantMessageId,
+        pendingRequest.variantId,
+        pendingRequest.stepId,
+        response,
+        toolResult,
+      );
+      pendingRequest.resolve(toolResult);
+
+      if (pendingRequest.chatId === activeChatId) {
+        scheduleStickyScrollToBottom({
+          force: true,
+          settleFrames: askUserSettleFrames,
+        });
+      }
+    } catch (error) {
+      const toolResult: ChatToolResult = {
+        toolCallId: toolCall.id,
+        toolName: toolCall.function.name,
+        content: `Error: ${labelError(error)}`,
+        isError: true,
+      };
+
+      completeAssistantFileApprovalStep(
+        pendingRequest.chatId,
+        pendingRequest.assistantMessageId,
+        pendingRequest.variantId,
+        pendingRequest.stepId,
+        response,
+        toolResult,
+      );
+      pendingRequest.resolve(toolResult);
+    }
+  }
+
   function cancelAskUserRequest(toolCallId: string) {
-    const pendingRequest = pendingAskUserRequestsRef.current[toolCallId];
+    const pendingRequest = pendingUserInputRequestsRef.current[toolCallId];
     if (!pendingRequest) {
       showError("This input request is no longer active.");
       return;
     }
 
-    updateAssistantUserInputStepStatus(
+    const updatePendingStatus =
+      pendingRequest.kind === "file_tool_approval"
+        ? updateAssistantFileApprovalStepStatus
+        : updateAssistantUserInputStepStatus;
+
+    updatePendingStatus(
       pendingRequest.chatId,
       pendingRequest.assistantMessageId,
       pendingRequest.variantId,
@@ -357,12 +565,13 @@ export function useToolExecution({
   }
 
   function canSubmitAskUserResponse(toolCallId: string) {
-    return Boolean(pendingAskUserRequestsRef.current[toolCallId]);
+    return Boolean(pendingUserInputRequestsRef.current[toolCallId]);
   }
 
   return {
     executeToolCall,
     submitAskUserResponse,
+    submitFileToolApprovalResponse,
     cancelAskUserRequest,
     canSubmitAskUserResponse,
   };

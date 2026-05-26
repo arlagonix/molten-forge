@@ -413,7 +413,7 @@ export const SkillsDialog = memo(function SkillsDialog({
               <div
                 role="button"
                 tabIndex={0}
-                className="mb-3 flex cursor-pointer items-center justify-between gap-3  border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="mb-3 flex cursor-pointer items-center justify-between gap-3  border bg-background px-3 py-2 text-base outline-none"
                 onClick={() =>
                   onSkillsSettingsChange((current) => ({
                     ...current,
@@ -508,7 +508,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                     role="button"
                     tabIndex={0}
                     className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
                       selectedSkill?.id === skill.id
                         ? "border-primary/30 bg-accent text-accent-foreground"
                         : "border-transparent hover:border-border hover:bg-muted/60",
@@ -761,7 +761,7 @@ export const SkillsDialog = memo(function SkillsDialog({
                                         key={tool.name}
                                         role="button"
                                         tabIndex={0}
-                                        className="flex w-full min-w-0 cursor-pointer items-start gap-2  px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        className="flex w-full min-w-0 cursor-pointer items-start gap-2  px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
                                         onClick={() =>
                                           toggleRecommendedTool(tool.name)
                                         }

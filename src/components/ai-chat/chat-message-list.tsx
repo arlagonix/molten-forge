@@ -21,6 +21,7 @@ import { ThinkingBlock } from "@/components/ai-chat/thinking-block";
 import {
   AskUserBlock,
   ChecklistBlock,
+  FileToolApprovalBlock,
 } from "@/components/ai-chat/tool-interaction-blocks";
 import { TooltipIconButton } from "@/components/ai-chat/tooltip-icon-button";
 import { UserMessageEditor } from "@/components/ai-chat/user-message-editor";
@@ -39,6 +40,7 @@ import { getActiveVariant } from "@/lib/ai-chat/chat-utils";
 import type {
   AskUserRequest,
   AskUserResponse,
+  FileToolApprovalResponse,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatMessage,
@@ -127,7 +129,11 @@ type ChatMessageListProps = {
     toolCall: ChatToolCall,
     request: AskUserRequest,
     response: AskUserResponse,
-  ) => void;
+  ) => void | Promise<void>;
+  onSubmitFileToolApprovalResponse: (
+    toolCall: ChatToolCall,
+    response: FileToolApprovalResponse,
+  ) => void | Promise<void>;
   onCancelAskUserRequest: (toolCallId: string) => void;
   onAskUserLayoutChange: () => void;
   onAssistantVisualProgress: (chatId: string) => void;
@@ -297,6 +303,7 @@ function getRelevantCollapsedKeys(message: ChatMessage) {
       step.type === "tool_execution" ||
       step.type === "agent_call" ||
       step.type === "user_input" ||
+      step.type === "file_approval" ||
       step.type === "checklist"
     ) {
       keys.add(step.id);
@@ -405,6 +412,7 @@ const ChatMessageItem = memo(
     onToggleToolExecutionCollapsed,
     onToggleThinkingCollapsed,
     onSubmitAskUserResponse,
+    onSubmitFileToolApprovalResponse,
     onCancelAskUserRequest,
     onAskUserLayoutChange,
     onAssistantVisualProgress,
@@ -575,6 +583,31 @@ const ChatMessageItem = memo(
                       )
                     }
                     onCancel={() => onCancelAskUserRequest(step.toolCall.id)}
+                    onLayoutChange={onAskUserLayoutChange}
+                  />
+                );
+              }
+
+              if (step.type === "file_approval") {
+                const manualCollapsed = collapsedToolStepIds[step.id];
+                const isCollapsed =
+                  manualCollapsed ?? step.status !== "waiting";
+
+                return (
+                  <FileToolApprovalBlock
+                    key={step.id}
+                    id={step.id}
+                    request={step.request}
+                    response={step.response}
+                    status={step.status}
+                    canSubmit={canSubmitAskUserResponse(step.toolCall.id)}
+                    isCollapsed={isCollapsed}
+                    onToggleCollapsed={() =>
+                      onToggleToolExecutionCollapsed(step.id, !isCollapsed)
+                    }
+                    onSubmit={(response) =>
+                      onSubmitFileToolApprovalResponse(step.toolCall, response)
+                    }
                     onLayoutChange={onAskUserLayoutChange}
                   />
                 );

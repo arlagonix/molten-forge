@@ -524,7 +524,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                       role="button"
                       tabIndex={0}
                       className={cn(
-                        "group flex min-w-0 cursor-pointer items-center gap-2  border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "group flex min-w-0 cursor-pointer items-center gap-2  border px-2 py-2 outline-none",
                         providerSelected
                           ? "border-primary/30 bg-accent text-accent-foreground"
                           : "border-transparent hover:border-border hover:bg-muted/60",
@@ -599,7 +599,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                                 role="button"
                                 tabIndex={0}
                                 className={cn(
-                                  "flex min-w-0 cursor-pointer items-center gap-2  border px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                  "flex min-w-0 cursor-pointer items-center gap-2  border px-2 py-1.5 outline-none",
                                   modelSelected
                                     ? "border-primary/30 bg-accent text-accent-foreground"
                                     : "border-transparent hover:border-border hover:bg-muted/60",

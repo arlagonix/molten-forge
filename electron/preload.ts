@@ -220,6 +220,16 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
   },
 });
 
+contextBridge.exposeInMainWorld("chatForgeWorkspace", {
+  selectFolder() {
+    return ipcRenderer.invoke("workspace:select-folder");
+  },
+
+  openFolder(folderPath: unknown) {
+    return ipcRenderer.invoke("workspace:open-folder", folderPath);
+  },
+});
+
 contextBridge.exposeInMainWorld("chatForgeTools", {
   execute(request: unknown) {
     return ipcRenderer.invoke("tools:execute", request);

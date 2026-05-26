@@ -527,7 +527,7 @@ export const AgentsDialog = memo(function AgentsDialog({
               <div
                 role="button"
                 tabIndex={0}
-                className="mb-3 flex cursor-pointer items-center justify-between gap-3 border bg-background px-3 py-2 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="mb-3 flex cursor-pointer items-center justify-between gap-3 border bg-background px-3 py-2 text-base outline-none"
                 onClick={() =>
                   onAgentsSettingsChange((current) => ({
                     ...current,
@@ -616,7 +616,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                     role="button"
                     tabIndex={0}
                     className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
                       selectedAgent?.id === agent.id
                         ? "border-primary/30 bg-accent text-accent-foreground"
                         : "border-transparent hover:border-border hover:bg-muted/60",
@@ -988,7 +988,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                                         key={skill.name}
                                         role="button"
                                         tabIndex={0}
-                                        className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
                                         onClick={() => toggleLoadedSkill(skill.name)}
                                         onKeyDown={(event) => {
                                           if (event.key === "Enter" || event.key === " ") {
@@ -1089,7 +1089,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                                           key={tool.name}
                                           role="button"
                                           tabIndex={0}
-                                          className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                          className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
                                           onClick={() => toggleAllowedTool(tool.name)}
                                           onKeyDown={(event) => {
                                             if (event.key === "Enter" || event.key === " ") {
@@ -1191,7 +1191,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                                           key={agent.name}
                                           role="button"
                                           tabIndex={0}
-                                          className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                          className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
                                           onClick={() => toggleAllowedAgent(agent.name)}
                                           onKeyDown={(event) => {
                                             if (event.key === "Enter" || event.key === " ") {

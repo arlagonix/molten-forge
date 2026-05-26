@@ -11,6 +11,8 @@ import {
 } from "@/components/ai-chat/chat-composer";
 import { ChatMessageList } from "@/components/ai-chat/chat-message-list";
 import { ComposerFooter } from "@/components/ai-chat/composer-footer";
+import { ChatCapabilitiesDialog } from "@/components/ai-chat/chat-capabilities-dialog";
+import { WorkspaceRootsControl } from "@/components/ai-chat/workspace-roots-control";
 import { EmptyChatState } from "@/components/ai-chat/empty-chat-state";
 import { FindBar } from "@/components/ai-chat/find-bar";
 import { ToolExecutionBlock } from "@/components/ai-chat/tool-execution-block";
@@ -36,11 +38,24 @@ import {
   DEFAULT_TOOLS_SETTINGS,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
+  FILE_READ_TOOL,
+  FILE_READ_TOOL_NAME,
+  FILE_FIND_TOOL,
+  FILE_FIND_TOOL_NAME,
+  FILE_SEARCH_TEXT_TOOL,
+  FILE_SEARCH_TEXT_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL,
+  FILE_REPLACE_TEXT_TOOL_NAME,
+  FILE_CREATE_TOOL,
+  FILE_CREATE_TOOL_NAME,
+  FILE_DELETE_TOOL,
+  FILE_DELETE_TOOL_NAME,
   compareToolsByDisplayOrder,
   isBuiltInToolName,
   isValidToolName,
 } from "@/lib/ai-chat/builtin-tools";
 import {
+  createId,
   createNewProvider,
   createProviderId,
   getEffectiveModelContext,
@@ -87,6 +102,7 @@ import type {
   ChatSession,
   ChatToolCall,
   ChatToolResult,
+  ChatWorkspaceRoot,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -209,8 +225,10 @@ export default function Home() {
   const [isSidebarModelComboboxOpen, setIsSidebarModelComboboxOpen] =
     useState(false);
   const [sidebarModelSearchValue, setSidebarModelSearchValue] = useState("");
+  const [isChatCapabilitiesDialogOpen, setIsChatCapabilitiesDialogOpen] = useState(false);
   const [isChatToolPickerOpen, setIsChatToolPickerOpen] = useState(false);
   const [chatToolSearchValue, setChatToolSearchValue] = useState("");
+  const [isWorkspacePickerOpen, setIsWorkspacePickerOpen] = useState(false);
   const [isChatSkillPickerOpen, setIsChatSkillPickerOpen] = useState(false);
   const [chatSkillSearchValue, setChatSkillSearchValue] = useState("");
   const [isChatAgentPickerOpen, setIsChatAgentPickerOpen] = useState(false);
@@ -507,6 +525,12 @@ export default function Home() {
       ASK_USER_TOOL,
       CHECKLIST_WRITE_TOOL,
       WEB_FETCH_TOOL,
+      FILE_READ_TOOL,
+      FILE_FIND_TOOL,
+      FILE_SEARCH_TEXT_TOOL,
+      FILE_REPLACE_TEXT_TOOL,
+      FILE_CREATE_TOOL,
+      FILE_DELETE_TOOL,
       ...loadedTools,
     ]) {
       if (!isValidToolName(tool.name) || byName.has(tool.name)) continue;
@@ -529,6 +553,12 @@ export default function Home() {
     if (toolsSettings.checklistWriteEnabled)
       names.add(CHECKLIST_WRITE_TOOL_NAME);
     if (toolsSettings.webFetchEnabled) names.add(WEB_FETCH_TOOL_NAME);
+    if (toolsSettings.fileReadEnabled) names.add(FILE_READ_TOOL_NAME);
+    if (toolsSettings.fileFindEnabled) names.add(FILE_FIND_TOOL_NAME);
+    if (toolsSettings.fileSearchTextEnabled) names.add(FILE_SEARCH_TEXT_TOOL_NAME);
+    if (toolsSettings.fileReplaceTextEnabled) names.add(FILE_REPLACE_TEXT_TOOL_NAME);
+    if (toolsSettings.fileCreateEnabled) names.add(FILE_CREATE_TOOL_NAME);
+    if (toolsSettings.fileDeleteEnabled) names.add(FILE_DELETE_TOOL_NAME);
 
     for (const tool of loadedTools) {
       if (
@@ -536,6 +566,12 @@ export default function Home() {
         tool.name !== ASK_USER_TOOL_NAME &&
         tool.name !== CHECKLIST_WRITE_TOOL_NAME &&
         tool.name !== WEB_FETCH_TOOL_NAME &&
+        tool.name !== FILE_READ_TOOL_NAME &&
+        tool.name !== FILE_FIND_TOOL_NAME &&
+        tool.name !== FILE_SEARCH_TEXT_TOOL_NAME &&
+        tool.name !== FILE_REPLACE_TEXT_TOOL_NAME &&
+        tool.name !== FILE_CREATE_TOOL_NAME &&
+        tool.name !== FILE_DELETE_TOOL_NAME &&
         isValidToolName(tool.name)
       ) {
         names.add(tool.name);
@@ -1022,6 +1058,71 @@ export default function Home() {
     return window.chatForgeTools;
   }
 
+  function getWorkspaceBridge() {
+    if (!window.chatForgeWorkspace) {
+      throw new Error("Electron workspace bridge is not available.");
+    }
+
+    return window.chatForgeWorkspace;
+  }
+
+  async function addActiveChatWorkspaceRoot() {
+    if (!activeChat) return;
+
+    try {
+      const result = await getWorkspaceBridge().selectFolder();
+      if (result.cancelled) return;
+
+      const now = new Date().toISOString();
+      const root: ChatWorkspaceRoot = {
+        id: createId(),
+        name: result.name || result.path,
+        path: result.path,
+        createdAt: now,
+      };
+
+      updateChat(activeChat.id, (chat) => {
+        const existingRoots = chat.workspaceRoots ?? [];
+        if (existingRoots.some((item) => item.path === root.path)) {
+          return chat;
+        }
+
+        return {
+          ...chat,
+          workspaceRoots: [...existingRoots, root],
+          updatedAt: now,
+        };
+      });
+
+      showSuccess("Workspace folder added.");
+    } catch (error) {
+      console.error("Failed to add workspace folder:", error);
+      showError("Failed to add workspace folder.", labelForError(error));
+    }
+  }
+
+  function removeActiveChatWorkspaceRoot(rootId: string) {
+    if (!activeChat) return;
+
+    updateChat(activeChat.id, (chat) => ({
+      ...chat,
+      workspaceRoots: (chat.workspaceRoots ?? []).filter(
+        (root) => root.id !== rootId,
+      ),
+      updatedAt: new Date().toISOString(),
+    }));
+    showSuccess("Workspace folder removed from chat.");
+  }
+
+  async function openWorkspaceRoot(root: ChatWorkspaceRoot) {
+    try {
+      await getWorkspaceBridge().openFolder(root.path);
+    } catch (error) {
+      console.error("Failed to open workspace folder:", error);
+      showError("Failed to open workspace folder.", labelForError(error));
+    }
+  }
+
   function isToolExecutionCollapsed(stepId: string) {
     const manualState = collapsedToolStepIds[stepId];
     if (manualState !== undefined) return manualState;
@@ -1133,6 +1234,7 @@ export default function Home() {
     stopChatGeneration,
     isChatGenerating,
     submitAskUserResponse,
+    submitFileToolApprovalResponse,
     cancelAskUserRequest,
     canSubmitAskUserResponse,
   } = useChatGeneration({
@@ -1165,8 +1267,12 @@ export default function Home() {
     scheduleStickyScrollToBottom,
     isStickyScrollSuppressed,
     syncChatScrollState,
-    executeExternalTool: (toolName, args) =>
-      getToolsBridge().execute({ name: toolName, args }),
+    executeExternalTool: (toolName, args, context) =>
+      getToolsBridge().execute({
+        name: toolName,
+        args,
+        workspaceRoots: context?.workspaceRoots,
+      }),
     showError,
   });
   function updateProvidersState(
@@ -1453,6 +1559,9 @@ export default function Home() {
     toggleThinkingCollapsed,
   );
   const stableSubmitAskUserResponse = useStableCallback(submitAskUserResponse);
+  const stableSubmitFileToolApprovalResponse = useStableCallback(
+    submitFileToolApprovalResponse,
+  );
   const stableCancelAskUserRequest = useStableCallback(cancelAskUserRequest);
   const stableHandleAskUserLayoutChange = useStableCallback(
     handleAskUserLayoutChange,
@@ -1576,6 +1685,9 @@ export default function Home() {
                   }
                   onToggleThinkingCollapsed={stableToggleThinkingCollapsed}
                   onSubmitAskUserResponse={stableSubmitAskUserResponse}
+                  onSubmitFileToolApprovalResponse={
+                    stableSubmitFileToolApprovalResponse
+                  }
                   onCancelAskUserRequest={stableCancelAskUserRequest}
                   onAskUserLayoutChange={stableHandleAskUserLayoutChange}
                   onAssistantVisualProgress={
@@ -1638,28 +1750,19 @@ export default function Home() {
               modelSearchValue={sidebarModelSearchValue}
               onModelSearchValueChange={setSidebarModelSearchValue}
               onSelectProviderModel={selectActiveChatProviderModel}
-              visibleChatTools={visibleChatTools}
-              selectedToolNames={activeChatEnabledToolNames}
-              isToolPickerOpen={isChatToolPickerOpen}
-              onToolPickerOpenChange={setIsChatToolPickerOpen}
-              toolSearchValue={chatToolSearchValue}
-              onToolSearchValueChange={setChatToolSearchValue}
-              onToggleTool={toggleActiveChatTool}
-              visibleChatSkills={visibleChatSkills}
-              selectedSkillNames={activeChatEnabledSkillNames}
-              activeSkillNames={activeChat?.activeSkillNames ?? []}
-              isSkillPickerOpen={isChatSkillPickerOpen}
-              onSkillPickerOpenChange={setIsChatSkillPickerOpen}
-              skillSearchValue={chatSkillSearchValue}
-              onSkillSearchValueChange={setChatSkillSearchValue}
-              onToggleSkill={toggleActiveChatSkill}
-              visibleChatAgents={visibleChatAgents}
-              selectedAgentNames={activeChatEnabledAgentNames}
-              isAgentPickerOpen={isChatAgentPickerOpen}
-              onAgentPickerOpenChange={setIsChatAgentPickerOpen}
-              agentSearchValue={chatAgentSearchValue}
-              onAgentSearchValueChange={setChatAgentSearchValue}
-              onToggleAgent={toggleActiveChatAgent}
+              workspaceControl={
+                <WorkspaceRootsControl
+                  activeChatExists={Boolean(activeChat)}
+                  disabled={isSending}
+                  roots={activeChat?.workspaceRoots ?? []}
+                  open={isWorkspacePickerOpen}
+                  onOpenChange={setIsWorkspacePickerOpen}
+                  onAddRoot={addActiveChatWorkspaceRoot}
+                  onRemoveRoot={removeActiveChatWorkspaceRoot}
+                  onOpenRoot={openWorkspaceRoot}
+                />
+              }
+              onOpenCapabilities={() => setIsChatCapabilitiesDialogOpen(true)}
             />
           }
           toolMentionOptions={toolMentionOptions}
@@ -1667,6 +1770,22 @@ export default function Home() {
           agentMentionOptions={agentMentionOptions}
         />
       </section>
+
+      <ChatCapabilitiesDialog
+        open={isChatCapabilitiesDialogOpen}
+        onOpenChange={setIsChatCapabilitiesDialogOpen}
+        tools={availableTools}
+        selectedToolNames={activeChatEnabledToolNames}
+        onToggleTool={toggleActiveChatTool}
+        skills={availableSkills}
+        selectedSkillNames={activeChatEnabledSkillNames}
+        activeSkillNames={activeChat?.activeSkillNames ?? []}
+        onToggleSkill={toggleActiveChatSkill}
+        agents={availableAgents}
+        selectedAgentNames={activeChatEnabledAgentNames}
+        onToggleAgent={toggleActiveChatAgent}
+        disabled={isSending}
+      />
 
       <SettingsDialog
         open={settingsOpen}
