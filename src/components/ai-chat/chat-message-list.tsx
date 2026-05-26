@@ -955,7 +955,7 @@ const ChatMessageItem = memo(
                   </span>
                 ) : generatedModelName ? (
                   <span
-                    className="block truncate text-muted-foreground"
+                    className="block truncate text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100"
                     title={`Generated with ${generatedModelName}`}
                   >
                     {generatedModelName}

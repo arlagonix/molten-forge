@@ -1,6 +1,7 @@
-import { BookOpen, Bot, Lock, Wrench } from "lucide-react";
+import { BookOpen, Bot, ChevronsUpDown, Lock, Wrench } from "lucide-react";
 import { memo, type ReactNode, useMemo, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +11,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { isBuiltInToolName } from "@/lib/ai-chat/builtin-tools";
 import type {
@@ -66,10 +71,7 @@ function CapabilityRow({
       role="button"
       tabIndex={disabled ? -1 : 0}
       className={cn(
-        "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
-        checked
-          ? "border-primary/30"
-          : "border-transparent hover:border-border hover:bg-muted/60",
+        "group flex min-w-0 cursor-pointer items-start gap-2 border border-transparent px-2 py-2 outline-none hover:border-border hover:bg-muted/60 focus:outline-none focus-visible:outline-none",
         disabled && "cursor-not-allowed opacity-60",
       )}
       onClick={() => {
@@ -105,6 +107,90 @@ function CapabilityRow({
         className="mt-0.5 shrink-0 cursor-pointer"
       />
     </div>
+  );
+}
+
+type CapabilityPickerProps = {
+  title: string;
+  placeholder: string;
+  emptyLabel: string;
+  totalCount: number;
+  selectedCount: number;
+  searchValue: string;
+  onSearchValueChange: (value: string) => void;
+  disabled?: boolean;
+  children: ReactNode;
+};
+
+function CapabilityPicker({
+  title,
+  placeholder,
+  emptyLabel,
+  totalCount,
+  selectedCount,
+  searchValue,
+  onSearchValueChange,
+  disabled,
+  children,
+}: CapabilityPickerProps) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <section className="min-w-0 space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+        </Label>
+        <span className="text-sm text-muted-foreground">
+          {selectedCount}/{totalCount}
+        </span>
+      </div>
+
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            role="combobox"
+            disabled={disabled}
+            aria-expanded={open}
+            className="h-9 w-full justify-between px-3 text-left font-normal outline-none focus:outline-none focus-visible:outline-none"
+          >
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {selectedCount === 0
+                ? `No ${title.toLowerCase()} enabled`
+                : `${selectedCount} of ${totalCount} ${title.toLowerCase()} enabled`}
+            </span>
+            <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="w-[var(--radix-popover-trigger-width)] p-0"
+          onWheel={(event) => event.stopPropagation()}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+        >
+          <div className="border-b p-2">
+            <Input
+              value={searchValue}
+              onChange={(event) => onSearchValueChange(event.target.value)}
+              placeholder={placeholder}
+              disabled={disabled}
+              autoFocus
+              className="h-8 outline-none focus-visible:ring-0"
+            />
+          </div>
+          <div className="max-h-80 overflow-y-auto overscroll-contain p-1">
+            {children}
+          </div>
+          {totalCount === 0 && (
+            <div className="border-t px-3 py-4 text-center text-sm text-muted-foreground">
+              {emptyLabel}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </section>
   );
 }
 
@@ -168,7 +254,7 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85dvh] max-w-4xl flex-col overflow-hidden p-0">
+      <DialogContent className="flex max-h-[85dvh] sm:max-w-[720px] flex-col overflow-visible p-0 outline-none focus:outline-none focus-visible:outline-none">
         <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle>Chat capabilities</DialogTitle>
           <DialogDescription>
@@ -177,23 +263,18 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <div className="grid gap-5">
-            <section className="min-w-0 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Tools
-                </Label>
-                <span className="text-sm text-muted-foreground">
-                  {selectedToolNames.length}/{tools.length}
-                </span>
-              </div>
-              <Input
-                value={toolSearch}
-                onChange={(event) => setToolSearch(event.target.value)}
-                placeholder="Search tools..."
-                disabled={disabled}
-              />
-              <div className="grid max-h-72 gap-1.5 overflow-y-auto pr-1">
+          <div className="grid gap-4">
+            <CapabilityPicker
+              title="Tools"
+              placeholder="Search tools..."
+              emptyLabel="No tools configured."
+              totalCount={tools.length}
+              selectedCount={selectedToolNames.length}
+              searchValue={toolSearch}
+              onSearchValueChange={setToolSearch}
+              disabled={disabled}
+            >
+              <div className="grid gap-1.5">
                 {visibleTools.map((tool) => (
                   <CapabilityRow
                     key={tool.name}
@@ -210,32 +291,25 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
                     }
                   />
                 ))}
-                {visibleTools.length === 0 && (
+                {visibleTools.length === 0 && tools.length > 0 && (
                   <div className="border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
                     No tools found.
                   </div>
                 )}
               </div>
-            </section>
+            </CapabilityPicker>
 
-            <Separator />
-
-            <section className="min-w-0 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Skills
-                </Label>
-                <span className="text-sm text-muted-foreground">
-                  {selectedSkillNames.length}/{skills.length}
-                </span>
-              </div>
-              <Input
-                value={skillSearch}
-                onChange={(event) => setSkillSearch(event.target.value)}
-                placeholder="Search skills..."
-                disabled={disabled}
-              />
-              <div className="grid max-h-72 gap-1.5 overflow-y-auto pr-1">
+            <CapabilityPicker
+              title="Skills"
+              placeholder="Search skills..."
+              emptyLabel="No skills configured."
+              totalCount={skills.length}
+              selectedCount={selectedSkillNames.length}
+              searchValue={skillSearch}
+              onSearchValueChange={setSkillSearch}
+              disabled={disabled}
+            >
+              <div className="grid gap-1.5">
                 {visibleSkills.map((skill) => (
                   <CapabilityRow
                     key={skill.name}
@@ -254,32 +328,25 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
                     }
                   />
                 ))}
-                {visibleSkills.length === 0 && (
+                {visibleSkills.length === 0 && skills.length > 0 && (
                   <div className="border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
                     No skills found.
                   </div>
                 )}
               </div>
-            </section>
+            </CapabilityPicker>
 
-            <Separator />
-
-            <section className="min-w-0 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Agents
-                </Label>
-                <span className="text-sm text-muted-foreground">
-                  {selectedAgentNames.length}/{agents.length}
-                </span>
-              </div>
-              <Input
-                value={agentSearch}
-                onChange={(event) => setAgentSearch(event.target.value)}
-                placeholder="Search agents..."
-                disabled={disabled}
-              />
-              <div className="grid max-h-72 gap-1.5 overflow-y-auto pr-1">
+            <CapabilityPicker
+              title="Agents"
+              placeholder="Search agents..."
+              emptyLabel="No agents configured."
+              totalCount={agents.length}
+              selectedCount={selectedAgentNames.length}
+              searchValue={agentSearch}
+              onSearchValueChange={setAgentSearch}
+              disabled={disabled}
+            >
+              <div className="grid gap-1.5">
                 {visibleAgents.map((agent) => (
                   <CapabilityRow
                     key={agent.name}
@@ -291,13 +358,13 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
                     onToggle={() => onToggleAgent(agent.name)}
                   />
                 ))}
-                {visibleAgents.length === 0 && (
+                {visibleAgents.length === 0 && agents.length > 0 && (
                   <div className="border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
                     No agents found.
                   </div>
                 )}
               </div>
-            </section>
+            </CapabilityPicker>
           </div>
         </div>
       </DialogContent>

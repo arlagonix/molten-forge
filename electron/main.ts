@@ -311,12 +311,154 @@ const FILE_TOOL_DEFAULT_EXCLUDES = new Set([
   "coverage",
   ".turbo",
 ]);
+const FILE_TOOL_TEXT_SAMPLE_BYTES = 64 * 1024;
 const FILE_TOOL_TEXT_EXTENSIONS = new Set([
-  ".c", ".cc", ".conf", ".cpp", ".cs", ".css", ".csv", ".cts",
-  ".env", ".go", ".h", ".html", ".java", ".js", ".json", ".jsx",
-  ".kt", ".less", ".log", ".lua", ".mjs", ".md", ".mdx", ".mts",
-  ".php", ".properties", ".py", ".rb", ".rs", ".scss", ".sh", ".sql",
-  ".svelte", ".toml", ".ts", ".tsx", ".txt", ".vue", ".xml", ".yaml", ".yml",
+  ".astro",
+  ".bash",
+  ".bat",
+  ".c",
+  ".cc",
+  ".cfg",
+  ".cjs",
+  ".clj",
+  ".cmd",
+  ".conf",
+  ".cpp",
+  ".cs",
+  ".css",
+  ".csv",
+  ".cts",
+  ".dart",
+  ".diff",
+  ".dockerignore",
+  ".editorconfig",
+  ".ejs",
+  ".env",
+  ".fish",
+  ".gitattributes",
+  ".gitignore",
+  ".go",
+  ".gql",
+  ".gradle",
+  ".graphql",
+  ".groovy",
+  ".h",
+  ".handlebars",
+  ".hbs",
+  ".hcl",
+  ".hpp",
+  ".htm",
+  ".html",
+  ".http",
+  ".ini",
+  ".java",
+  ".js",
+  ".json",
+  ".json5",
+  ".jsonc",
+  ".jsx",
+  ".kt",
+  ".kts",
+  ".less",
+  ".lock",
+  ".log",
+  ".lua",
+  ".mjs",
+  ".md",
+  ".mdx",
+  ".mts",
+  ".patch",
+  ".php",
+  ".pl",
+  ".properties",
+  ".ps1",
+  ".pug",
+  ".py",
+  ".r",
+  ".rb",
+  ".rest",
+  ".rs",
+  ".sass",
+  ".scala",
+  ".scss",
+  ".sh",
+  ".sql",
+  ".svelte",
+  ".svx",
+  ".swift",
+  ".tf",
+  ".tfvars",
+  ".toml",
+  ".ts",
+  ".tsx",
+  ".txt",
+  ".vue",
+  ".webmanifest",
+  ".xml",
+  ".yaml",
+  ".yml",
+  ".zsh",
+]);
+const FILE_TOOL_BINARY_EXTENSIONS = new Set([
+  ".7z",
+  ".a",
+  ".avi",
+  ".avif",
+  ".bin",
+  ".bmp",
+  ".bz2",
+  ".class",
+  ".db",
+  ".dll",
+  ".dmg",
+  ".doc",
+  ".docx",
+  ".dylib",
+  ".eot",
+  ".exe",
+  ".gif",
+  ".gz",
+  ".heic",
+  ".ico",
+  ".jar",
+  ".jpeg",
+  ".jpg",
+  ".mov",
+  ".mp3",
+  ".mp4",
+  ".o",
+  ".otf",
+  ".pdf",
+  ".png",
+  ".ppt",
+  ".pptx",
+  ".rar",
+  ".sqlite",
+  ".so",
+  ".tar",
+  ".tgz",
+  ".ttf",
+  ".webm",
+  ".webp",
+  ".woff",
+  ".woff2",
+  ".xls",
+  ".xlsx",
+  ".zip",
+]);
+const FILE_TOOL_TEXT_FILENAMES = new Set([
+  ".dockerignore",
+  ".editorconfig",
+  ".env",
+  ".gitattributes",
+  ".gitignore",
+  ".npmrc",
+  ".nvmrc",
+  ".prettierrc",
+  "dockerfile",
+  "license",
+  "makefile",
+  "readme",
 ]);
 const WEB_FETCH_ALLOWED_CONTENT_TYPES = new Set([
   "",
@@ -602,13 +744,9 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
         ? value.webFetchEnabled
         : false,
     fileReadEnabled:
-      typeof value.fileReadEnabled === "boolean"
-        ? value.fileReadEnabled
-        : true,
+      typeof value.fileReadEnabled === "boolean" ? value.fileReadEnabled : true,
     fileFindEnabled:
-      typeof value.fileFindEnabled === "boolean"
-        ? value.fileFindEnabled
-        : true,
+      typeof value.fileFindEnabled === "boolean" ? value.fileFindEnabled : true,
     fileSearchTextEnabled:
       typeof value.fileSearchTextEnabled === "boolean"
         ? value.fileSearchTextEnabled
@@ -1559,7 +1697,6 @@ async function executeWebFetchTool(args: unknown): Promise<ToolCommandResult> {
   };
 }
 
-
 function normalizeWorkspaceRoots(value: unknown): WorkspaceRoot[] {
   if (!Array.isArray(value)) return [];
 
@@ -1612,7 +1749,12 @@ function readOptionalStringArray(args: unknown, key: string) {
     .filter(Boolean);
 }
 
-function readPositiveIntegerArg(args: unknown, key: string, fallback: number, max: number) {
+function readPositiveIntegerArg(
+  args: unknown,
+  key: string,
+  fallback: number,
+  max: number,
+) {
   if (!isPlainObject(args)) return fallback;
   const value = args[key];
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
@@ -1623,7 +1765,10 @@ function readPositiveIntegerArg(args: unknown, key: string, fallback: number, ma
 
 function pathIsInside(parent: string, child: string) {
   const relative = path.relative(parent, child);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }
 
 async function getRealWorkspaceRoot(root: WorkspaceRoot) {
@@ -1652,7 +1797,9 @@ async function resolveWorkspaceRootForPath(
 
   if (!path.isAbsolute(requestedPath)) {
     if (roots.length === 1) return getRealWorkspaceRoot(roots[0]);
-    throw new Error("rootId is required when the chat has multiple workspace roots and the path is relative.");
+    throw new Error(
+      "rootId is required when the chat has multiple workspace roots and the path is relative.",
+    );
   }
 
   const resolvedPath = path.resolve(requestedPath);
@@ -1667,7 +1814,9 @@ async function resolveWorkspaceRootForPath(
     if (pathIsInside(realRoot.realPath, realTarget)) return realRoot;
   }
 
-  throw new Error("The requested path is outside all approved workspace roots.");
+  throw new Error(
+    "The requested path is outside all approved workspace roots.",
+  );
 }
 
 async function resolveWorkspaceTarget(
@@ -1685,15 +1834,19 @@ async function resolveWorkspaceTarget(
   try {
     realTargetPath = await fs.realpath(targetPath);
   } catch (error) {
-    const code = typeof error === "object" && error && "code" in error
-      ? (error as { code?: string }).code
-      : undefined;
-    if (code === "ENOENT") throw new Error(`Path does not exist: ${requestedPath}`);
+    const code =
+      typeof error === "object" && error && "code" in error
+        ? (error as { code?: string }).code
+        : undefined;
+    if (code === "ENOENT")
+      throw new Error(`Path does not exist: ${requestedPath}`);
     throw error;
   }
 
   if (!pathIsInside(root.realPath, realTargetPath)) {
-    throw new Error("The requested path resolves outside the approved workspace root.");
+    throw new Error(
+      "The requested path resolves outside the approved workspace root.",
+    );
   }
 
   return {
@@ -1715,9 +1868,10 @@ async function findNearestExistingParent(startPath: string, rootPath: string) {
       }
       return currentPath;
     } catch (error) {
-      const code = typeof error === "object" && error && "code" in error
-        ? (error as { code?: string }).code
-        : undefined;
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
       if (code !== "ENOENT") throw error;
     }
 
@@ -1726,7 +1880,9 @@ async function findNearestExistingParent(startPath: string, rootPath: string) {
     currentPath = parentPath;
   }
 
-  throw new Error("Could not resolve a valid parent inside the approved workspace root.");
+  throw new Error(
+    "Could not resolve a valid parent inside the approved workspace root.",
+  );
 }
 
 async function resolveWorkspaceTargetForCreate(
@@ -1742,49 +1898,66 @@ async function resolveWorkspaceTargetForCreate(
     : path.resolve(root.realPath, requestedPath);
 
   if (!pathIsInside(root.realPath, targetPath)) {
-    throw new Error("The requested path is outside the approved workspace root.");
+    throw new Error(
+      "The requested path is outside the approved workspace root.",
+    );
   }
 
   try {
     await fs.lstat(targetPath);
     throw new Error(`Path already exists: ${requestedPath}`);
   } catch (error) {
-    const code = typeof error === "object" && error && "code" in error
-      ? (error as { code?: string }).code
-      : undefined;
+    const code =
+      typeof error === "object" && error && "code" in error
+        ? (error as { code?: string }).code
+        : undefined;
     if (code !== "ENOENT") throw error;
   }
 
   const parentPath = path.dirname(targetPath);
   if (!pathIsInside(root.realPath, parentPath)) {
-    throw new Error("The requested parent folder is outside the approved workspace root.");
+    throw new Error(
+      "The requested parent folder is outside the approved workspace root.",
+    );
   }
 
   if (createParents) {
-    const nearestParent = await findNearestExistingParent(parentPath, root.realPath);
+    const nearestParent = await findNearestExistingParent(
+      parentPath,
+      root.realPath,
+    );
     const realNearestParent = await fs.realpath(nearestParent);
     if (!pathIsInside(root.realPath, realNearestParent)) {
-      throw new Error("The requested parent folder resolves outside the approved workspace root.");
+      throw new Error(
+        "The requested parent folder resolves outside the approved workspace root.",
+      );
     }
     await fs.mkdir(parentPath, { recursive: true });
   }
 
   const realParentPath = await fs.realpath(parentPath);
   const parentStats = await fs.stat(realParentPath);
-  if (!parentStats.isDirectory()) throw new Error("Parent path is not a directory.");
+  if (!parentStats.isDirectory())
+    throw new Error("Parent path is not a directory.");
   if (!pathIsInside(root.realPath, realParentPath)) {
-    throw new Error("The requested parent folder resolves outside the approved workspace root.");
+    throw new Error(
+      "The requested parent folder resolves outside the approved workspace root.",
+    );
   }
 
   return {
     root,
     absolutePath: targetPath,
     realParentPath,
-    relativePath: path.relative(root.realPath, targetPath) || path.basename(targetPath),
+    relativePath:
+      path.relative(root.realPath, targetPath) || path.basename(targetPath),
   };
 }
 
-function buildFileToolResult(payload: unknown, isError = false): ToolCommandResult {
+function buildFileToolResult(
+  payload: unknown,
+  isError = false,
+): ToolCommandResult {
   const content = stringifyToolResult(payload);
   return {
     content,
@@ -1796,36 +1969,84 @@ function buildFileToolResult(payload: unknown, isError = false): ToolCommandResu
   };
 }
 
-function looksBinaryBuffer(buffer: Buffer) {
-  return buffer.includes(0);
+function getFileExtension(filePath: string) {
+  return path.extname(filePath).toLowerCase();
 }
 
-function isLikelyTextFile(filePath: string) {
-  const ext = path.extname(filePath).toLowerCase();
-  return !ext || FILE_TOOL_TEXT_EXTENSIONS.has(ext);
+function getFileBaseName(filePath: string) {
+  return path.basename(filePath).toLowerCase();
+}
+
+function isKnownBinaryFilePath(filePath: string) {
+  return FILE_TOOL_BINARY_EXTENSIONS.has(getFileExtension(filePath));
+}
+
+function isKnownTextFilePath(filePath: string) {
+  const extension = getFileExtension(filePath);
+  const baseName = getFileBaseName(filePath);
+  return (
+    FILE_TOOL_TEXT_EXTENSIONS.has(extension) ||
+    FILE_TOOL_TEXT_FILENAMES.has(baseName)
+  );
+}
+
+function looksLikeTextBuffer(buffer: Buffer) {
+  if (buffer.length === 0) return true;
+  if (buffer.includes(0)) return false;
+
+  let suspiciousBytes = 0;
+  for (const byte of buffer) {
+    if (byte === 9 || byte === 10 || byte === 13) continue;
+    if (byte < 32 || byte === 127) suspiciousBytes += 1;
+  }
+  if (suspiciousBytes / buffer.length > 0.01) return false;
+
+  const decoded = buffer.toString("utf8");
+  if (!decoded) return true;
+  const replacementCharacters = decoded.match(/\uFFFD/g)?.length ?? 0;
+  return replacementCharacters / decoded.length < 0.01;
+}
+
+async function readFileSample(filePath: string, size: number) {
+  if (size <= 0) return Buffer.alloc(0);
+  const handle = await fs.open(filePath, "r");
+  try {
+    const sample = Buffer.alloc(size);
+    const { bytesRead } = await handle.read(sample, 0, size, 0);
+    return sample.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
 }
 
 async function assertTextFile(filePath: string, maxBytes: number) {
   const stats = await fs.stat(filePath);
   if (!stats.isFile()) throw new Error("Path is not a file.");
   if (stats.size > maxBytes) {
-    throw new Error(`File is too large (${stats.size} bytes). Maximum is ${maxBytes} bytes.`);
+    throw new Error(
+      `File is too large (${stats.size} bytes). Maximum is ${maxBytes} bytes.`,
+    );
   }
-  if (!isLikelyTextFile(filePath)) {
-    throw new Error(`Refusing to treat this file type as text: ${path.extname(filePath) || "no extension"}`);
+  if (isKnownBinaryFilePath(filePath)) {
+    throw new Error(
+      `Refusing to treat this binary file type as text: ${getFileExtension(filePath) || "no extension"}`,
+    );
   }
 
-  const handle = await fs.open(filePath, "r");
-  try {
-    const sampleSize = Math.min(4096, stats.size);
-    const sample = Buffer.alloc(sampleSize);
-    await handle.read(sample, 0, sampleSize, 0);
-    if (looksBinaryBuffer(sample)) throw new Error("Refusing to read a binary file.");
-  } finally {
-    await handle.close();
+  const sampleSize = Math.min(FILE_TOOL_TEXT_SAMPLE_BYTES, stats.size);
+  const sample = await readFileSample(filePath, sampleSize);
+  if (!looksLikeTextBuffer(sample)) {
+    const fileKind = isKnownTextFilePath(filePath)
+      ? "known text file type with binary-looking contents"
+      : "file that appears to be binary";
+    throw new Error(`Refusing to read a ${fileKind}.`);
   }
 
   return stats;
+}
+
+function isLikelyTextFile(filePath: string) {
+  return !isKnownBinaryFilePath(filePath);
 }
 
 function truncateText(value: string, maxChars: number) {
@@ -1833,12 +2054,23 @@ function truncateText(value: string, maxChars: number) {
   return { text: value.slice(0, maxChars), truncated: true };
 }
 
-async function executeFileReadTool(args: unknown, context: ToolExecutionContext) {
+async function executeFileReadTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
   const requestedPath = readRequiredString(args, "path");
   const rootId = readOptionalString(args, "rootId");
-  const maxChars = readPositiveIntegerArg(args, "maxChars", FILE_TOOL_MAX_READ_CHARS, FILE_TOOL_MAX_READ_CHARS);
+  const maxChars = readPositiveIntegerArg(
+    args,
+    "maxChars",
+    FILE_TOOL_MAX_READ_CHARS,
+    FILE_TOOL_MAX_READ_CHARS,
+  );
   const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
-  const stats = await assertTextFile(target.realPath, FILE_TOOL_MAX_TEXT_FILE_BYTES);
+  const stats = await assertTextFile(
+    target.realPath,
+    FILE_TOOL_MAX_TEXT_FILE_BYTES,
+  );
   const text = await fs.readFile(target.realPath, "utf8");
   const truncated = truncateText(text, maxChars);
 
@@ -1862,9 +2094,16 @@ function normalizeExtensions(values: string[]) {
   );
 }
 
-function shouldSkipPath(relativePath: string, direntName: string, excludes: string[]) {
+function shouldSkipPath(
+  relativePath: string,
+  direntName: string,
+  excludes: string[],
+) {
   if (FILE_TOOL_DEFAULT_EXCLUDES.has(direntName)) return true;
-  const normalizedRelative = relativePath.split(path.sep).join("/").toLowerCase();
+  const normalizedRelative = relativePath
+    .split(path.sep)
+    .join("/")
+    .toLowerCase();
   return excludes.some((item) => {
     const needle = item.split(path.sep).join("/").toLowerCase();
     return needle && normalizedRelative.includes(needle);
@@ -1961,12 +2200,20 @@ async function collectWorkspaceFiles({
   return results;
 }
 
-async function executeFileFindTool(args: unknown, context: ToolExecutionContext) {
+async function executeFileFindTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
   const query = readOptionalString(args, "query")?.trim().toLowerCase() ?? "";
   const rootId = readOptionalString(args, "rootId");
   const include = readOptionalStringArray(args, "include");
   const exclude = readOptionalStringArray(args, "exclude");
-  const maxResults = readPositiveIntegerArg(args, "maxResults", 50, FILE_TOOL_MAX_RESULTS);
+  const maxResults = readPositiveIntegerArg(
+    args,
+    "maxResults",
+    50,
+    FILE_TOOL_MAX_RESULTS,
+  );
   const candidates = await collectWorkspaceFiles({
     context,
     rootId,
@@ -1989,10 +2236,19 @@ async function executeFileFindTool(args: unknown, context: ToolExecutionContext)
       type: candidate.type,
     }));
 
-  return buildFileToolResult({ ok: true, query, count: matches.length, results: matches });
+  return buildFileToolResult({
+    ok: true,
+    query,
+    count: matches.length,
+    results: matches,
+  });
 }
 
-function makeSearchSnippet(line: string, query: string, caseSensitive: boolean) {
+function makeSearchSnippet(
+  line: string,
+  query: string,
+  caseSensitive: boolean,
+) {
   const haystack = caseSensitive ? line : line.toLowerCase();
   const needle = caseSensitive ? query : query.toLowerCase();
   const index = haystack.indexOf(needle);
@@ -2002,13 +2258,21 @@ function makeSearchSnippet(line: string, query: string, caseSensitive: boolean) 
   return `${start > 0 ? "…" : ""}${line.slice(start, end)}${end < line.length ? "…" : ""}`;
 }
 
-async function executeFileSearchTextTool(args: unknown, context: ToolExecutionContext) {
+async function executeFileSearchTextTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
   const query = readRequiredString(args, "query");
   const rootId = readOptionalString(args, "rootId");
   const include = readOptionalStringArray(args, "include");
   const exclude = readOptionalStringArray(args, "exclude");
   const caseSensitive = isPlainObject(args) && args.caseSensitive === true;
-  const maxResults = readPositiveIntegerArg(args, "maxResults", 50, FILE_TOOL_MAX_RESULTS);
+  const maxResults = readPositiveIntegerArg(
+    args,
+    "maxResults",
+    50,
+    FILE_TOOL_MAX_RESULTS,
+  );
   const candidates = await collectWorkspaceFiles({
     context,
     rootId,
@@ -2018,7 +2282,13 @@ async function executeFileSearchTextTool(args: unknown, context: ToolExecutionCo
     includeDirectories: false,
   });
   const needle = caseSensitive ? query : query.toLowerCase();
-  const results: Array<{ rootId: string; rootName: string; path: string; line: number; snippet: string }> = [];
+  const results: Array<{
+    rootId: string;
+    rootName: string;
+    path: string;
+    line: number;
+    snippet: string;
+  }> = [];
 
   for (const candidate of candidates) {
     if (results.length >= maxResults) break;
@@ -2026,10 +2296,12 @@ async function executeFileSearchTextTool(args: unknown, context: ToolExecutionCo
 
     try {
       const stats = await fs.stat(candidate.absolutePath);
-      if (!stats.isFile() || stats.size > FILE_TOOL_MAX_SEARCH_FILE_BYTES) continue;
-      const sample = await fs.readFile(candidate.absolutePath);
-      if (looksBinaryBuffer(sample.subarray(0, Math.min(4096, sample.length)))) continue;
-      const text = sample.toString("utf8");
+      if (!stats.isFile() || stats.size > FILE_TOOL_MAX_SEARCH_FILE_BYTES)
+        continue;
+      const sampleSize = Math.min(FILE_TOOL_TEXT_SAMPLE_BYTES, stats.size);
+      const sample = await readFileSample(candidate.absolutePath, sampleSize);
+      if (!looksLikeTextBuffer(sample)) continue;
+      const text = await fs.readFile(candidate.absolutePath, "utf8");
       const lines = text.split(/\r?\n/);
       for (let index = 0; index < lines.length; index += 1) {
         const line = lines[index];
@@ -2049,27 +2321,46 @@ async function executeFileSearchTextTool(args: unknown, context: ToolExecutionCo
     }
   }
 
-  return buildFileToolResult({ ok: true, query, count: results.length, results });
+  return buildFileToolResult({
+    ok: true,
+    query,
+    count: results.length,
+    results,
+  });
 }
 
-async function executeFileReplaceTextTool(args: unknown, context: ToolExecutionContext) {
+async function executeFileReplaceTextTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
   const requestedPath = readRequiredString(args, "path");
   const oldText = readRequiredRawString(args, "oldText");
   const newText = readOptionalString(args, "newText") ?? "";
   const rootId = readOptionalString(args, "rootId");
-  const expectedReplacements = isPlainObject(args) && typeof args.expectedReplacements === "number" && Number.isFinite(args.expectedReplacements)
-    ? Math.floor(args.expectedReplacements)
-    : undefined;
+  const expectedReplacements =
+    isPlainObject(args) &&
+    typeof args.expectedReplacements === "number" &&
+    Number.isFinite(args.expectedReplacements)
+      ? Math.floor(args.expectedReplacements)
+      : undefined;
 
   const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
-  const stats = await assertTextFile(target.realPath, FILE_TOOL_MAX_TEXT_FILE_BYTES);
+  const stats = await assertTextFile(
+    target.realPath,
+    FILE_TOOL_MAX_TEXT_FILE_BYTES,
+  );
   const current = await fs.readFile(target.realPath, "utf8");
   const replacementCount = oldText ? current.split(oldText).length - 1 : 0;
   if (replacementCount === 0) {
     throw new Error("oldText was not found in the target file.");
   }
-  if (expectedReplacements !== undefined && replacementCount !== expectedReplacements) {
-    throw new Error(`Expected ${expectedReplacements} replacement(s), but found ${replacementCount}.`);
+  if (
+    expectedReplacements !== undefined &&
+    replacementCount !== expectedReplacements
+  ) {
+    throw new Error(
+      `Expected ${expectedReplacements} replacement(s), but found ${replacementCount}.`,
+    );
   }
 
   const next = current.split(oldText).join(newText);
@@ -2088,14 +2379,19 @@ async function executeFileReplaceTextTool(args: unknown, context: ToolExecutionC
   });
 }
 
-async function executeFileCreateTool(args: unknown, context: ToolExecutionContext) {
+async function executeFileCreateTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
   const requestedPath = readRequiredString(args, "path");
   const content = readOptionalString(args, "content") ?? "";
   const rootId = readOptionalString(args, "rootId");
   const createParents = isPlainObject(args) && args.createParents === true;
 
   if (Buffer.byteLength(content, "utf8") > FILE_TOOL_MAX_TEXT_FILE_BYTES) {
-    throw new Error(`Content is too large. Maximum is ${FILE_TOOL_MAX_TEXT_FILE_BYTES} bytes.`);
+    throw new Error(
+      `Content is too large. Maximum is ${FILE_TOOL_MAX_TEXT_FILE_BYTES} bytes.`,
+    );
   }
 
   const target = await resolveWorkspaceTargetForCreate(
@@ -2106,10 +2402,15 @@ async function executeFileCreateTool(args: unknown, context: ToolExecutionContex
   );
 
   if (!isLikelyTextFile(target.absolutePath)) {
-    throw new Error(`Refusing to create this file type as text: ${path.extname(target.absolutePath) || "no extension"}`);
+    throw new Error(
+      `Refusing to create this file type as text: ${path.extname(target.absolutePath) || "no extension"}`,
+    );
   }
 
-  await fs.writeFile(target.absolutePath, content, { encoding: "utf8", flag: "wx" });
+  await fs.writeFile(target.absolutePath, content, {
+    encoding: "utf8",
+    flag: "wx",
+  });
 
   return buildFileToolResult({
     ok: true,
@@ -2121,7 +2422,10 @@ async function executeFileCreateTool(args: unknown, context: ToolExecutionContex
   });
 }
 
-async function executeFileDeleteTool(args: unknown, context: ToolExecutionContext) {
+async function executeFileDeleteTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
   const requestedPath = readRequiredString(args, "path");
   const rootId = readOptionalString(args, "rootId");
   const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
@@ -2132,7 +2436,9 @@ async function executeFileDeleteTool(args: unknown, context: ToolExecutionContex
 
   const stats = await fs.stat(target.realPath);
   if (!stats.isFile()) {
-    throw new Error("file_delete only supports files. Folder deletion is not supported.");
+    throw new Error(
+      "file_delete only supports files. Folder deletion is not supported.",
+    );
   }
 
   await shell.trashItem(target.absolutePath);
@@ -2147,14 +2453,24 @@ async function executeFileDeleteTool(args: unknown, context: ToolExecutionContex
   });
 }
 
-async function executeFileTool(toolName: string, args: unknown, context: ToolExecutionContext) {
+async function executeFileTool(
+  toolName: string,
+  args: unknown,
+  context: ToolExecutionContext,
+) {
   try {
-    if (toolName === FILE_READ_TOOL_NAME) return executeFileReadTool(args, context);
-    if (toolName === FILE_FIND_TOOL_NAME) return executeFileFindTool(args, context);
-    if (toolName === FILE_SEARCH_TEXT_TOOL_NAME) return executeFileSearchTextTool(args, context);
-    if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) return executeFileReplaceTextTool(args, context);
-    if (toolName === FILE_CREATE_TOOL_NAME) return executeFileCreateTool(args, context);
-    if (toolName === FILE_DELETE_TOOL_NAME) return executeFileDeleteTool(args, context);
+    if (toolName === FILE_READ_TOOL_NAME)
+      return executeFileReadTool(args, context);
+    if (toolName === FILE_FIND_TOOL_NAME)
+      return executeFileFindTool(args, context);
+    if (toolName === FILE_SEARCH_TEXT_TOOL_NAME)
+      return executeFileSearchTextTool(args, context);
+    if (toolName === FILE_REPLACE_TEXT_TOOL_NAME)
+      return executeFileReplaceTextTool(args, context);
+    if (toolName === FILE_CREATE_TOOL_NAME)
+      return executeFileCreateTool(args, context);
+    if (toolName === FILE_DELETE_TOOL_NAME)
+      return executeFileDeleteTool(args, context);
     throw new Error(`Unknown file tool: ${toolName}`);
   } catch (error) {
     const payload = { ok: false, error: getErrorMessage(error) };
@@ -2190,7 +2506,11 @@ async function openWorkspaceFolder(folderPath: unknown) {
   if (error) throw new Error(error);
 }
 
-async function executeToolManifest(name: unknown, args: unknown, context: ToolExecutionContext = {}) {
+async function executeToolManifest(
+  name: unknown,
+  args: unknown,
+  context: ToolExecutionContext = {},
+) {
   const toolName = typeof name === "string" ? name.trim() : "";
   if (!toolName) throw new Error("Tool name is required.");
 

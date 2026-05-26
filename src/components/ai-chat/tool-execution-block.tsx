@@ -2,7 +2,11 @@ import { Check, ChevronDown, ChevronRight, Wrench, X } from "lucide-react";
 
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { Spinner } from "@/components/ui/spinner";
-import { LOAD_SKILL_TOOL_NAME } from "@/lib/ai-chat/builtin-tools";
+import {
+  FILE_FIND_TOOL_NAME,
+  FILE_READ_TOOL_NAME,
+  LOAD_SKILL_TOOL_NAME,
+} from "@/lib/ai-chat/builtin-tools";
 import { buildToolExecutionPreviewForCall } from "@/lib/ai-chat/tool-preview";
 import type {
   ChatToolCall,
@@ -233,6 +237,37 @@ function hasMeaningfulToolInput(value: string) {
   }
 }
 
+function parseToolCallArguments(toolCall: ChatToolCall) {
+  try {
+    const parsed = JSON.parse(toolCall.function.arguments || "{}");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function getStringArgument(args: Record<string, unknown>, key: string) {
+  const value = args[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getFileToolHeaderDetail(toolCall: ChatToolCall) {
+  if (toolCall.function.name === FILE_READ_TOOL_NAME) {
+    const args = parseToolCallArguments(toolCall);
+    return getStringArgument(args, "path");
+  }
+
+  if (toolCall.function.name === FILE_FIND_TOOL_NAME) {
+    const args = parseToolCallArguments(toolCall);
+    const query = getStringArgument(args, "query");
+    return query ? `query: ${query}` : "all workspace files";
+  }
+
+  return "";
+}
+
 export function ToolExecutionBlock({
   id,
   toolCall,
@@ -271,6 +306,7 @@ export function ToolExecutionBlock({
   const showToolInput =
     hasMeaningfulToolInput(toolCall.function.arguments || "") &&
     (!executionPreview || executionPreview.usesStdin);
+  const fileToolHeaderDetail = getFileToolHeaderDetail(toolCall);
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
@@ -287,6 +323,14 @@ export function ToolExecutionBlock({
               <span className="truncate">{toolCall.function.name}</span>
               <span className="text-muted-foreground/60">•</span>
               {renderToolStatus(effectiveStatus)}
+              {fileToolHeaderDetail ? (
+                <>
+                  <span className="text-muted-foreground/60">•</span>
+                  <span className="min-w-0 truncate normal-case tracking-normal text-muted-foreground/85">
+                    {fileToolHeaderDetail}
+                  </span>
+                </>
+              ) : null}
             </div>
             {isCollapsed ? (
               <ChevronRight className="size-3.5 shrink-0" />
