@@ -173,7 +173,7 @@ export const SettingsDialog = memo(function SettingsDialog({
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
 
-        <div className="min-h-0 overflow-y-auto p-6 chat-scrollbar">
+        <div className="min-h-0 overflow-y-auto p-4 chat-scrollbar">
           <div className="grid gap-6">
             <section className="grid gap-3">
               <h3 className="text-base font-semibold leading-6">

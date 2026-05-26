@@ -471,6 +471,33 @@ export function useChatGeneration({
     );
   }
 
+  function completeAssistantToolExecutionStepForResult(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    toolResult: ChatToolResult,
+  ) {
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: (variant.processSteps ?? []).map((step) =>
+          step.type === "tool_execution" &&
+          step.toolCall.id === toolResult.toolCallId
+            ? {
+                ...step,
+                status: toolResult.isError ? "failed" : "complete",
+                toolResult,
+              }
+            : step,
+        ),
+      }),
+      { touch: false },
+    );
+  }
+
   function updateAssistantUserInputStepStatus(
     chatId: string,
     assistantMessageId: string,
@@ -1437,10 +1464,16 @@ export function useChatGeneration({
                         childWorkspaceRoots,
                       ),
                     },
+                    {
+                      id: createId(),
+                      type: "tool_execution" as const,
+                      status: "pending" as const,
+                      toolCall: childToolCall,
+                    },
                   ],
                 );
 
-                return await executeToolCall(childToolCall, {
+                const toolResult = await executeToolCall(childToolCall, {
                   chatId,
                   assistantMessageId,
                   variantId,
@@ -1449,6 +1482,13 @@ export function useChatGeneration({
                   activeSkillNames: agent.loadedSkillNames ?? [],
                   workspaceRoots: childWorkspaceRoots,
                 });
+                completeAssistantToolExecutionStepForResult(
+                  chatId,
+                  assistantMessageId,
+                  variantId,
+                  toolResult,
+                );
+                return toolResult;
               }
 
               const args = childToolCall.function.arguments.trim()
@@ -1664,16 +1704,24 @@ export function useChatGeneration({
 
         if (requiresFileToolApproval(toolCall.function.name)) {
           try {
-            toolSteps.push({
-              id: createId(),
-              type: "file_approval" as const,
-              status: "waiting" as const,
-              toolCall,
-              request: parseFileToolApprovalRequestFromToolCall(
+            toolSteps.push(
+              {
+                id: createId(),
+                type: "file_approval" as const,
+                status: "waiting" as const,
                 toolCall,
-                chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [],
-              ),
-            });
+                request: parseFileToolApprovalRequestFromToolCall(
+                  toolCall,
+                  chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [],
+                ),
+              },
+              {
+                id: createId(),
+                type: "tool_execution" as const,
+                status: "pending" as const,
+                toolCall,
+              },
+            );
             continue;
           } catch {
             // Keep invalid file approval calls visible as failed tool executions once

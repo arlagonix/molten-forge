@@ -68,7 +68,7 @@ function CapabilityRow({
       className={cn(
         "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
         checked
-          ? "border-primary/30 bg-accent text-accent-foreground"
+          ? "border-primary/30"
           : "border-transparent hover:border-border hover:bg-muted/60",
         disabled && "cursor-not-allowed opacity-60",
       )}
@@ -127,29 +127,44 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
   const [skillSearch, setSkillSearch] = useState("");
   const [agentSearch, setAgentSearch] = useState("");
 
-  const selectedTools = useMemo(() => new Set(selectedToolNames), [selectedToolNames]);
-  const selectedSkills = useMemo(() => new Set(selectedSkillNames), [selectedSkillNames]);
-  const activeSkills = useMemo(() => new Set(activeSkillNames), [activeSkillNames]);
-  const selectedAgents = useMemo(() => new Set(selectedAgentNames), [selectedAgentNames]);
+  const selectedTools = useMemo(
+    () => new Set(selectedToolNames),
+    [selectedToolNames],
+  );
+  const selectedSkills = useMemo(
+    () => new Set(selectedSkillNames),
+    [selectedSkillNames],
+  );
+  const activeSkills = useMemo(
+    () => new Set(activeSkillNames),
+    [activeSkillNames],
+  );
+  const selectedAgents = useMemo(
+    () => new Set(selectedAgentNames),
+    [selectedAgentNames],
+  );
 
   const visibleTools = useMemo(
-    () => tools.filter((tool) => matchesSearch(toolSearch, tool.name, tool.description)),
+    () =>
+      tools.filter((tool) =>
+        matchesSearch(toolSearch, tool.name, tool.description),
+      ),
     [tools, toolSearch],
   );
   const visibleSkills = useMemo(
-    () => skills.filter((skill) => matchesSearch(skillSearch, skill.name, skill.description)),
+    () =>
+      skills.filter((skill) =>
+        matchesSearch(skillSearch, skill.name, skill.description),
+      ),
     [skills, skillSearch],
   );
   const visibleAgents = useMemo(
-    () => agents.filter((agent) => matchesSearch(agentSearch, agent.name, agent.description)),
+    () =>
+      agents.filter((agent) =>
+        matchesSearch(agentSearch, agent.name, agent.description),
+      ),
     [agents, agentSearch],
   );
-
-  const enabledSummary = [
-    `${selectedToolNames.length} tools`,
-    `${selectedSkillNames.length} skills`,
-    `${selectedAgentNames.length} agents`,
-  ].join(" · ");
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -157,12 +172,12 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
         <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle>Chat capabilities</DialogTitle>
           <DialogDescription>
-            Choose which tools, skills, and agents are available in this chat. {enabledSummary} enabled.
+            Choose which tools, skills, and agents are available in this chat.
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <div className="grid gap-6 lg:grid-cols-3">
+          <div className="grid gap-5">
             <section className="min-w-0 space-y-3">
               <div className="flex items-center justify-between gap-3">
                 <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
@@ -178,7 +193,7 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
                 placeholder="Search tools..."
                 disabled={disabled}
               />
-              <div className="grid gap-1.5">
+              <div className="grid max-h-72 gap-1.5 overflow-y-auto pr-1">
                 {visibleTools.map((tool) => (
                   <CapabilityRow
                     key={tool.name}
@@ -203,7 +218,7 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
               </div>
             </section>
 
-            <Separator className="lg:hidden" />
+            <Separator />
 
             <section className="min-w-0 space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -220,7 +235,7 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
                 placeholder="Search skills..."
                 disabled={disabled}
               />
-              <div className="grid gap-1.5">
+              <div className="grid max-h-72 gap-1.5 overflow-y-auto pr-1">
                 {visibleSkills.map((skill) => (
                   <CapabilityRow
                     key={skill.name}
@@ -247,7 +262,7 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
               </div>
             </section>
 
-            <Separator className="lg:hidden" />
+            <Separator />
 
             <section className="min-w-0 space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -264,7 +279,7 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
                 placeholder="Search agents..."
                 disabled={disabled}
               />
-              <div className="grid gap-1.5">
+              <div className="grid max-h-72 gap-1.5 overflow-y-auto pr-1">
                 {visibleAgents.map((agent) => (
                   <CapabilityRow
                     key={agent.name}
