@@ -3,11 +3,16 @@ import { useRef } from "react";
 import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL_NAME,
+  FILE_CREATE_TOOL_NAME,
+  FILE_DELETE_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
   isFileToolName,
   requiresFileToolApproval,
+  requiresToolApproval,
   createAskUserToolResult,
-  createCancelledFileToolResult,
+  createCancelledToolResult,
+  createToolApprovalRequest,
   createChecklistWriteToolResult,
   isFileToolApprovalResponseApproved,
   parseAskUserRequestFromToolCall,
@@ -18,7 +23,8 @@ import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import type {
   AskUserRequest,
   AskUserResponse,
-  FileToolApprovalResponse,
+  ToolApprovalResponse,
+  ChatFileToolAutoApproval,
   ChatToolCall,
   ChatToolResult,
   ChatWorkspaceRoot,
@@ -30,7 +36,7 @@ import type {
 } from "@/lib/ai-chat/types";
 
 type PendingUserInputRequest = {
-  kind: "ask_user" | "file_tool_approval";
+  kind: "ask_user" | "tool_approval";
   chatId: string;
   assistantMessageId: string;
   variantId: string;
@@ -46,6 +52,7 @@ export function useToolExecution({
   activeChatId,
   loadedTools,
   workspaceRoots,
+  fileToolAutoApproval,
   availableSkillsByName,
   modelSelectableSkillNames,
   activeSkillNames,
@@ -65,6 +72,7 @@ export function useToolExecution({
   activeChatId?: string;
   loadedTools: LoadedToolInfo[];
   workspaceRoots: ChatWorkspaceRoot[];
+  fileToolAutoApproval?: ChatFileToolAutoApproval;
   availableSkillsByName: Map<string, LoadedSkillInfo>;
   modelSelectableSkillNames: string[];
   activeSkillNames: string[];
@@ -88,7 +96,7 @@ export function useToolExecution({
     assistantMessageId: string,
     variantId: string,
     stepId: string,
-    response: FileToolApprovalResponse,
+    response: ToolApprovalResponse,
     toolResult: ChatToolResult,
   ) => void;
   updateAssistantToolStepStatus: (
@@ -207,7 +215,7 @@ export function useToolExecution({
     return createChecklistWriteToolResult(toolCall, request);
   }
 
-  async function executeFileToolCallWithApproval(
+  async function executeToolCallWithApproval(
     toolCall: ChatToolCall,
     options: {
       chatId: string;
@@ -216,12 +224,19 @@ export function useToolExecution({
       stepId: string;
       signal?: AbortSignal;
       workspaceRoots?: ChatWorkspaceRoot[];
+      fileToolAutoApproval?: ChatFileToolAutoApproval;
     },
   ): Promise<ChatToolResult> {
-    parseFileToolApprovalRequestFromToolCall(
-      toolCall,
-      options.workspaceRoots ?? workspaceRoots,
-    );
+    const tool = loadedTools.find((candidate) => candidate.name === toolCall.function.name);
+
+    if (requiresFileToolApproval(toolCall.function.name)) {
+      parseFileToolApprovalRequestFromToolCall(
+        toolCall,
+        options.workspaceRoots ?? workspaceRoots,
+      );
+    } else {
+      createToolApprovalRequest(toolCall, tool);
+    }
 
     return new Promise<ChatToolResult>((resolve, reject) => {
       let settled = false;
@@ -259,7 +274,7 @@ export function useToolExecution({
       };
 
       pendingUserInputRequestsRef.current[toolCall.id] = {
-        kind: "file_tool_approval",
+        kind: "tool_approval",
         toolCall,
         chatId: options.chatId,
         assistantMessageId: options.assistantMessageId,
@@ -350,6 +365,64 @@ export function useToolExecution({
     };
   }
 
+
+  function isFileToolCallAutoApproved(
+    toolName: string,
+    settings?: ChatFileToolAutoApproval,
+  ) {
+    if (toolName === FILE_CREATE_TOOL_NAME) return settings?.create === true;
+    if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) {
+      return settings?.replaceText === true;
+    }
+    if (toolName === FILE_DELETE_TOOL_NAME) return settings?.delete === true;
+    return false;
+  }
+
+  async function executeExternalToolCall(
+    toolCall: ChatToolCall,
+    options: {
+      chatId: string;
+      assistantMessageId: string;
+      variantId: string;
+      stepId: string;
+      workspaceRoots?: ChatWorkspaceRoot[];
+    },
+  ): Promise<ChatToolResult> {
+    const toolName = toolCall.function.name;
+    const tool = loadedTools.find((candidate) => candidate.name === toolName);
+    const argsText = toolCall.function.arguments.trim() || "{}";
+    const args = JSON.parse(argsText);
+
+    const result = await runQueuedTool(
+      toolName,
+      tool,
+      () =>
+        executeExternalTool(
+          toolName,
+          args,
+          isFileToolName(toolName)
+            ? { workspaceRoots: options.workspaceRoots ?? workspaceRoots }
+            : undefined,
+        ),
+      (status) =>
+        updateAssistantToolStepStatus(
+          options.chatId,
+          options.assistantMessageId,
+          options.variantId,
+          options.stepId,
+          status,
+        ),
+    );
+
+    return {
+      toolCallId: toolCall.id,
+      toolName: result.toolName || toolName,
+      content: result.content,
+      isError: result.timedOut || result.exitCode !== 0,
+      execution: result.execution,
+    };
+  }
+
   async function executeToolCall(
     toolCall: ChatToolCall,
     options: {
@@ -360,10 +433,10 @@ export function useToolExecution({
       signal?: AbortSignal;
       activeSkillNames?: string[];
       workspaceRoots?: ChatWorkspaceRoot[];
+      fileToolAutoApproval?: ChatFileToolAutoApproval;
     },
   ): Promise<ChatToolResult> {
     const toolName = toolCall.function.name;
-    const tool = loadedTools.find((candidate) => candidate.name === toolName);
 
     try {
       if (toolName === ASK_USER_TOOL_NAME) {
@@ -382,41 +455,26 @@ export function useToolExecution({
         );
       }
 
-      if (requiresFileToolApproval(toolName)) {
-        return await executeFileToolCallWithApproval(toolCall, options);
+      const customTool = loadedTools.find((candidate) => candidate.name === toolName);
+
+      if (requiresToolApproval(toolName, customTool)) {
+        const effectiveAutoApproval =
+          options.fileToolAutoApproval ?? fileToolAutoApproval;
+        const autoApproved =
+          requiresFileToolApproval(toolName) &&
+          isFileToolCallAutoApproved(toolName, effectiveAutoApproval);
+
+        if (!autoApproved) {
+          return await executeToolCallWithApproval(toolCall, options);
+        }
+
+        parseFileToolApprovalRequestFromToolCall(
+          toolCall,
+          options.workspaceRoots ?? workspaceRoots,
+        );
       }
 
-      const argsText = toolCall.function.arguments.trim() || "{}";
-      const args = JSON.parse(argsText);
-
-      const result = await runQueuedTool(
-        toolName,
-        tool,
-        () =>
-          executeExternalTool(
-            toolName,
-            args,
-            isFileToolName(toolName)
-              ? { workspaceRoots: options.workspaceRoots ?? workspaceRoots }
-              : undefined,
-          ),
-        (status) =>
-          updateAssistantToolStepStatus(
-            options.chatId,
-            options.assistantMessageId,
-            options.variantId,
-            options.stepId,
-            status,
-          ),
-      );
-
-      return {
-        toolCallId: toolCall.id,
-        toolName: result.toolName || toolName,
-        content: result.content,
-        isError: result.timedOut || result.exitCode !== 0,
-        execution: result.execution,
-      };
+      return await executeExternalToolCall(toolCall, options);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         throw error;
@@ -468,7 +526,7 @@ export function useToolExecution({
 
   async function submitFileToolApprovalResponse(
     toolCall: ChatToolCall,
-    response: FileToolApprovalResponse,
+    response: ToolApprovalResponse,
   ) {
     const pendingRequest = pendingUserInputRequestsRef.current[toolCall.id];
     if (!pendingRequest) {
@@ -476,7 +534,7 @@ export function useToolExecution({
       return;
     }
 
-    if (pendingRequest.kind !== "file_tool_approval") {
+    if (pendingRequest.kind !== "tool_approval") {
       showError("This approval request does not match the active input.");
       return;
     }
@@ -485,7 +543,7 @@ export function useToolExecution({
       let toolResult: ChatToolResult;
 
       if (!isFileToolApprovalResponseApproved(response)) {
-        toolResult = createCancelledFileToolResult(toolCall);
+        toolResult = createCancelledToolResult(toolCall);
       } else {
         const argsText = toolCall.function.arguments.trim() || "{}";
         const args = JSON.parse(argsText);
@@ -546,7 +604,7 @@ export function useToolExecution({
     }
 
     const updatePendingStatus =
-      pendingRequest.kind === "file_tool_approval"
+      pendingRequest.kind === "tool_approval"
         ? updateAssistantFileApprovalStepStatus
         : updateAssistantUserInputStepStatus;
 

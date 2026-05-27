@@ -15,7 +15,12 @@ import type {
 import type { StreamBufferEvent } from "@/lib/ai-chat/stream-buffer";
 
 export type ActiveProcessStepRef = {
-  type: "thinking" | "assistant_message" | "tool_execution" | "user_input";
+  type:
+    | "thinking"
+    | "assistant_message"
+    | "tool_building"
+    | "tool_execution"
+    | "user_input";
   id?: string;
 };
 
@@ -41,17 +46,25 @@ function completeThinkingProcessSteps(
   processSteps: ChatAssistantProcessStep[],
   completedAt = new Date().toISOString(),
 ): ChatAssistantProcessStep[] {
-  return processSteps.map((step) => {
-    if (step.type !== "thinking") return step;
-    if (step.status === "complete") return step;
+  const nextSteps: ChatAssistantProcessStep[] = [];
 
-    return {
+  for (const step of processSteps) {
+    if (step.type === "tool_building") continue;
+
+    if (step.type !== "thinking" || step.status === "complete") {
+      nextSteps.push(step);
+      continue;
+    }
+
+    nextSteps.push({
       ...step,
       status: "complete",
       startedAt: step.startedAt ?? completedAt,
       completedAt: step.completedAt ?? completedAt,
-    };
-  });
+    });
+  }
+
+  return nextSteps;
 }
 
 export function appendStreamEventsToAssistantVariant(

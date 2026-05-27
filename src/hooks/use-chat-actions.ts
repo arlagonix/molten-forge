@@ -15,6 +15,7 @@ import {
   titleFromMessage,
 } from "@/lib/ai-chat/chat-utils";
 import type {
+  ChatFileToolAutoApproval,
   ChatMessage,
   ChatSession,
   LoadedAgentInfo,
@@ -32,6 +33,7 @@ export function useChatActions({
   globallyEnabledToolNames,
   globallyEnabledSkillNames,
   globallyEnabledAgentNames,
+  fileToolAutoApprovalDefaults,
   isSending,
   messageElementRefs,
   setActiveChatId,
@@ -57,6 +59,7 @@ export function useChatActions({
   globallyEnabledToolNames: Set<string>;
   globallyEnabledSkillNames: Set<string>;
   globallyEnabledAgentNames: Set<string>;
+  fileToolAutoApprovalDefaults: ChatFileToolAutoApproval;
   isSending: boolean;
   messageElementRefs: MutableRefObject<Map<string, HTMLDivElement>>;
   setActiveChatId: Dispatch<SetStateAction<string | undefined>>;
@@ -193,7 +196,10 @@ export function useChatActions({
   }
 
   async function createNewChat() {
-    const chat = createEmptyChat();
+    const chat: ChatSession = {
+      ...createEmptyChat(),
+      fileToolAutoApproval: { ...fileToolAutoApprovalDefaults },
+    };
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
     setEditingMessageId(null);
@@ -205,6 +211,53 @@ export function useChatActions({
       await saveActiveChatId(chat.id);
     } catch (error) {
       console.error("Failed to save new chat:", error);
+    }
+  }
+
+  async function createChatWithSameSettings(chatId: string) {
+    const sourceChat = chats.find((chat) => chat.id === chatId);
+    if (!sourceChat) return;
+
+    const now = new Date().toISOString();
+    const chat: ChatSession = {
+      ...createEmptyChat(),
+      enabledToolNames: sourceChat.enabledToolNames
+        ? [...sourceChat.enabledToolNames]
+        : undefined,
+      disabledToolNames: sourceChat.disabledToolNames
+        ? [...sourceChat.disabledToolNames]
+        : undefined,
+      enabledSkillNames: sourceChat.enabledSkillNames
+        ? [...sourceChat.enabledSkillNames]
+        : undefined,
+      disabledSkillNames: sourceChat.disabledSkillNames
+        ? [...sourceChat.disabledSkillNames]
+        : undefined,
+      enabledAgentNames: sourceChat.enabledAgentNames
+        ? [...sourceChat.enabledAgentNames]
+        : undefined,
+      disabledAgentNames: sourceChat.disabledAgentNames
+        ? [...sourceChat.disabledAgentNames]
+        : undefined,
+      fileToolAutoApproval: sourceChat.fileToolAutoApproval
+        ? { ...sourceChat.fileToolAutoApproval }
+        : undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setChats((currentChats) => [chat, ...currentChats]);
+    setActiveChatId(chat.id);
+    setEditingMessageId(null);
+    resetChatScrollState();
+    focusDraftTextarea();
+
+    try {
+      await saveChat(chat);
+      await saveActiveChatId(chat.id);
+      showSuccess("Chat created with same settings.");
+    } catch (error) {
+      console.error("Failed to save chat with same settings:", error);
     }
   }
 
@@ -236,7 +289,14 @@ export function useChatActions({
       chats.filter((chat) => chat.id !== chatId),
     );
     const nextChats =
-      remainingChats.length > 0 ? remainingChats : [createEmptyChat()];
+      remainingChats.length > 0
+        ? remainingChats
+        : [
+            {
+              ...createEmptyChat(),
+              fileToolAutoApproval: { ...fileToolAutoApprovalDefaults },
+            },
+          ];
     const nextActiveId =
       activeChatId === chatId
         ? nextChats[0].id
@@ -321,6 +381,9 @@ export function useChatActions({
       workspaceRoots: activeChat.workspaceRoots
         ? activeChat.workspaceRoots.map((root) => ({ ...root }))
         : undefined,
+      fileToolAutoApproval: activeChat.fileToolAutoApproval
+        ? { ...activeChat.fileToolAutoApproval }
+        : { ...fileToolAutoApprovalDefaults },
       createdAt: now,
       updatedAt: now,
     };
@@ -379,6 +442,24 @@ export function useChatActions({
   }
 
 
+
+  function toggleActiveChatFileToolAutoApproval(
+    key: keyof ChatFileToolAutoApproval,
+  ) {
+    if (!activeChat) return;
+
+    updateChat(activeChat.id, (chat) => {
+      const currentSettings = chat.fileToolAutoApproval ?? {};
+
+      return {
+        ...chat,
+        fileToolAutoApproval: {
+          ...currentSettings,
+          [key]: currentSettings[key] !== true,
+        },
+      };
+    });
+  }
 
   function toggleActiveChatSkill(skillName: string) {
     if (!activeChat) return;
@@ -487,11 +568,13 @@ export function useChatActions({
     saveEditedUserMessage,
     stopGeneration,
     createNewChat,
+    createChatWithSameSettings,
     switchChat,
     clearChat,
     removeChat,
     branchChatFromMessage,
     toggleActiveChatTool,
+    toggleActiveChatFileToolAutoApproval,
     toggleActiveChatSkill,
     toggleActiveChatAgent,
     renameChat,

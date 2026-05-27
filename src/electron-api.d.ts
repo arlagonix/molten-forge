@@ -41,6 +41,7 @@ type AiStreamDeltaEvent =
   | { type: "content"; delta: string }
   | { type: "reasoning"; delta: string }
   | { type: "reasoning_metadata"; delta: ChatReasoningMetadata }
+  | { type: "tool_call_delta"; toolCalls: AiToolCall[] }
   | { type: "raw"; data: unknown };
 
 type AiStreamResult = {

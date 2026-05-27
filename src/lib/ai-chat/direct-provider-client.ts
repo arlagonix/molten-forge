@@ -585,6 +585,7 @@ export async function streamProviderChat({
   settingsOverride,
   onContentDelta,
   onReasoningDelta,
+  onToolCallDelta,
 }: {
   provider: ProviderConfig;
   systemPrompt: string;
@@ -595,6 +596,7 @@ export async function streamProviderChat({
   settingsOverride?: ProviderGenerationSettings;
   onContentDelta: (delta: string) => void;
   onReasoningDelta?: (delta: string) => void;
+  onToolCallDelta?: (toolCalls: ChatToolCall[]) => void;
 }): Promise<StreamProviderChatResult> {
   if (!provider.baseUrl.trim()) {
     throw new Error("Provider base URL is required.");
@@ -659,6 +661,8 @@ export async function streamProviderChat({
           reasoningMetadata,
           event.delta,
         );
+      } else if (event.type === "tool_call_delta") {
+        onToolCallDelta?.(event.toolCalls);
       } else if (event.type === "raw") {
         reasoningMetadata = mergeReasoningMetadata(
           reasoningMetadata,

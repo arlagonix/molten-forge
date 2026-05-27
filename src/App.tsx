@@ -50,6 +50,7 @@ import {
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL,
   FILE_DELETE_TOOL_NAME,
+  buildFileToolAutoApprovalFromToolsSettings,
   compareToolsByDisplayOrder,
   isBuiltInToolName,
   isValidToolName,
@@ -842,7 +843,11 @@ export default function Home() {
         let nextActiveChatId = loadedActiveChatId;
 
         if (nextChats.length === 0) {
-          const chat = createEmptyChat();
+          const chat = {
+            ...createEmptyChat(),
+            fileToolAutoApproval:
+              buildFileToolAutoApprovalFromToolsSettings(loadedToolsSettings),
+          };
           nextChats = [chat];
           nextActiveChatId = chat.id;
           await saveChat(chat);
@@ -879,7 +884,11 @@ export default function Home() {
       } catch (error) {
         console.error("Failed to load app data from IndexedDB:", error);
         const fallbackProvider = normalizeProviderForState(defaultProvider);
-        const fallbackChat = createEmptyChat();
+        const fallbackChat = {
+          ...createEmptyChat(),
+          fileToolAutoApproval:
+            buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
+        };
         savedChatSnapshotsRef.current = {
           [fallbackChat.id]: JSON.stringify(fallbackChat),
         };
@@ -1396,11 +1405,13 @@ export default function Home() {
     saveEditedUserMessage,
     stopGeneration,
     createNewChat,
+    createChatWithSameSettings,
     switchChat,
     clearChat,
     removeChat,
     branchChatFromMessage,
     toggleActiveChatTool,
+    toggleActiveChatFileToolAutoApproval,
     toggleActiveChatSkill,
     toggleActiveChatAgent,
     renameChat,
@@ -1415,6 +1426,8 @@ export default function Home() {
     globallyEnabledToolNames,
     globallyEnabledSkillNames,
     globallyEnabledAgentNames,
+    fileToolAutoApprovalDefaults:
+      buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
     isSending,
     messageElementRefs,
     setActiveChatId,
@@ -1604,6 +1617,7 @@ export default function Home() {
         onGenerateChatTitle={stableGenerateChatTitle}
         onRemoveChat={removeChat}
         onCreateNewChat={createNewChat}
+        onCreateChatWithSameSettings={createChatWithSameSettings}
         onOpenSettings={() => setSettingsOpen(true)}
         onClearChat={clearChat}
       />
@@ -1777,6 +1791,8 @@ export default function Home() {
         tools={availableTools}
         selectedToolNames={activeChatEnabledToolNames}
         onToggleTool={toggleActiveChatTool}
+        fileToolAutoApproval={activeChat?.fileToolAutoApproval ?? {}}
+        onToggleFileToolAutoApproval={toggleActiveChatFileToolAutoApproval}
         skills={availableSkills}
         selectedSkillNames={activeChatEnabledSkillNames}
         activeSkillNames={activeChat?.activeSkillNames ?? []}

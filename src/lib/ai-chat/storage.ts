@@ -221,6 +221,18 @@ function normalizeToolsSettings(
       typeof value?.fileDeleteEnabled === "boolean"
         ? value.fileDeleteEnabled
         : false,
+    fileReplaceTextAutoApproveEnabled:
+      typeof value?.fileReplaceTextAutoApproveEnabled === "boolean"
+        ? value.fileReplaceTextAutoApproveEnabled
+        : false,
+    fileCreateAutoApproveEnabled:
+      typeof value?.fileCreateAutoApproveEnabled === "boolean"
+        ? value.fileCreateAutoApproveEnabled
+        : false,
+    fileDeleteAutoApproveEnabled:
+      typeof value?.fileDeleteAutoApproveEnabled === "boolean"
+        ? value.fileDeleteAutoApproveEnabled
+        : false,
   };
 }
 

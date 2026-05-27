@@ -9,6 +9,7 @@ import {
   Pencil,
   RefreshCcw,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
@@ -21,11 +22,12 @@ import { ThinkingBlock } from "@/components/ai-chat/thinking-block";
 import {
   AskUserBlock,
   ChecklistBlock,
-  FileToolApprovalBlock,
+  ToolApprovalBlock,
 } from "@/components/ai-chat/tool-interaction-blocks";
 import { TooltipIconButton } from "@/components/ai-chat/tooltip-icon-button";
 import { UserMessageEditor } from "@/components/ai-chat/user-message-editor";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Popover,
   PopoverContent,
@@ -40,7 +42,7 @@ import { getActiveVariant } from "@/lib/ai-chat/chat-utils";
 import type {
   AskUserRequest,
   AskUserResponse,
-  FileToolApprovalResponse,
+  ToolApprovalResponse,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatMessage,
@@ -132,7 +134,7 @@ type ChatMessageListProps = {
   ) => void | Promise<void>;
   onSubmitFileToolApprovalResponse: (
     toolCall: ChatToolCall,
-    response: FileToolApprovalResponse,
+    response: ToolApprovalResponse,
   ) => void | Promise<void>;
   onCancelAskUserRequest: (toolCallId: string) => void;
   onAskUserLayoutChange: () => void;
@@ -303,6 +305,7 @@ function getRelevantCollapsedKeys(message: ChatMessage) {
       step.type === "tool_execution" ||
       step.type === "agent_call" ||
       step.type === "user_input" ||
+      step.type === "approval" ||
       step.type === "file_approval" ||
       step.type === "checklist"
     ) {
@@ -543,6 +546,46 @@ const ChatMessageItem = memo(
                 );
               }
 
+              if (step.type === "tool_building") {
+                const toolNames = [
+                  ...new Set(
+                    step.toolCalls
+                      .map((toolCall) => toolCall.function.name.trim())
+                      .filter(Boolean),
+                  ),
+                ];
+                const toolName = toolNames.join(", ");
+
+                return (
+                  <article
+                    key={step.id}
+                    className="flex w-full min-w-0 max-w-full justify-start"
+                  >
+                    <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+                      <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <Wrench className="size-3.5 shrink-0" />
+                          <span className="shrink-0 truncate">Tool building</span>
+                          <span className="shrink-0 text-muted-foreground/60">•</span>
+                          <span className="inline-flex shrink-0 items-center gap-1 text-amber-600 dark:text-amber-400">
+                            <Spinner className="size-3.5" />
+                            In progress
+                          </span>
+                          {toolName ? (
+                            <>
+                              <span className="shrink-0 text-muted-foreground/60">•</span>
+                              <span className="min-w-0 truncate normal-case tracking-normal text-muted-foreground/85">
+                                {toolName}
+                              </span>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                );
+              }
+
               if (step.type === "agent_call") {
                 void isLatestProcessStep;
                 void stepFlushVersion;
@@ -588,13 +631,13 @@ const ChatMessageItem = memo(
                 );
               }
 
-              if (step.type === "file_approval") {
+              if (step.type === "approval" || step.type === "file_approval") {
                 const manualCollapsed = collapsedToolStepIds[step.id];
                 const isCollapsed =
                   manualCollapsed ?? step.status !== "waiting";
 
                 return (
-                  <FileToolApprovalBlock
+                  <ToolApprovalBlock
                     key={step.id}
                     id={step.id}
                     request={step.request}
@@ -632,12 +675,16 @@ const ChatMessageItem = memo(
                 );
               }
 
-              return renderToolExecutionBlock({
-                id: step.id,
-                toolCall: step.toolCall,
-                toolResult: step.toolResult,
-                status: step.status,
-              });
+              if (step.type === "tool_execution") {
+                return renderToolExecutionBlock({
+                  id: step.id,
+                  toolCall: step.toolCall,
+                  toolResult: step.toolResult,
+                  status: step.status,
+                });
+              }
+
+              return null;
             })}
           </div>
         )}

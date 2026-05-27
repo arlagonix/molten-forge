@@ -1,4 +1,5 @@
 import {
+  Copy,
   Edit3,
   Loader2,
   MoreHorizontal,
@@ -52,6 +53,7 @@ type ChatSidebarProps = {
   onGenerateChatTitle: (chatId: string) => void;
   onRemoveChat: (chatId: string) => void;
   onCreateNewChat: () => void;
+  onCreateChatWithSameSettings: (chatId: string) => void;
   onOpenSettings: () => void;
   onClearChat: (chatId: string) => void;
 };
@@ -72,6 +74,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onGenerateChatTitle,
   onRemoveChat,
   onCreateNewChat,
+  onCreateChatWithSameSettings,
   onOpenSettings,
   onClearChat,
 }: ChatSidebarProps) {
@@ -258,8 +261,10 @@ export const ChatSidebar = memo(function ChatSidebar({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
-              align="end"
-              className=""
+              side="right"
+              align="start"
+              sideOffset={0}
+              className="-translate-x-8 translate-y-8"
               onCloseAutoFocus={(event) => event.preventDefault()}
             >
               <DropdownMenuItem
@@ -289,6 +294,15 @@ export const ChatSidebar = memo(function ChatSidebar({
                   <Sparkles className="size-4" />
                 )}
                 Generate title
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onCreateChatWithSameSettings(chat.id);
+                }}
+              >
+                <Copy className="size-4" />
+                New with same settings
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(event) => {

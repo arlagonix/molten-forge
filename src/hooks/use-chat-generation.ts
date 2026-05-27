@@ -14,6 +14,9 @@ import {
   ASK_USER_TOOL_NAME,
   CHECKLIST_WRITE_TOOL_NAME,
   CALL_AGENT_TOOL_NAME,
+  FILE_CREATE_TOOL_NAME,
+  FILE_DELETE_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
   createAgentToolResult,
   createCallAgentTool,
@@ -24,6 +27,8 @@ import {
   parseFileToolApprovalRequestFromToolCall,
   parseSkillMentionNames,
   requiresFileToolApproval,
+  requiresToolApproval,
+  createToolApprovalRequest,
 } from "@/lib/ai-chat/builtin-tools";
 import { streamProviderChat } from "@/lib/ai-chat/direct-provider-client";
 import type { StreamProviderChatResult } from "@/lib/ai-chat/direct-provider-client";
@@ -66,8 +71,9 @@ import {
 import type {
   AgentsSettings,
   AskUserResponse,
-  FileToolApprovalResponse,
+  ToolApprovalResponse,
   ChatAgentCall,
+  ChatFileToolAutoApproval,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatReasoningMetadata,
@@ -564,7 +570,7 @@ export function useChatGeneration({
       (variant) => ({
         ...variant,
         processSteps: (variant.processSteps ?? []).map((step) =>
-          step.id === stepId && step.type === "file_approval"
+          step.id === stepId && (step.type === "approval" || step.type === "file_approval")
             ? { ...step, status }
             : step,
         ),
@@ -578,7 +584,7 @@ export function useChatGeneration({
     assistantMessageId: string,
     variantId: string,
     stepId: string,
-    response: FileToolApprovalResponse,
+    response: ToolApprovalResponse,
     toolResult: ChatToolResult,
   ) {
     updateAssistantVariant(
@@ -588,7 +594,7 @@ export function useChatGeneration({
       (variant) => ({
         ...variant,
         processSteps: (variant.processSteps ?? []).map((step) =>
-          step.id === stepId && step.type === "file_approval"
+          step.id === stepId && (step.type === "approval" || step.type === "file_approval")
             ? {
                 ...step,
                 status: "complete",
@@ -617,6 +623,7 @@ export function useChatGeneration({
     loadedTools,
     availableSkillsByName,
     workspaceRoots: activeChat?.workspaceRoots ?? [],
+    fileToolAutoApproval: activeChat?.fileToolAutoApproval,
     modelSelectableSkillNames: activeChat
       ? getEnabledSkillsForChat({
           chat: activeChat,
@@ -705,6 +712,80 @@ export function useChatGeneration({
     });
 
     return thinkingStepId;
+  }
+
+  function upsertToolBuildingProcessStep(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    bufferKey: string,
+    toolCalls: ChatToolCall[],
+  ) {
+    if (toolCalls.length === 0) return;
+
+    const activeStep = getActiveStreamProcessStep(bufferKey);
+    if (activeStep?.type === "thinking" && activeStep.id) {
+      flushBufferedAssistantVariant(bufferKey);
+      completeAssistantThinkingStep(
+        chatId,
+        assistantMessageId,
+        variantId,
+        activeStep.id,
+      );
+    }
+
+    const now = new Date().toISOString();
+    const existingStepId =
+      activeStep?.type === "tool_building" ? activeStep.id : undefined;
+
+    if (existingStepId) {
+      updateAssistantVariant(
+        chatId,
+        assistantMessageId,
+        variantId,
+        (variant) => ({
+          ...variant,
+          processSteps: (variant.processSteps ?? []).map((step) =>
+            step.id === existingStepId && step.type === "tool_building"
+              ? { ...step, toolCalls, updatedAt: now }
+              : step,
+          ),
+        }),
+        { touch: false },
+      );
+      return;
+    }
+
+    const stepId = createId();
+    appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
+      {
+        id: stepId,
+        type: "tool_building",
+        status: "running",
+        toolCalls,
+        updatedAt: now,
+      },
+    ]);
+    setActiveStreamProcessStep(bufferKey, { type: "tool_building", id: stepId });
+  }
+
+  function removeToolBuildingProcessSteps(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+  ) {
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: (variant.processSteps ?? []).filter(
+          (step) => step.type !== "tool_building",
+        ),
+      }),
+      { touch: false },
+    );
   }
 
   function selectAssistantVariant(messageId: string, variantIndex: number) {
@@ -894,6 +975,22 @@ export function useChatGeneration({
     ];
   }
 
+  function getChatFileToolAutoApproval(chatId: string) {
+    return chats.find((chat) => chat.id === chatId)?.fileToolAutoApproval;
+  }
+
+  function isFileToolCallAutoApproved(
+    toolName: string,
+    settings?: ChatFileToolAutoApproval,
+  ) {
+    if (toolName === FILE_CREATE_TOOL_NAME) return settings?.create === true;
+    if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) {
+      return settings?.replaceText === true;
+    }
+    if (toolName === FILE_DELETE_TOOL_NAME) return settings?.delete === true;
+    return false;
+  }
+
   function composeSystemPrompt(activeSkillNames: string[]) {
     return buildSystemPromptWithActiveSkills({
       systemPrompt,
@@ -933,7 +1030,9 @@ export function useChatGeneration({
       (variant) => ({
         ...variant,
         processSteps: keepOnlyLatestChecklistListStep(
-          cancelUnfinishedChecklistListSteps(variant.processSteps ?? []),
+          cancelUnfinishedChecklistListSteps(variant.processSteps ?? []).filter(
+            (step) => step.type !== "tool_building",
+          ),
         ),
       }),
       { touch: false },
@@ -1447,40 +1546,72 @@ export function useChatGeneration({
               const childWorkspaceRoots =
                 chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [];
 
-              if (requiresFileToolApproval(childToolCall.function.name)) {
+              const childTool = availableToolsByName.get(
+                childToolCall.function.name,
+              );
+
+              if (requiresToolApproval(childToolCall.function.name, childTool)) {
+                const autoApproval = getChatFileToolAutoApproval(chatId);
+                const autoApproved =
+                  requiresFileToolApproval(childToolCall.function.name) &&
+                  isFileToolCallAutoApproved(
+                    childToolCall.function.name,
+                    autoApproval,
+                  );
                 const approvalStepId = createId();
-                appendAssistantProcessSteps(
-                  chatId,
-                  assistantMessageId,
-                  variantId,
-                  [
-                    {
-                      id: approvalStepId,
-                      type: "file_approval" as const,
-                      status: "waiting" as const,
-                      toolCall: childToolCall,
-                      request: parseFileToolApprovalRequestFromToolCall(
-                        childToolCall,
-                        childWorkspaceRoots,
-                      ),
-                    },
-                    {
-                      id: createId(),
-                      type: "tool_execution" as const,
-                      status: "pending" as const,
-                      toolCall: childToolCall,
-                    },
-                  ],
-                );
+                const executionStepId = createId();
+
+                if (autoApproved) {
+                  appendAssistantProcessSteps(
+                    chatId,
+                    assistantMessageId,
+                    variantId,
+                    [
+                      {
+                        id: executionStepId,
+                        type: "tool_execution" as const,
+                        status: "pending" as const,
+                        toolCall: childToolCall,
+                      },
+                    ],
+                  );
+                } else {
+                  appendAssistantProcessSteps(
+                    chatId,
+                    assistantMessageId,
+                    variantId,
+                    [
+                      {
+                        id: approvalStepId,
+                        type: "approval" as const,
+                        status: "waiting" as const,
+                        toolCall: childToolCall,
+                        request: requiresFileToolApproval(childToolCall.function.name)
+                          ? parseFileToolApprovalRequestFromToolCall(
+                              childToolCall,
+                              childWorkspaceRoots,
+                            )
+                          : createToolApprovalRequest(childToolCall, childTool),
+                      },
+                      {
+                        id: executionStepId,
+                        type: "tool_execution" as const,
+                        status: "pending" as const,
+                        toolCall: childToolCall,
+                      },
+                    ],
+                  );
+                }
 
                 const toolResult = await executeToolCall(childToolCall, {
                   chatId,
                   assistantMessageId,
                   variantId,
-                  stepId: approvalStepId,
+                  stepId: autoApproved ? executionStepId : approvalStepId,
                   signal,
                   activeSkillNames: agent.loadedSkillNames ?? [],
                   workspaceRoots: childWorkspaceRoots,
+                  fileToolAutoApproval: autoApproval,
                 });
                 completeAssistantToolExecutionStepForResult(
                   chatId,
@@ -1702,29 +1833,41 @@ export function useChatGeneration({
           }
         }
 
-        if (requiresFileToolApproval(toolCall.function.name)) {
+        const tool = availableToolsByName.get(toolCall.function.name);
+        if (requiresToolApproval(toolCall.function.name, tool)) {
+          const autoApproval = getChatFileToolAutoApproval(chatId);
+          const autoApproved =
+            requiresFileToolApproval(toolCall.function.name) &&
+            isFileToolCallAutoApproved(
+              toolCall.function.name,
+              autoApproval,
+            );
+
           try {
-            toolSteps.push(
-              {
+            if (!autoApproved) {
+              toolSteps.push({
                 id: createId(),
-                type: "file_approval" as const,
+                type: "approval" as const,
                 status: "waiting" as const,
                 toolCall,
-                request: parseFileToolApprovalRequestFromToolCall(
-                  toolCall,
-                  chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [],
-                ),
-              },
-              {
-                id: createId(),
-                type: "tool_execution" as const,
-                status: "pending" as const,
-                toolCall,
-              },
-            );
+                request: requiresFileToolApproval(toolCall.function.name)
+                  ? parseFileToolApprovalRequestFromToolCall(
+                      toolCall,
+                      chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [],
+                    )
+                  : createToolApprovalRequest(toolCall, tool),
+              });
+            }
+
+            toolSteps.push({
+              id: createId(),
+              type: "tool_execution" as const,
+              status: "pending" as const,
+              toolCall,
+            });
             continue;
           } catch {
-            // Keep invalid file approval calls visible as failed tool executions once
+            // Keep invalid approval calls visible as failed tool executions once
             // executeToolCall returns the validation error.
           }
         }
@@ -1760,7 +1903,12 @@ export function useChatGeneration({
         (variant) => ({
           ...variant,
           toolCalls: [...(variant.toolCalls ?? []), ...toolCalls],
-          processSteps: [...(variant.processSteps ?? []), ...toolSteps],
+          processSteps: [
+            ...(variant.processSteps ?? []).filter(
+              (step) => step.type !== "tool_building",
+            ),
+            ...toolSteps,
+          ],
         }),
         { touch: false },
       );
@@ -1788,6 +1936,7 @@ export function useChatGeneration({
                 step.type !== "tool_execution" &&
                 step.type !== "agent_call" &&
                 step.type !== "user_input" &&
+                step.type !== "approval" &&
                 step.type !== "file_approval" &&
                 step.type !== "checklist"
               ) {
@@ -2054,6 +2203,19 @@ export function useChatGeneration({
               scheduleStickyScrollToBottom();
             }
           },
+          onToolCallDelta: (toolCalls) => {
+            upsertToolBuildingProcessStep(
+              chatId,
+              assistantMessageId,
+              variantId,
+              bufferKey,
+              toolCalls,
+            );
+
+            if (chatId === activeChatId) {
+              scheduleStickyScrollToBottom({ settleFrames: 2 });
+            }
+          },
         });
 
         lastStreamResult = streamResult;
@@ -2079,6 +2241,7 @@ export function useChatGeneration({
         }
 
         flushBufferedAssistantVariant(bufferKey);
+        removeToolBuildingProcessSteps(chatId, assistantMessageId, variantId);
 
         const toolCalls = streamResult.toolCalls ?? [];
         if (!toolCalls.length) break;
@@ -2151,6 +2314,7 @@ export function useChatGeneration({
                       toolStepIdsByToolCallId.get(toolCall.id) ?? toolCall.id,
                     signal: controller.signal,
                     activeSkillNames: currentActiveSkillNames,
+                    fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
                   });
 
             applyToolResultToVisibleStep(toolResult);

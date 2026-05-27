@@ -21,8 +21,8 @@ import type {
   AskUserRequest,
   AskUserResponse,
   ChecklistWriteRequest,
-  FileToolApprovalRequest,
-  FileToolApprovalResponse,
+  ToolApprovalRequest,
+  ToolApprovalResponse,
   ToolExecutionStatus,
   UserInputStatus,
 } from "@/lib/ai-chat/types";
@@ -77,9 +77,9 @@ function formatUserInputStatus(status: UserInputStatus | undefined) {
   return "Waiting";
 }
 
-function formatFileApprovalHeaderStatus(
+function formatToolApprovalHeaderStatus(
   status: UserInputStatus,
-  response?: FileToolApprovalResponse,
+  response?: ToolApprovalResponse,
 ) {
   if (status === "waiting") return "Waiting";
   if (status === "complete") return response?.approved ? "Approved" : undefined;
@@ -986,7 +986,7 @@ export const AskUserBlock = memo(function AskUserBlock({
   );
 });
 
-export const FileToolApprovalBlock = memo(function FileToolApprovalBlock({
+export const ToolApprovalBlock = memo(function ToolApprovalBlock({
   id,
   request,
   response,
@@ -998,13 +998,13 @@ export const FileToolApprovalBlock = memo(function FileToolApprovalBlock({
   onLayoutChange,
 }: {
   id: string;
-  request: FileToolApprovalRequest;
-  response?: FileToolApprovalResponse;
+  request: ToolApprovalRequest;
+  response?: ToolApprovalResponse;
   status?: UserInputStatus;
   canSubmit: boolean;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
-  onSubmit: (response: FileToolApprovalResponse) => void;
+  onSubmit: (response: ToolApprovalResponse) => void;
   onLayoutChange?: () => void;
 }) {
   const effectiveStatus = status ?? "waiting";
@@ -1019,7 +1019,7 @@ export const FileToolApprovalBlock = memo(function FileToolApprovalBlock({
     onSubmit({ approved, answeredAt: new Date().toISOString() });
   }
 
-  const approvalStatusText = formatFileApprovalHeaderStatus(
+  const approvalStatusText = formatToolApprovalHeaderStatus(
     effectiveStatus,
     response,
   );
@@ -1036,7 +1036,7 @@ export const FileToolApprovalBlock = memo(function FileToolApprovalBlock({
           <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
             <div className="flex min-w-0 items-center gap-2">
               <ShieldCheck className="size-3.5 shrink-0" />
-              <span className="truncate">File approval</span>
+              <span className="truncate">Approval</span>
               {approvalStatusText && (
                 <>
                   <span className="text-muted-foreground/60">•</span>
@@ -1081,12 +1081,26 @@ export const FileToolApprovalBlock = memo(function FileToolApprovalBlock({
               {request.description?.trim() && (
                 <div>{request.description.trim()}</div>
               )}
-              <div className="min-w-0 text-sm">
-                <span className="text-muted-foreground">Path: </span>
-                <span className="font-mono text-muted-foreground/85 [overflow-wrap:anywhere]">
-                  {request.path}
-                </span>
-              </div>
+              {request.path?.trim() && (
+                <div className="min-w-0 text-sm">
+                  <span className="text-muted-foreground">Target: </span>
+                  <span className="font-mono text-muted-foreground/85 [overflow-wrap:anywhere]">
+                    {request.path}
+                  </span>
+                </div>
+              )}
+              {request.details?.length ? (
+                <div className="grid gap-1 text-sm">
+                  {request.details.map((detail) => (
+                    <div key={detail.label} className="min-w-0">
+                      <span className="text-muted-foreground">{detail.label}: </span>
+                      <span className="text-muted-foreground/85 [overflow-wrap:anywhere]">
+                        {detail.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             {isWaiting && canSubmit && (
@@ -1120,7 +1134,7 @@ export const FileToolApprovalBlock = memo(function FileToolApprovalBlock({
 
             {response && effectiveStatus !== "waiting" && (
               <div className="text-sm leading-5 text-muted-foreground">
-                File operation {response.approved ? "approved" : "cancelled"}.
+                Operation {response.approved ? "approved" : "cancelled"}.
               </div>
             )}
           </div>

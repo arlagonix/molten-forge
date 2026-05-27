@@ -182,28 +182,32 @@ export type AskUserResponse = {
   answeredAt: string;
 };
 
-export type FileToolApprovalAction =
+export type ToolApprovalAction =
   | "replacement"
   | "creation"
   | "deletion"
   | "operation";
 
-export type FileToolApprovalRequest = {
+export type ToolApprovalRequest = {
   title: string;
   description?: string;
   toolName: string;
-  action: FileToolApprovalAction;
-  path: string;
+  action: ToolApprovalAction;
+  path?: string;
   details?: {
     label: string;
     value: string;
   }[];
 };
 
-export type FileToolApprovalResponse = {
+export type ToolApprovalResponse = {
   approved: boolean;
   answeredAt: string;
 };
+
+export type FileToolApprovalAction = ToolApprovalAction;
+export type FileToolApprovalRequest = ToolApprovalRequest;
+export type FileToolApprovalResponse = ToolApprovalResponse;
 
 export type UserInputStatus = "waiting" | "complete" | "cancelled" | "failed";
 
@@ -226,6 +230,13 @@ export type ChatAssistantProcessStep =
       status?: ThinkingStatus;
       startedAt?: string;
       completedAt?: string;
+    }
+  | {
+      id: string;
+      type: "tool_building";
+      status?: "running";
+      toolCalls: ChatToolCall[];
+      updatedAt?: string;
     }
   | {
       id: string;
@@ -257,11 +268,11 @@ export type ChatAssistantProcessStep =
     }
   | {
       id: string;
-      type: "file_approval";
+      type: "approval" | "file_approval";
       status?: UserInputStatus;
       toolCall: ChatToolCall;
-      request: FileToolApprovalRequest;
-      response?: FileToolApprovalResponse;
+      request: ToolApprovalRequest;
+      response?: ToolApprovalResponse;
       toolResult?: ChatToolResult;
     }
   | {
@@ -321,6 +332,12 @@ export type ChatWorkspaceRoot = {
   createdAt: string;
 };
 
+export type ChatFileToolAutoApproval = {
+  create?: boolean;
+  replaceText?: boolean;
+  delete?: boolean;
+};
+
 export type ChatSession = {
   id: string;
   title: string;
@@ -339,6 +356,7 @@ export type ChatSession = {
   disabledAgentNames?: string[];
   activeSkillNames?: string[];
   workspaceRoots?: ChatWorkspaceRoot[];
+  fileToolAutoApproval?: ChatFileToolAutoApproval;
 };
 
 export type ApiToolCall = ChatToolCall;
@@ -386,6 +404,7 @@ export type ToolDefinition = {
   timeoutMs: number;
   maxConcurrentRuns?: number;
   delayBetweenRunsMs?: number;
+  requiresApproval?: boolean;
 };
 
 export type LoadedToolInfo = ToolDefinition;
@@ -498,6 +517,9 @@ export type ToolsSettings = {
   fileReplaceTextEnabled: boolean;
   fileCreateEnabled: boolean;
   fileDeleteEnabled: boolean;
+  fileReplaceTextAutoApproveEnabled: boolean;
+  fileCreateAutoApproveEnabled: boolean;
+  fileDeleteAutoApproveEnabled: boolean;
 };
 
 export type SkillsSettings = {

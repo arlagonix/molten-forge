@@ -3,9 +3,24 @@ import { Check, ChevronDown, ChevronRight, Wrench, X } from "lucide-react";
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { Spinner } from "@/components/ui/spinner";
 import {
+  ASK_USER_TOOL,
+  CALL_AGENT_TOOL_NAME,
+  CHECKLIST_WRITE_TOOL,
+  FILE_CREATE_TOOL,
+  FILE_CREATE_TOOL_NAME,
+  FILE_DELETE_TOOL,
+  FILE_DELETE_TOOL_NAME,
+  FILE_FIND_TOOL,
   FILE_FIND_TOOL_NAME,
+  FILE_READ_TOOL,
   FILE_READ_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL,
+  FILE_REPLACE_TEXT_TOOL_NAME,
+  FILE_SEARCH_TEXT_TOOL,
+  FILE_SEARCH_TEXT_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
+  WEB_FETCH_TOOL,
+  WEB_FETCH_TOOL_NAME,
 } from "@/lib/ai-chat/builtin-tools";
 import { buildToolExecutionPreviewForCall } from "@/lib/ai-chat/tool-preview";
 import type {
@@ -16,9 +31,24 @@ import type {
   ToolExecutionStatus,
 } from "@/lib/ai-chat/types";
 
-const TOOL_DESCRIPTION_PREVIEW_MAX_LENGTH = 95;
 const TOOL_INFO_CODE_BLOCK_CLASS_NAME =
   "chat-markdown-compact chat-tool-info-codeblock";
+
+const BUILTIN_TOOL_DESCRIPTIONS: Record<string, string> = {
+  [ASK_USER_TOOL.name]: ASK_USER_TOOL.description,
+  [CHECKLIST_WRITE_TOOL.name]: CHECKLIST_WRITE_TOOL.description,
+  [WEB_FETCH_TOOL.name]: WEB_FETCH_TOOL.description,
+  [FILE_READ_TOOL.name]: FILE_READ_TOOL.description,
+  [FILE_FIND_TOOL.name]: FILE_FIND_TOOL.description,
+  [FILE_SEARCH_TEXT_TOOL.name]: FILE_SEARCH_TEXT_TOOL.description,
+  [FILE_REPLACE_TEXT_TOOL.name]: FILE_REPLACE_TEXT_TOOL.description,
+  [FILE_CREATE_TOOL.name]: FILE_CREATE_TOOL.description,
+  [FILE_DELETE_TOOL.name]: FILE_DELETE_TOOL.description,
+  [LOAD_SKILL_TOOL_NAME]:
+    "Load the full instructions for one relevant skill and activate it for this chat.",
+  [CALL_AGENT_TOOL_NAME]:
+    "Delegate a focused subtask to one configured agent and return the result to the current chat.",
+};
 
 function formatJsonLikeCodeBlock(value: string) {
   const trimmed = value.trim();
@@ -171,17 +201,18 @@ function getLoadSkillDetails(toolResult?: ChatToolResult) {
   return { instructions, recommendedToolNames, compactOutput };
 }
 
-function formatToolDescriptionPreview(description?: string) {
-  const normalizedDescription = description?.replace(/\s+/g, " ").trim() || "";
-  if (!normalizedDescription) return "";
+function normalizeToolDescription(description?: string) {
+  return description?.replace(/\s+/g, " ").trim() || "";
+}
 
-  if (normalizedDescription.length <= TOOL_DESCRIPTION_PREVIEW_MAX_LENGTH) {
-    return normalizedDescription;
-  }
+function getToolDescription(toolName: string, loadedTools: LoadedToolInfo[]) {
+  const customDescription = loadedTools.find(
+    (candidate) => candidate.name === toolName,
+  )?.description;
 
-  return `${normalizedDescription
-    .slice(0, TOOL_DESCRIPTION_PREVIEW_MAX_LENGTH)
-    .trimEnd()}…`;
+  return normalizeToolDescription(
+    customDescription || BUILTIN_TOOL_DESCRIPTIONS[toolName],
+  );
 }
 
 function getEffectiveToolStatus(
@@ -196,7 +227,7 @@ function getEffectiveToolStatus(
 function renderToolStatus(status: ToolExecutionStatus) {
   if (status === "failed") {
     return (
-      <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400">
+      <span className="inline-flex shrink-0 items-center gap-1 text-red-600 dark:text-red-400">
         <X className="size-3.5" />
         Failed
       </span>
@@ -205,7 +236,7 @@ function renderToolStatus(status: ToolExecutionStatus) {
 
   if (status === "complete") {
     return (
-      <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+      <span className="inline-flex shrink-0 items-center gap-1 text-green-600 dark:text-green-400">
         <Check className="size-3.5" />
         Complete
       </span>
@@ -213,7 +244,7 @@ function renderToolStatus(status: ToolExecutionStatus) {
   }
 
   return (
-    <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+    <span className="inline-flex shrink-0 items-center gap-1 text-amber-600 dark:text-amber-400">
       <Spinner className="size-3.5" />
       {status === "pending" ? "Waiting" : "Running"}
     </span>
@@ -253,16 +284,33 @@ function getStringArgument(args: Record<string, unknown>, key: string) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function getFileToolHeaderDetail(toolCall: ChatToolCall) {
+function getToolHeaderDetail(toolCall: ChatToolCall) {
+  const args = parseToolCallArguments(toolCall);
+
   if (toolCall.function.name === FILE_READ_TOOL_NAME) {
-    const args = parseToolCallArguments(toolCall);
     return getStringArgument(args, "path");
   }
 
   if (toolCall.function.name === FILE_FIND_TOOL_NAME) {
-    const args = parseToolCallArguments(toolCall);
     const query = getStringArgument(args, "query");
     return query ? `query: ${query}` : "all workspace files";
+  }
+
+  if (toolCall.function.name === FILE_SEARCH_TEXT_TOOL_NAME) {
+    const query = getStringArgument(args, "query");
+    return query ? `query: ${query}` : "";
+  }
+
+  if (
+    toolCall.function.name === FILE_CREATE_TOOL_NAME ||
+    toolCall.function.name === FILE_REPLACE_TEXT_TOOL_NAME ||
+    toolCall.function.name === FILE_DELETE_TOOL_NAME
+  ) {
+    return getStringArgument(args, "path");
+  }
+
+  if (toolCall.function.name === WEB_FETCH_TOOL_NAME) {
+    return getStringArgument(args, "url");
   }
 
   return "";
@@ -291,22 +339,19 @@ export function ToolExecutionBlock({
     loadedTools,
     toolResult,
   );
-  const toolInfo = loadedTools.find(
-    (candidate) => candidate.name === toolCall.function.name,
-  );
-  const toolDescription = formatToolDescriptionPreview(toolInfo?.description);
   const loadedSkillName = getLoadSkillName(toolCall, toolResult);
   const loadSkillDetails = getLoadSkillDetails(toolResult);
   const isLoadSkillTool = toolCall.function.name === LOAD_SKILL_TOOL_NAME;
-  const showLoadSkillSummary =
-    isLoadSkillTool &&
-    loadedSkillName &&
-    effectiveStatus === "complete" &&
-    !toolResult?.isError;
+  const toolDescription = getToolDescription(
+    toolCall.function.name,
+    loadedTools,
+  );
   const showToolInput =
     hasMeaningfulToolInput(toolCall.function.arguments || "") &&
     (!executionPreview || executionPreview.usesStdin);
-  const fileToolHeaderDetail = getFileToolHeaderDetail(toolCall);
+  const toolHeaderDetail = isLoadSkillTool
+    ? loadedSkillName
+    : getToolHeaderDetail(toolCall);
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
@@ -318,16 +363,18 @@ export function ToolExecutionBlock({
           aria-expanded={!isCollapsed}
         >
           <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
               <Wrench className="size-3.5 shrink-0" />
-              <span className="truncate">{toolCall.function.name}</span>
-              <span className="text-muted-foreground/60">•</span>
+              <span className="shrink-0 truncate">
+                {toolCall.function.name}
+              </span>
+              <span className="shrink-0 text-muted-foreground/60">•</span>
               {renderToolStatus(effectiveStatus)}
-              {fileToolHeaderDetail ? (
+              {toolHeaderDetail ? (
                 <>
-                  <span className="text-muted-foreground/60">•</span>
+                  <span className="shrink-0 text-muted-foreground/60">•</span>
                   <span className="min-w-0 truncate normal-case tracking-normal text-muted-foreground/85">
-                    {fileToolHeaderDetail}
+                    {toolHeaderDetail}
                   </span>
                 </>
               ) : null}
@@ -338,22 +385,15 @@ export function ToolExecutionBlock({
               <ChevronDown className="size-3.5 shrink-0" />
             )}
           </div>
-          {showLoadSkillSummary ? (
-            <div className="mt-2 text-sm normal-case leading-5 tracking-normal text-muted-foreground/85">
-              Loaded skill{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">
-                {loadedSkillName}
-              </code>
-            </div>
-          ) : toolDescription ? (
-            <div className="mt-2 text-sm normal-case leading-5 tracking-normal text-muted-foreground/85">
-              {toolDescription}
-            </div>
-          ) : null}
         </button>
 
         {!isCollapsed && (
           <div className="mt-3 grid gap-3">
+            {toolDescription ? (
+              <div className="text-sm leading-5 text-muted-foreground/85">
+                {toolDescription}
+              </div>
+            ) : null}
             {renderToolExecutionPreview(executionPreview)}
             {showToolInput && (
               <div className="grid gap-1.5">

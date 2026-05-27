@@ -19,6 +19,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { isBuiltInToolName } from "@/lib/ai-chat/builtin-tools";
 import type {
+  ChatFileToolAutoApproval,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -31,6 +32,8 @@ type ChatCapabilitiesDialogProps = {
   tools: LoadedToolInfo[];
   selectedToolNames: string[];
   onToggleTool: (toolName: string) => void;
+  fileToolAutoApproval: ChatFileToolAutoApproval;
+  onToggleFileToolAutoApproval: (key: keyof ChatFileToolAutoApproval) => void;
   skills: LoadedSkillInfo[];
   selectedSkillNames: string[];
   activeSkillNames: string[];
@@ -105,6 +108,58 @@ function CapabilityRow({
         onClick={(event) => event.stopPropagation()}
         onCheckedChange={onToggle}
         className="mt-0.5 shrink-0 cursor-pointer"
+      />
+    </div>
+  );
+}
+
+type AutoApprovalRowProps = {
+  label: string;
+  description: string;
+  checked: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+};
+
+function AutoApprovalRow({
+  label,
+  description,
+  checked,
+  onToggle,
+  disabled,
+}: AutoApprovalRowProps) {
+  return (
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      className={cn(
+        "flex min-w-0 cursor-pointer items-center gap-3 border border-transparent px-2 py-2 outline-none hover:border-border hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        disabled && "cursor-not-allowed opacity-60",
+      )}
+      onClick={() => {
+        if (!disabled) onToggle();
+      }}
+      onKeyDown={(event) => {
+        if (disabled) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onToggle();
+        }
+      }}
+    >
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-base font-medium leading-6">{label}</div>
+        <div className="mt-0.5 text-sm leading-5 text-muted-foreground">
+          {description}
+        </div>
+      </div>
+      <Switch
+        checked={checked}
+        disabled={disabled}
+        tabIndex={-1}
+        onClick={(event) => event.stopPropagation()}
+        onCheckedChange={onToggle}
+        className="shrink-0 cursor-pointer"
       />
     </div>
   );
@@ -200,6 +255,8 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
   tools,
   selectedToolNames,
   onToggleTool,
+  fileToolAutoApproval,
+  onToggleFileToolAutoApproval,
   skills,
   selectedSkillNames,
   activeSkillNames,
@@ -258,7 +315,8 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
         <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle>Chat capabilities</DialogTitle>
           <DialogDescription>
-            Choose which tools, skills, and agents are available in this chat.
+            Choose which tools, skills, agents, and file approvals are available
+            in this chat.
           </DialogDescription>
         </DialogHeader>
 
@@ -365,6 +423,35 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
                 )}
               </div>
             </CapabilityPicker>
+
+            <section className="min-w-0 space-y-2">
+              <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                File auto-approval
+              </Label>
+              <div className="grid gap-1.5">
+                <AutoApprovalRow
+                  label="Auto-approve file create"
+                  description="Run file_create without showing an approval prompt."
+                  checked={fileToolAutoApproval.create === true}
+                  disabled={disabled}
+                  onToggle={() => onToggleFileToolAutoApproval("create")}
+                />
+                <AutoApprovalRow
+                  label="Auto-approve file replace text"
+                  description="Run file_replace_text without showing an approval prompt."
+                  checked={fileToolAutoApproval.replaceText === true}
+                  disabled={disabled}
+                  onToggle={() => onToggleFileToolAutoApproval("replaceText")}
+                />
+                <AutoApprovalRow
+                  label="Auto-approve file delete"
+                  description="Run file_delete without showing an approval prompt."
+                  checked={fileToolAutoApproval.delete === true}
+                  disabled={disabled}
+                  onToggle={() => onToggleFileToolAutoApproval("delete")}
+                />
+              </div>
+            </section>
           </div>
         </div>
       </DialogContent>

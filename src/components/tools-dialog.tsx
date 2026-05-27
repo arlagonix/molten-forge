@@ -149,6 +149,7 @@ const BUILTIN_FILE_TOOL_META = [
     id: "builtin-file-replace-text",
     name: BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME,
     setting: "fileReplaceTextEnabled" as const,
+    autoApproveSetting: "fileReplaceTextAutoApproveEnabled" as const,
     description: "Replaces exact text in a workspace file after user confirmation. Disabled by default.",
     parameters: {
       type: "object",
@@ -167,6 +168,7 @@ const BUILTIN_FILE_TOOL_META = [
     id: "builtin-file-create",
     name: BUILTIN_FILE_CREATE_TOOL_NAME,
     setting: "fileCreateEnabled" as const,
+    autoApproveSetting: "fileCreateAutoApproveEnabled" as const,
     description: "Creates a new UTF-8 text file in a workspace folder after user confirmation.",
     parameters: {
       type: "object",
@@ -184,6 +186,7 @@ const BUILTIN_FILE_TOOL_META = [
     id: "builtin-file-delete",
     name: BUILTIN_FILE_DELETE_TOOL_NAME,
     setting: "fileDeleteEnabled" as const,
+    autoApproveSetting: "fileDeleteAutoApproveEnabled" as const,
     description: "Moves a workspace file to the operating system Trash after user confirmation. Disabled by default.",
     parameters: {
       type: "object",
@@ -319,6 +322,7 @@ type ToolDraft = {
   timeoutMs: string;
   maxConcurrentRuns: string;
   delayBetweenRunsMs: string;
+  requiresApproval: boolean;
 };
 
 type ToolTestState = {
@@ -365,6 +369,7 @@ function createBlankToolDraft(): ToolDraft {
     timeoutMs: "30000",
     maxConcurrentRuns: "",
     delayBetweenRunsMs: "0",
+    requiresApproval: false,
   };
 }
 
@@ -381,7 +386,8 @@ function areToolDraftsEqual(left: ToolDraft, right: ToolDraft) {
     left.input === right.input &&
     left.timeoutMs === right.timeoutMs &&
     left.maxConcurrentRuns === right.maxConcurrentRuns &&
-    left.delayBetweenRunsMs === right.delayBetweenRunsMs
+    left.delayBetweenRunsMs === right.delayBetweenRunsMs &&
+    left.requiresApproval === right.requiresApproval
   );
 }
 
@@ -402,6 +408,7 @@ function toolToDraft(tool: LoadedToolInfo): ToolDraft {
         ? ""
         : String(tool.maxConcurrentRuns),
     delayBetweenRunsMs: String(tool.delayBetweenRunsMs ?? 0),
+    requiresApproval: tool.requiresApproval === true,
   };
 }
 
@@ -724,6 +731,7 @@ function draftToTool(draft: ToolDraft): LoadedToolInfo {
       Number.isFinite(delayBetweenRunsMs) && delayBetweenRunsMs > 0
         ? Math.round(delayBetweenRunsMs)
         : 0,
+    requiresApproval: draft.requiresApproval,
   };
 }
 
@@ -833,6 +841,10 @@ export const ToolsDialog = memo(function ToolsDialog({
   const selectedFileToolInfo = BUILTIN_FILE_TOOL_META.find(
     (tool) => tool.name === selectedToolName,
   );
+  const selectedFileToolAutoApproveSetting =
+    selectedFileToolInfo && "autoApproveSetting" in selectedFileToolInfo
+      ? selectedFileToolInfo.autoApproveSetting
+      : undefined;
   const selectedTool = useMemo(
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
@@ -1892,11 +1904,37 @@ export const ToolsDialog = memo(function ToolsDialog({
                         </p>
                         <p>
                           Reads and searches run directly. file_replace_text, file_create,
-                          and file_delete ask for user confirmation before writing. file_delete
-                          moves files to the operating system Trash.
+                          and file_delete ask for user confirmation before writing unless
+                          auto-approval is enabled for the chat. file_delete moves files
+                          to the operating system Trash.
                         </p>
                       </div>
                     </div>
+
+                    {selectedFileToolAutoApproveSetting ? (
+                      <div className="flex items-start justify-between gap-3 border bg-muted/20 p-3">
+                        <div className="grid gap-1">
+                          <Label>Auto-approve in new chats</Label>
+                          <p className="text-base leading-6 text-muted-foreground">
+                            Use this as the default auto-approval setting for
+                            newly created chats. Existing chats keep their own
+                            per-chat setting.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={
+                            toolsSettings[selectedFileToolAutoApproveSetting] === true
+                          }
+                          onCheckedChange={(checked) =>
+                            onToolsSettingsChange((current) => ({
+                              ...current,
+                              [selectedFileToolAutoApproveSetting]: checked,
+                            }))
+                          }
+                          className="mt-0.5 shrink-0 cursor-pointer"
+                        />
+                      </div>
+                    ) : null}
 
                     <div className="grid gap-2">
                       <Label>Parameters JSON schema</Label>
@@ -1956,6 +1994,21 @@ export const ToolsDialog = memo(function ToolsDialog({
 
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
                   <div className="grid gap-5 pb-1">
+                    <div className="grid gap-1">
+                      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <Wrench className="size-5 text-muted-foreground" />
+                        {toolDraft.name || "Custom tool"}
+                      </h3>
+                    </div>
+
+                    <div className="grid gap-1 border bg-muted/20 p-3">
+                      <Label>Description</Label>
+                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
+                        {toolDraft.description.trim() ||
+                          "Add a clear description so the model knows when to use this tool."}
+                      </p>
+                    </div>
+
                     <div className="grid gap-2">
                       <Label htmlFor="tool-name">Name</Label>
                       <Input
@@ -1978,6 +2031,23 @@ export const ToolsDialog = memo(function ToolsDialog({
                         }
                         placeholder="Describe when the model should use this tool."
                         className="min-h-40 resize-y"
+                      />
+                    </div>
+
+                    <div className="flex items-start justify-between gap-3 border bg-muted/20 p-3">
+                      <div className="grid gap-1">
+                        <Label htmlFor="tool-requires-approval">Requires approval</Label>
+                        <p className="text-sm leading-5 text-muted-foreground">
+                          Ask for user approval before running this custom tool.
+                        </p>
+                      </div>
+                      <Switch
+                        id="tool-requires-approval"
+                        checked={toolDraft.requiresApproval}
+                        onCheckedChange={(checked) =>
+                          updateToolDraft({ requiresApproval: checked })
+                        }
+                        className="mt-0.5 shrink-0 cursor-pointer"
                       />
                     </div>
 

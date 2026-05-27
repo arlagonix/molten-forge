@@ -88,6 +88,7 @@ type ToolDefinition = {
   timeoutMs: number;
   maxConcurrentRuns?: number;
   delayBetweenRunsMs?: number;
+  requiresApproval?: boolean;
 };
 
 type ToolExecutionPreview = {
@@ -167,6 +168,9 @@ type ToolsSettings = {
   fileReplaceTextEnabled: boolean;
   fileCreateEnabled: boolean;
   fileDeleteEnabled: boolean;
+  fileReplaceTextAutoApproveEnabled: boolean;
+  fileCreateAutoApproveEnabled: boolean;
+  fileDeleteAutoApproveEnabled: boolean;
 };
 
 type SkillsSettings = {
@@ -273,6 +277,9 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   fileReplaceTextEnabled: false,
   fileCreateEnabled: true,
   fileDeleteEnabled: false,
+  fileReplaceTextAutoApproveEnabled: false,
+  fileCreateAutoApproveEnabled: false,
+  fileDeleteAutoApproveEnabled: false,
 };
 const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   enabled: true,
@@ -763,6 +770,18 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
       typeof value.fileDeleteEnabled === "boolean"
         ? value.fileDeleteEnabled
         : false,
+    fileReplaceTextAutoApproveEnabled:
+      typeof value.fileReplaceTextAutoApproveEnabled === "boolean"
+        ? value.fileReplaceTextAutoApproveEnabled
+        : false,
+    fileCreateAutoApproveEnabled:
+      typeof value.fileCreateAutoApproveEnabled === "boolean"
+        ? value.fileCreateAutoApproveEnabled
+        : false,
+    fileDeleteAutoApproveEnabled:
+      typeof value.fileDeleteAutoApproveEnabled === "boolean"
+        ? value.fileDeleteAutoApproveEnabled
+        : false,
   };
 }
 
@@ -847,6 +866,7 @@ function normalizeToolDefinition(candidate: unknown): ToolDefinition {
       source.maxConcurrentRuns,
     ),
     delayBetweenRunsMs: normalizeNonNegativeInteger(source.delayBetweenRunsMs),
+    requiresApproval: source.requiresApproval === true,
   };
 }
 
@@ -2591,14 +2611,19 @@ function readFinalToolCalls(data: unknown): ToolCall[] {
   );
 }
 
-function mergeToolCallDelta(current: Map<number, ToolCall>, data: unknown) {
-  if (!data || typeof data !== "object") return;
+function mergeToolCallDelta(
+  current: Map<number, ToolCall>,
+  data: unknown,
+): ToolCall[] {
+  if (!data || typeof data !== "object") return [];
   const choices = "choices" in data ? data.choices : undefined;
-  if (!Array.isArray(choices)) return;
+  if (!Array.isArray(choices)) return [];
   const delta = choices[0]?.delta;
-  if (!delta || typeof delta !== "object") return;
+  if (!delta || typeof delta !== "object") return [];
   const toolCalls = "tool_calls" in delta ? delta.tool_calls : undefined;
-  if (!Array.isArray(toolCalls)) return;
+  if (!Array.isArray(toolCalls)) return [];
+
+  let changed = false;
 
   for (const rawCall of toolCalls) {
     if (!isPlainObject(rawCall)) continue;
@@ -2627,7 +2652,10 @@ function mergeToolCallDelta(current: Map<number, ToolCall>, data: unknown) {
         arguments: `${existing.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}`,
       },
     });
+    changed = true;
   }
+
+  return changed ? [...current.values()] : [];
 }
 
 function isSafeExternalUrl(url: string) {
@@ -4718,7 +4746,13 @@ ipcMain.handle(
         const eventFinishReason = readFinishReason(data);
         if (eventFinishReason) finishReason = eventFinishReason;
 
-        mergeToolCallDelta(streamedToolCalls, data);
+        const toolCallDelta = mergeToolCallDelta(streamedToolCalls, data);
+        if (toolCallDelta.length > 0) {
+          event.sender.send(`ai:stream-delta:${streamId}`, {
+            type: "tool_call_delta",
+            toolCalls: toolCallDelta,
+          });
+        }
 
         const reasoningMetadataDelta = readReasoningMetadataDelta(data);
         if (reasoningMetadataDelta) {

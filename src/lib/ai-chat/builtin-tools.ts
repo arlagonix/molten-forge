@@ -5,6 +5,7 @@ import type {
   AskUserResponse,
   FileToolApprovalRequest,
   FileToolApprovalResponse,
+  ChatFileToolAutoApproval,
   ChatToolCall,
   ChatToolResult,
   ChatWorkspaceRoot,
@@ -30,7 +31,20 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   fileReplaceTextEnabled: false,
   fileCreateEnabled: true,
   fileDeleteEnabled: false,
+  fileReplaceTextAutoApproveEnabled: false,
+  fileCreateAutoApproveEnabled: false,
+  fileDeleteAutoApproveEnabled: false,
 };
+
+export function buildFileToolAutoApprovalFromToolsSettings(
+  settings: ToolsSettings,
+): ChatFileToolAutoApproval {
+  return {
+    create: settings.fileCreateAutoApproveEnabled === true,
+    replaceText: settings.fileReplaceTextAutoApproveEnabled === true,
+    delete: settings.fileDeleteAutoApproveEnabled === true,
+  };
+}
 
 export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   enabled: true,
@@ -157,7 +171,7 @@ export const CHECKLIST_WRITE_TOOL: LoadedToolInfo = {
   name: CHECKLIST_WRITE_TOOL_NAME,
   enabled: true,
   description:
-    "Create or update a visible checklist snapshot to track progress during complex multi-step work. Use this for substantial coding, debugging, research, or planning tasks. Keep items short. Each item must explicitly set done to true or false.",
+    "Create or update the visible checklist for complex multi-step work. Use this early for coding, debugging, research, planning, or any task with several steps. Call it again whenever progress changes. Always send the full current checklist snapshot, not just changed items. Keep items short and mark each item with done true or false.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -165,7 +179,7 @@ export const CHECKLIST_WRITE_TOOL: LoadedToolInfo = {
       items: {
         type: "array",
         description:
-          "Checklist items. Include the full current checklist snapshot. Each item must explicitly set done to true or false.",
+          "Full current checklist snapshot, not just changed items. Include one short item per meaningful step and explicitly set done to true or false on every item.",
         minItems: 1,
         maxItems: MAX_CHECKLIST_ITEMS,
         items: {
@@ -558,6 +572,93 @@ export function requiresFileToolApproval(toolName: string) {
   );
 }
 
+function getToolArgValue(args: unknown, key: string) {
+  if (
+    !args ||
+    typeof args !== "object" ||
+    Array.isArray(args) ||
+    !(key in args)
+  ) {
+    throw new Error(`Missing required tool argument: ${key}`);
+  }
+
+  return (args as Record<string, unknown>)[key];
+}
+
+function stringifyCommandArgValue(value: unknown) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (value === null || value === undefined) return "";
+  return JSON.stringify(value);
+}
+
+function materializeCommandArgs(templateArgs: string[], modelArgs: unknown) {
+  const templatePattern = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+
+  return templateArgs.map((templateArg) =>
+    templateArg.replace(templatePattern, (_full, key: string) =>
+      stringifyCommandArgValue(getToolArgValue(modelArgs, key)),
+    ),
+  );
+}
+
+function quoteCommandPreviewPart(value: string) {
+  if (!value) return '""';
+  if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(value)) return value;
+  return `"${value.replace(/"/g, '\\\"')}"`;
+}
+
+function formatCommandPreview(command: string, args: string[]) {
+  return [command, ...args].map(quoteCommandPreviewPart).join(" ");
+}
+
+function buildCustomToolApprovalCommand(
+  toolCall: ChatToolCall,
+  tool?: Pick<LoadedToolInfo, "command" | "args">,
+) {
+  const command = tool?.command?.trim();
+  if (!command) return undefined;
+
+  try {
+    const modelArgs = parseToolArgumentsText(toolCall.function.arguments || "{}");
+    return formatCommandPreview(
+      command,
+      materializeCommandArgs(tool?.args ?? [], modelArgs),
+    );
+  } catch {
+    return formatCommandPreview(command, tool?.args ?? []);
+  }
+}
+
+export function createToolApprovalRequest(
+  toolCall: ChatToolCall,
+  tool?: Pick<LoadedToolInfo, "name" | "description" | "command" | "args">,
+): FileToolApprovalRequest {
+  const description = tool?.description?.trim();
+  const command = buildCustomToolApprovalCommand(toolCall, tool);
+
+  return {
+    title: "Approve tool execution",
+    description: `The model wants to run a custom tool \`${toolCall.function.name}\`.`,
+    toolName: toolCall.function.name,
+    action: "operation",
+    details: [
+      ...(description ? [{ label: "Description", value: description }] : []),
+      ...(command ? [{ label: "Command", value: command }] : []),
+      { label: "Approval mode", value: "Manual user approval required" },
+    ],
+  };
+}
+
+export function requiresToolApproval(
+  toolName: string,
+  tool?: Pick<LoadedToolInfo, "requiresApproval">,
+) {
+  return requiresFileToolApproval(toolName) || tool?.requiresApproval === true;
+}
+
 export function getFileToolApprovalAction(toolName: string) {
   if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) return "replacement";
   if (toolName === FILE_CREATE_TOOL_NAME) return "creation";
@@ -709,7 +810,7 @@ export function isFileToolApprovalResponseApproved(
   return response.approved;
 }
 
-export function createCancelledFileToolResult(
+export function createCancelledToolResult(
   toolCall: ChatToolCall,
   action = getFileToolApprovalAction(toolCall.function.name),
 ): ChatToolResult {
@@ -717,13 +818,15 @@ export function createCancelledFileToolResult(
     toolCallId: toolCall.id,
     toolName: toolCall.function.name,
     content: JSON.stringify(
-      { ok: false, cancelled: true, message: `User cancelled file ${action}.` },
+      { ok: false, cancelled: true, message: `User cancelled ${action}.` },
       null,
       2,
     ),
     isError: true,
   };
 }
+
+export const createCancelledFileToolResult = createCancelledToolResult;
 
 export function compareToolsByDisplayOrder(
   left: Pick<LoadedToolInfo, "name">,
