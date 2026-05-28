@@ -18,6 +18,7 @@ import type {
   ChatFileToolAutoApproval,
   ChatMessage,
   ChatSession,
+  ChatThinkingMode,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -242,6 +243,7 @@ export function useChatActions({
       fileToolAutoApproval: sourceChat.fileToolAutoApproval
         ? { ...sourceChat.fileToolAutoApproval }
         : undefined,
+      thinkingMode: sourceChat.thinkingMode,
       createdAt: now,
       updatedAt: now,
     };
@@ -384,6 +386,7 @@ export function useChatActions({
       fileToolAutoApproval: activeChat.fileToolAutoApproval
         ? { ...activeChat.fileToolAutoApproval }
         : { ...fileToolAutoApprovalDefaults },
+      thinkingMode: activeChat.thinkingMode,
       createdAt: now,
       updatedAt: now,
     };
@@ -459,6 +462,15 @@ export function useChatActions({
         },
       };
     });
+  }
+
+  function setActiveChatThinkingMode(thinkingMode: ChatThinkingMode) {
+    if (!activeChat) return;
+
+    updateChat(activeChat.id, (chat) => ({
+      ...chat,
+      thinkingMode,
+    }));
   }
 
   function toggleActiveChatSkill(skillName: string) {
@@ -575,6 +587,7 @@ export function useChatActions({
     branchChatFromMessage,
     toggleActiveChatTool,
     toggleActiveChatFileToolAutoApproval,
+    setActiveChatThinkingMode,
     toggleActiveChatSkill,
     toggleActiveChatAgent,
     renameChat,

@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   ChatReasoningMetadata,
   ChatSession,
+  ChatThinkingMode,
   ChatTitleMode,
   ChatTokenUsage,
   ProviderConfig,
@@ -337,6 +338,18 @@ export function parseOptionalNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
+export function resolveChatThinkingSettings(
+  thinkingMode?: ChatThinkingMode,
+): ProviderGenerationSettings | undefined {
+  if (!thinkingMode || thinkingMode === "model_default") return undefined;
+
+  if (thinkingMode === "off") {
+    return { reasoningMode: "off", reasoningEffort: "low" };
+  }
+
+  return { reasoningMode: "enabled", reasoningEffort: thinkingMode };
+}
+
 export function sanitizeGenerationSettings(
   settings: ProviderGenerationSettings,
 ): ProviderGenerationSettings {
@@ -441,16 +454,58 @@ export function titleFromMessage(message: string) {
   return cleanTitle.length > 44 ? `${cleanTitle.slice(0, 44).trimEnd()}...` : cleanTitle;
 }
 
+function extractTitleFromJson(value: string) {
+  try {
+    const parsed = JSON.parse(value);
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "title" in parsed &&
+      typeof parsed.title === "string"
+    ) {
+      return parsed.title;
+    }
+  } catch {
+    // Ignore non-JSON title responses.
+  }
+
+  return undefined;
+}
+
 export function cleanGeneratedChatTitle(title: string) {
-  const cleanTitle = title
+  const withoutReasoning = title
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/^```(?:json|text|markdown)?\s*/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  const jsonTitle = extractTitleFromJson(withoutReasoning);
+  const rawTitle = jsonTitle ?? withoutReasoning;
+  const firstUsefulLine = rawTitle
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .find(Boolean)
-    ?.replace(/^#{1,6}\s+/, "")
+    .find(Boolean);
+
+  if (!firstUsefulLine) return undefined;
+
+  let cleanTitle = firstUsefulLine
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^[-*•>\d.)\s]+/, "")
+    .replace(/^(?:chat\s*)?(?:conversation\s*)?title\s*[:：\-–—]\s*/i, "")
+    .replace(/^(?:the\s+)?title\s+(?:is|would\s+be)\s*[:：\-–—]?\s*/i, "")
+    .replace(/^sure[,\s]+(?:here(?:'s| is)\s+)?(?:a\s+)?(?:concise\s+)?(?:title\s*)?[:：\-–—]?\s*/i, "")
     .replace(/^[`'"“”‘’]+|[`'"“”‘’]+$/g, "")
-    .replace(/[.!?]+$/g, "")
+    .replace(/[.!?。！？]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  const titlePrefixMatch = cleanTitle.match(/^(?:.*?\btitle\b.*?)[:：]\s*(.+)$/i);
+  if (titlePrefixMatch?.[1]) {
+    cleanTitle = titlePrefixMatch[1]
+      .replace(/^[`'"“”‘’]+|[`'"“”‘’]+$/g, "")
+      .replace(/[.!?。！？]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 
   if (!cleanTitle) return undefined;
 

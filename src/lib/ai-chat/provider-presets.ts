@@ -1,7 +1,7 @@
 import type { ProviderConfig, ProviderGenerationSettings } from "./types";
 
 export const defaultGenerationSettings: ProviderGenerationSettings = {
-  reasoningMode: "off",
+  reasoningMode: "auto",
   reasoningEffort: "medium",
   requestTimeoutMs: 30000,
 };

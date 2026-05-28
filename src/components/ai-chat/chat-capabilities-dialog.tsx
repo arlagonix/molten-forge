@@ -12,6 +12,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -20,6 +27,7 @@ import { Switch } from "@/components/ui/switch";
 import { isBuiltInToolName } from "@/lib/ai-chat/builtin-tools";
 import type {
   ChatFileToolAutoApproval,
+  ChatThinkingMode,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -41,6 +49,8 @@ type ChatCapabilitiesDialogProps = {
   agents: LoadedAgentInfo[];
   selectedAgentNames: string[];
   onToggleAgent: (agentName: string) => void;
+  thinkingMode: ChatThinkingMode;
+  onThinkingModeChange: (thinkingMode: ChatThinkingMode) => void;
   disabled?: boolean;
 };
 
@@ -264,6 +274,8 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
   agents,
   selectedAgentNames,
   onToggleAgent,
+  thinkingMode,
+  onThinkingModeChange,
   disabled = false,
 }: ChatCapabilitiesDialogProps) {
   const [toolSearch, setToolSearch] = useState("");
@@ -315,13 +327,46 @@ export const ChatCapabilitiesDialog = memo(function ChatCapabilitiesDialog({
         <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle>Chat capabilities</DialogTitle>
           <DialogDescription>
-            Choose which tools, skills, agents, and file approvals are available
-            in this chat.
+            Choose thinking behavior, tools, skills, agents, and file approvals
+            for this chat.
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           <div className="grid gap-4">
+            <section className="min-w-0 space-y-2">
+              <Label
+                htmlFor="chat-thinking-mode"
+                className="text-sm font-medium uppercase tracking-wide text-muted-foreground"
+              >
+                Thinking mode
+              </Label>
+              <div className="grid gap-1.5">
+                <Select
+                  value={thinkingMode}
+                  onValueChange={(value) =>
+                    onThinkingModeChange(value as ChatThinkingMode)
+                  }
+                  disabled={disabled}
+                >
+                  <SelectTrigger id="chat-thinking-mode" className="h-9">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="model_default">Model default</SelectItem>
+                    <SelectItem value="off">No thinking</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="high">High</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-sm leading-5 text-muted-foreground">
+                  Overrides how much reasoning this chat asks the selected
+                  model to use.
+                </p>
+              </div>
+            </section>
+
             <CapabilityPicker
               title="Tools"
               placeholder="Search tools..."

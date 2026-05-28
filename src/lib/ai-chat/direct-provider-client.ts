@@ -140,11 +140,13 @@ function buildApiMessages({
   systemPrompt,
   messages,
   userMessage,
+  settings,
 }: {
   provider: ProviderConfig;
   systemPrompt: string;
   messages: ChatMessage[];
   userMessage?: string;
+  settings: ProviderGenerationSettings;
 }): ApiChatMessage[] {
   const apiMessages: ApiChatMessage[] = [
     ...(systemPrompt.trim()
@@ -190,10 +192,16 @@ function buildApiMessages({
     }
   }
 
-  if (userMessage?.trim()) {
+  const finalUserMessage = appendThinkingControlPrompt(
+    userMessage?.trim() ?? "",
+    provider,
+    settings,
+  );
+
+  if (finalUserMessage) {
     apiMessages.push({
       role: "user",
-      content: userMessage.trim(),
+      content: finalUserMessage,
     });
   }
 
@@ -234,30 +242,101 @@ function modelLooksReasoningCapable(model: string) {
   ].some((marker) => normalized.includes(marker));
 }
 
-function shouldSendReasoningControls(provider: ProviderConfig, settings: ProviderGenerationSettings) {
-  if (settings.reasoningMode === "off") return false;
-  if (settings.reasoningMode === "enabled") return true;
-  return modelLooksReasoningCapable(provider.model);
+function isLocalOpenAiCompatibleProvider(provider: ProviderConfig) {
+  try {
+    const url = new URL(provider.baseUrl);
+    return ["localhost", "127.0.0.1", "0.0.0.0", "::1"].includes(url.hostname);
+  } catch {
+    const baseUrl = provider.baseUrl.toLowerCase();
+    return baseUrl.includes("localhost") || baseUrl.includes("127.0.0.1");
+  }
 }
 
-function buildReasoningPayload(provider: ProviderConfig, settings: ProviderGenerationSettings) {
+function modelUsesOpenAiReasoningEffort(model: string) {
+  const normalized = model.toLowerCase();
+  return (
+    normalized.includes("gpt-oss") ||
+    normalized.includes("openai/") ||
+    /(^|[/:-])o[134](?:-|$)/.test(normalized)
+  );
+}
+
+function modelSupportsQwenSoftSwitch(model: string) {
+  const normalized = model.toLowerCase();
+  if (normalized.includes("qwen3.5") || normalized.includes("qwen-3.5")) {
+    return false;
+  }
+
+  return (
+    normalized.includes("qwen3") ||
+    normalized.includes("qwen-3") ||
+    normalized.includes("qwen/qwen3")
+  );
+}
+
+function shouldSendReasoningControls(
+  _provider: ProviderConfig,
+  settings: ProviderGenerationSettings,
+) {
+  return (
+    settings.reasoningMode === "off" ||
+    settings.reasoningMode === "enabled"
+  );
+}
+
+function buildReasoningPayload(
+  provider: ProviderConfig,
+  settings: ProviderGenerationSettings,
+) {
   if (!shouldSendReasoningControls(provider, settings)) return {};
 
-  const model = provider.model.toLowerCase();
   const effort = settings.reasoningEffort ?? "medium";
+  const isLocalProvider = isLocalOpenAiCompatibleProvider(provider);
 
-  if (
-    model.includes("gpt-oss") ||
-    model.includes("openai/") ||
-    /(^|[/:-])o[134](?:-|$)/.test(model)
-  ) {
+  if (settings.reasoningMode === "off") {
+    return {
+      reasoning_effort: "none",
+      ...(isLocalProvider
+        ? {
+            enable_thinking: false,
+            chat_template_kwargs: { enable_thinking: false },
+          }
+        : {}),
+    };
+  }
+
+  if (modelUsesOpenAiReasoningEffort(provider.model)) {
     return { reasoning_effort: effort };
   }
 
   return {
     reasoning: true,
     reasoning_effort: effort,
+    ...(isLocalProvider
+      ? {
+          enable_thinking: true,
+          chat_template_kwargs: { enable_thinking: true },
+        }
+      : {}),
   };
+}
+
+function appendThinkingControlPrompt(
+  content: string,
+  provider: ProviderConfig,
+  settings: ProviderGenerationSettings,
+) {
+  if (!content || !modelSupportsQwenSoftSwitch(provider.model)) return content;
+
+  if (settings.reasoningMode === "off") {
+    return `${content}\n/no_think`;
+  }
+
+  if (settings.reasoningMode === "enabled") {
+    return `${content}\n/think`;
+  }
+
+  return content;
 }
 
 function buildPayload({
@@ -292,6 +371,7 @@ function buildPayload({
       systemPrompt,
       messages,
       userMessage,
+      settings,
     }),
     stream,
     ...(tools?.length

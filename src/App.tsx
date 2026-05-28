@@ -114,6 +114,7 @@ import type {
   ProviderConfig,
   ProvidersState,
   SkillsSettings,
+  ToolCommandResult,
   ToolExecutionStatus,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
@@ -1498,6 +1499,7 @@ export default function Home() {
     branchChatFromMessage,
     toggleActiveChatTool,
     toggleActiveChatFileToolAutoApproval,
+    setActiveChatThinkingMode,
     toggleActiveChatSkill,
     toggleActiveChatAgent,
     renameChat,
@@ -1902,6 +1904,8 @@ export default function Home() {
         agents={availableAgents}
         selectedAgentNames={activeChatEnabledAgentNames}
         onToggleAgent={toggleActiveChatAgent}
+        thinkingMode={activeChat?.thinkingMode ?? "model_default"}
+        onThinkingModeChange={setActiveChatThinkingMode}
         disabled={isSending}
       />
 

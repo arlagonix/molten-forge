@@ -32,6 +32,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
   formatOptionalNumber,
@@ -457,8 +464,43 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
       temperature: undefined,
       topP: undefined,
       maxTokens: undefined,
+      reasoningMode: undefined,
+      reasoningEffort: undefined,
       requestTimeoutMs: undefined,
     });
+  }
+
+  const selectedModelThinkingMode = (() => {
+    if (selectedModelSettings?.reasoningMode === "off") return "off";
+    if (selectedModelSettings?.reasoningMode === "enabled") {
+      return selectedModelSettings.reasoningEffort ?? "medium";
+    }
+    return "auto";
+  })();
+
+  function updateSelectedModelThinkingMode(value: string) {
+    if (value === "auto") {
+      updateSelectedModelGenerationSettings({
+        reasoningMode: "auto",
+        reasoningEffort: undefined,
+      });
+      return;
+    }
+
+    if (value === "off") {
+      updateSelectedModelGenerationSettings({
+        reasoningMode: "off",
+        reasoningEffort: "low",
+      });
+      return;
+    }
+
+    if (value === "low" || value === "medium" || value === "high") {
+      updateSelectedModelGenerationSettings({
+        reasoningMode: "enabled",
+        reasoningEffort: value,
+      });
+    }
   }
 
   function updateSelectedModelManualContext(value: string) {
@@ -932,7 +974,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                     </Button>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-4">
+                  <div className="grid gap-4 md:grid-cols-5">
                     <div className="grid gap-2">
                       <Label htmlFor="generation-temperature">
                         Temperature
@@ -996,6 +1038,27 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                         }
                         placeholder="Provider default"
                       />
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label htmlFor="generation-thinking-mode">
+                        Thinking mode
+                      </Label>
+                      <Select
+                        value={selectedModelThinkingMode}
+                        onValueChange={updateSelectedModelThinkingMode}
+                      >
+                        <SelectTrigger id="generation-thinking-mode">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="auto">Auto</SelectItem>
+                          <SelectItem value="off">No thinking</SelectItem>
+                          <SelectItem value="low">Low</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="high">High</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
 
                     <div className="grid gap-2">

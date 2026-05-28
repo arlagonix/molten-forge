@@ -7,6 +7,13 @@ export type ProviderGenerationSettings = {
   requestTimeoutMs?: number;
 };
 
+export type ChatThinkingMode =
+  | "model_default"
+  | "off"
+  | "low"
+  | "medium"
+  | "high";
+
 export type ProviderModelContext = {
   manualContextLength?: number;
   detectedContextLength?: number;
@@ -358,6 +365,7 @@ export type ChatSession = {
   activeSkillNames?: string[];
   workspaceRoots?: ChatWorkspaceRoot[];
   fileToolAutoApproval?: ChatFileToolAutoApproval;
+  thinkingMode?: ChatThinkingMode;
   tasks?: AgentTask[];
   nextTaskId?: number;
 };

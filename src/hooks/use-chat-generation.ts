@@ -7,6 +7,7 @@ import {
   isAutoTitledChat,
   labelForError,
   mergeReasoningMetadata,
+  resolveChatThinkingSettings,
   titleFromMessage,
 } from "@/lib/ai-chat/chat-utils";
 import { generateTitleFromFirstExchange } from "@/lib/ai-chat/title-generation";
@@ -1146,6 +1147,12 @@ export function useChatGeneration({
     return chats.find((chat) => chat.id === chatId)?.fileToolAutoApproval;
   }
 
+  function getChatThinkingSettings(chatId: string) {
+    return resolveChatThinkingSettings(
+      chatsRef.current.find((chat) => chat.id === chatId)?.thinkingMode,
+    );
+  }
+
   function isFileToolCallAutoApproved(
     toolName: string,
     settings?: ChatFileToolAutoApproval,
@@ -1679,6 +1686,7 @@ export function useChatGeneration({
             inheritedToolsForRun,
             chatEnabledAgents,
           }),
+          settingsOverride: getChatThinkingSettings(chatId),
           onContentDelta: (delta) => {
             accumulatedOutput += delta;
             updateAssistantAgentCall(
@@ -2508,6 +2516,7 @@ export function useChatGeneration({
           tools: forcedAgentRequests.length
             ? toolsForRun.filter((tool) => tool.name !== CALL_AGENT_TOOL_NAME)
             : toolsForRun,
+          settingsOverride: getChatThinkingSettings(chatId),
           onContentDelta: (delta) => {
             accumulatedContent += delta;
             const assistantMessageStepId = ensureAssistantMessageProcessStep(
