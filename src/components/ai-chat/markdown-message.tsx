@@ -272,6 +272,119 @@ function languageFromNode(node: ReactNode): string | undefined {
   return languageFromNode(props.children);
 }
 
+function classNameWithLanguage(className: string | undefined, language?: string) {
+  if (!language) return className;
+
+  const languageClass = `language-${language}`;
+  const existingClassName = className?.trim();
+
+  if (!existingClassName) return languageClass;
+
+  const classes = existingClassName.split(/\s+/);
+
+  if (classes.includes(languageClass)) return existingClassName;
+
+  return [...classes, languageClass].join(" ");
+}
+
+function withSemanticCodeLanguage(
+  node: ReactNode,
+  language?: string,
+): ReactNode {
+  if (!language) return node;
+
+  if (Array.isArray(node)) {
+    return node.map((child, index) => (
+      <React.Fragment key={index}>
+        {withSemanticCodeLanguage(child, language)}
+      </React.Fragment>
+    ));
+  }
+
+  if (!isValidElement(node)) return node;
+
+  const props = node.props as { className?: string; children?: ReactNode };
+
+  if (typeof node.type === "string" && node.type.toLowerCase() === "code") {
+    return React.cloneElement(
+      node as React.ReactElement<{
+        className?: string;
+        children?: ReactNode;
+      }>,
+      {
+        className: classNameWithLanguage(props.className, language),
+      },
+    );
+  }
+
+  if (props.children === undefined) return node;
+
+  return React.cloneElement(
+    node as React.ReactElement<{ className?: string; children?: ReactNode }>,
+    {
+      children: withSemanticCodeLanguage(props.children, language),
+    },
+  );
+}
+
+function nodeAsElement(node: Node | null): Element | null {
+  if (!node) return null;
+
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    return node as Element;
+  }
+
+  return node.parentElement;
+}
+
+function copyRangeIsInsideSingleCodeBlock(range: Range) {
+  const startElement = nodeAsElement(range.startContainer);
+  const endElement = nodeAsElement(range.endContainer);
+  const startPre = startElement?.closest("pre.chat-code-pre[data-language]");
+  const endPre = endElement?.closest("pre.chat-code-pre[data-language]");
+
+  if (!startPre || startPre !== endPre) return null;
+
+  return startPre as HTMLPreElement;
+}
+
+function sanitizeCopiedMarkdownHtml(container: HTMLElement) {
+  container
+    .querySelectorAll(
+      [
+        "[data-codeblock-ui='true']",
+        ".chat-code-header",
+        ".chat-code-toolbar-actions",
+        ".chat-code-action",
+      ].join(","),
+    )
+    .forEach((node) => node.remove());
+
+  container.querySelectorAll("pre[data-language]").forEach((pre) => {
+    const language = pre.getAttribute("data-language")?.trim();
+    const code = pre.querySelector("code");
+
+    if (!language || !code) return;
+
+    code.className = classNameWithLanguage(code.className, language) ?? "";
+  });
+}
+
+function createCodeClipboardHtml(text: string, language?: string) {
+  const pre = document.createElement("pre");
+  const code = document.createElement("code");
+
+  if (language) {
+    pre.setAttribute("data-language", language);
+    code.className = `language-${language}`;
+  }
+
+  code.textContent = text;
+  pre.appendChild(code);
+
+  return pre.outerHTML;
+}
+
 type CodeBlockFrameProps = {
   children: ReactNode;
   className?: string;
@@ -317,12 +430,20 @@ function CodeBlockFrame({
         className,
       )}
     >
-      <div className="chat-code-header">
-        <span className="chat-code-language" title={displayLanguage}>
+      <div className="chat-code-header" data-codeblock-ui="true">
+        <span
+          className="chat-code-language"
+          title={displayLanguage}
+          data-codeblock-ui="true"
+        >
           {displayLanguage}
         </span>
 
-        <div className="chat-code-toolbar-actions" aria-label="Code block actions">
+        <div
+          className="chat-code-toolbar-actions"
+          aria-label="Code block actions"
+          data-codeblock-ui="true"
+        >
           {canPreview ? (
             <Button
               type="button"
@@ -423,8 +544,12 @@ function CodeBlockFrame({
         <CodeBlockSourceView
           wrapped={wrapped}
           className={isFullscreen ? "min-h-0 flex-1 overflow-auto" : undefined}
+          language={language ? displayLanguage : undefined}
         >
-          {children}
+          {withSemanticCodeLanguage(
+            children,
+            language ? displayLanguage : undefined,
+          )}
         </CodeBlockSourceView>
       )}
     </div>
@@ -590,8 +715,52 @@ export const MarkdownMessage = React.memo(function MarkdownMessage({
   className,
   skipSyntaxHighlight = false,
 }: MarkdownMessageProps) {
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
+
+  const handleCopy = React.useCallback(
+    (event: React.ClipboardEvent<HTMLDivElement>) => {
+      const root = rootRef.current;
+      const selection = window.getSelection();
+
+      if (!root || !selection || selection.rangeCount === 0) return;
+      if (selection.isCollapsed) return;
+
+      const range = selection.getRangeAt(0);
+
+      if (!root.contains(range.commonAncestorContainer)) return;
+
+      const codePre = copyRangeIsInsideSingleCodeBlock(range);
+      const selectedText = selection.toString();
+      let html: string;
+      let plainText = selectedText;
+
+      if (codePre) {
+        const language = codePre.getAttribute("data-language")?.trim();
+        html = createCodeClipboardHtml(selectedText, language || undefined);
+      } else {
+        const container = document.createElement("div");
+        container.appendChild(range.cloneContents());
+        sanitizeCopiedMarkdownHtml(container);
+        html = container.innerHTML;
+        plainText = container.textContent ?? selectedText;
+      }
+
+      event.preventDefault();
+      event.clipboardData.setData("text/plain", plainText);
+
+      if (html.trim()) {
+        event.clipboardData.setData("text/html", html);
+      }
+    },
+    [],
+  );
+
   return (
-    <div className={cn("chat-markdown w-full min-w-0 max-w-full", className)}>
+    <div
+      ref={rootRef}
+      className={cn("chat-markdown w-full min-w-0 max-w-full", className)}
+      onCopy={handleCopy}
+    >
       <ReactMarkdown
         remarkPlugins={REMARK_PLUGINS}
         rehypePlugins={

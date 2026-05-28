@@ -114,7 +114,6 @@ import type {
   ProviderConfig,
   ProvidersState,
   SkillsSettings,
-  ToolCommandResult,
   ToolExecutionStatus,
   ToolsSettings,
 } from "@/lib/ai-chat/types";

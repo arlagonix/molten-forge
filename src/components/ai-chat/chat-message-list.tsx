@@ -68,10 +68,6 @@ type VisibleAssistantProcessStepGroup =
     };
 
 function getVisibleStepToolBatchId(step: VisibleAssistantProcessStep) {
-  if (step.type === "tasks") {
-    return undefined;
-  }
-
   return "toolBatchId" in step ? step.toolBatchId : undefined;
 }
 

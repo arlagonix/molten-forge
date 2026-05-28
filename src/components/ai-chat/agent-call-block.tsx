@@ -24,7 +24,7 @@ function getEffectiveStatus(
 function hasPendingAskUser(
   agentCall: ChatAgentCall,
   canSubmitAskUserResponse: (toolCallId: string) => boolean,
-): boolean {
+) {
   const hasLocalPending = (agentCall.toolCalls ?? []).some(
     (toolCall) =>
       toolCall.function.name === ASK_USER_TOOL_NAME &&

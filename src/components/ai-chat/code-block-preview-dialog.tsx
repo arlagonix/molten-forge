@@ -25,6 +25,7 @@ type CodeBlockSourceViewProps = {
   children: ReactNode;
   wrapped: boolean;
   className?: string;
+  language?: string;
 };
 
 type CodeBlockPreviewDialogProps = {
@@ -70,6 +71,7 @@ export function CodeBlockSourceView({
   children,
   wrapped,
   className,
+  language,
 }: CodeBlockSourceViewProps) {
   return (
     <div
@@ -84,6 +86,7 @@ export function CodeBlockSourceView({
           "chat-code-pre",
           wrapped ? "chat-code-pre-wrap" : "chat-code-pre-nowrap",
         )}
+        data-language={language || undefined}
       >
         {children}
       </pre>
