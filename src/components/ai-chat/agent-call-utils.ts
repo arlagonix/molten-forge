@@ -12,6 +12,8 @@ export type RenderAgentToolExecutionBlock = (args: {
   toolCall: ChatToolCall;
   toolResult?: ChatToolResult;
   status?: ToolExecutionStatus;
+  isCollapsed?: boolean;
+  onToggleCollapsed?: (stepId: string, nextCollapsed: boolean) => void;
 }) => ReactNode;
 
 export function formatAgentStatus(status: AgentCallStatus) {

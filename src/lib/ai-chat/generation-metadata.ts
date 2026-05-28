@@ -30,16 +30,51 @@ export type ActiveGeneration = {
   variantId: string;
 };
 
-export function keepOnlyLatestChecklistListStep<T extends ChatAssistantProcessStep>(
+export function keepOnlyLatestTaskListStep<T extends ChatAssistantProcessStep>(
   processSteps: T[],
 ): T[] {
   return processSteps;
 }
 
-export function cancelUnfinishedChecklistListSteps(
+export function cancelUnfinishedTaskListSteps(
   processSteps: ChatAssistantProcessStep[],
 ): ChatAssistantProcessStep[] {
-  return processSteps;
+  return processSteps.map((step) => {
+    if (step.type === "tool_execution") {
+      if (step.status === "complete" || step.status === "failed") return step;
+      return { ...step, status: "failed" };
+    }
+
+    if (step.type === "user_input" || step.type === "approval" || step.type === "file_approval") {
+      if (step.status === "complete" || step.status === "failed" || step.status === "cancelled") {
+        return step;
+      }
+      return { ...step, status: "cancelled" };
+    }
+
+    if (step.type === "agent_call") {
+      if (step.status === "complete" || step.status === "failed" || step.status === "cancelled") {
+        return step;
+      }
+      return {
+        ...step,
+        status: "cancelled",
+        agentCall: {
+          ...step.agentCall,
+          status: "cancelled",
+          completedAt: step.agentCall.completedAt ?? new Date().toISOString(),
+          error: step.agentCall.error ?? "Agent call cancelled.",
+        },
+      };
+    }
+
+    if (step.type === "tasks") {
+      if (step.status === "complete" || step.status === "failed") return step;
+      return { ...step, status: "failed" };
+    }
+
+    return step;
+  });
 }
 
 function completeThinkingProcessSteps(
@@ -267,8 +302,8 @@ export function markAssistantVariantErrored({
   const content = `${variant.content}${appendedContent}`;
   const completedAt = new Date().toISOString();
   const baseProcessSteps = completeThinkingProcessSteps(
-    keepOnlyLatestChecklistListStep(
-      cancelUnfinishedChecklistListSteps(variant.processSteps ?? []),
+    keepOnlyLatestTaskListStep(
+      cancelUnfinishedTaskListSteps(variant.processSteps ?? []),
     ),
     completedAt,
   );

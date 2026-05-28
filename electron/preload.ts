@@ -235,6 +235,10 @@ contextBridge.exposeInMainWorld("chatForgeTools", {
     return ipcRenderer.invoke("tools:execute", request);
   },
 
+  cancel(executionId: unknown) {
+    return ipcRenderer.invoke("tools:cancel", executionId);
+  },
+
   test(request: unknown) {
     return ipcRenderer.invoke("tools:test", request);
   },

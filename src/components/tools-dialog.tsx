@@ -72,8 +72,42 @@ const TOOL_TEST_STATES_STORAGE_KEY = "chat-forge-tool-test-states";
 const TOOL_TEST_STATE_SAVE_DELAY_MS = 350;
 const BUILTIN_ASK_USER_TOOL_NAME = "ask_user";
 const BUILTIN_ASK_USER_TOOL_ID = "builtin-ask-user";
-const BUILTIN_CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
-const BUILTIN_CHECKLIST_WRITE_TOOL_ID = "builtin-checklist-write";
+const BUILTIN_TASK_TOOL_NAMES = [
+  "add_tasks",
+  "delete_tasks",
+  "complete_tasks",
+  "get_tasks_list",
+  "clear_tasks_list",
+] as const;
+const BUILTIN_TASK_TOOL_META = [
+  {
+    id: "builtin-add-tasks",
+    name: "add_tasks",
+    description: "Adds one or more tasks to the current chat task list.",
+  },
+  {
+    id: "builtin-delete-tasks",
+    name: "delete_tasks",
+    description:
+      "Deletes one or more tasks from the current chat task list by numeric id.",
+  },
+  {
+    id: "builtin-complete-tasks",
+    name: "complete_tasks",
+    description: "Marks one or more tasks as done by numeric id.",
+  },
+  {
+    id: "builtin-get-tasks-list",
+    name: "get_tasks_list",
+    description:
+      "Gets the current chat task list.",
+  },
+  {
+    id: "builtin-clear-tasks-list",
+    name: "clear_tasks_list",
+    description: "Clears all tasks from the current chat task list.",
+  },
+] as const;
 const BUILTIN_LOAD_SKILL_TOOL_NAME = "load_skill";
 const BUILTIN_LOAD_SKILL_TOOL_ID = "builtin-load-skill";
 const BUILTIN_WEB_FETCH_TOOL_NAME = "web_fetch";
@@ -113,7 +147,8 @@ const BUILTIN_FILE_TOOL_META = [
     id: "builtin-file-find",
     name: BUILTIN_FILE_FIND_TOOL_NAME,
     setting: "fileFindEnabled" as const,
-    description: "Finds files or folders by name/path inside approved workspace folders.",
+    description:
+      "Finds files or folders by name/path inside approved workspace folders.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -130,7 +165,8 @@ const BUILTIN_FILE_TOOL_META = [
     id: "builtin-file-search-text",
     name: BUILTIN_FILE_SEARCH_TEXT_TOOL_NAME,
     setting: "fileSearchTextEnabled" as const,
-    description: "Searches text file contents inside approved workspace folders.",
+    description:
+      "Searches text file contents inside approved workspace folders.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -150,7 +186,8 @@ const BUILTIN_FILE_TOOL_META = [
     name: BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME,
     setting: "fileReplaceTextEnabled" as const,
     autoApproveSetting: "fileReplaceTextAutoApproveEnabled" as const,
-    description: "Replaces exact text in a workspace file after user confirmation. Disabled by default.",
+    description:
+      "Replaces exact text in a workspace file after user confirmation. Disabled by default.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -169,7 +206,8 @@ const BUILTIN_FILE_TOOL_META = [
     name: BUILTIN_FILE_CREATE_TOOL_NAME,
     setting: "fileCreateEnabled" as const,
     autoApproveSetting: "fileCreateAutoApproveEnabled" as const,
-    description: "Creates a new UTF-8 text file in a workspace folder after user confirmation.",
+    description:
+      "Creates a new UTF-8 text file in a workspace folder after user confirmation.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -187,7 +225,8 @@ const BUILTIN_FILE_TOOL_META = [
     name: BUILTIN_FILE_DELETE_TOOL_NAME,
     setting: "fileDeleteEnabled" as const,
     autoApproveSetting: "fileDeleteAutoApproveEnabled" as const,
-    description: "Moves a workspace file to the operating system Trash after user confirmation. Disabled by default.",
+    description:
+      "Moves a workspace file to the operating system Trash after user confirmation. Disabled by default.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -248,8 +287,8 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
   },
   required: ["questions"],
 };
-const BUILTIN_CHECKLIST_WRITE_TOOL_DESCRIPTION =
-  "Creates visible checklist snapshots for tracking progress during complex multi-step work.";
+const BUILTIN_TASK_TOOLS_DESCRIPTION =
+  "Manage a simple persistent task list for the current chat with numeric ids and done states.";
 const BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION =
   "Loads full instructions for one relevant skill and activates it for the current chat when skills are available.";
 const BUILTIN_WEB_FETCH_TOOL_DESCRIPTION =
@@ -281,32 +320,58 @@ const BUILTIN_WEB_FETCH_TOOL_PARAMETERS = {
   required: ["url"],
 };
 
-const BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS = {
-  type: "object",
-  properties: {
-    items: {
-      type: "array",
-      description:
-        "Checklist items. Include the full current checklist snapshot. Each item must explicitly set done to true or false.",
-      minItems: 1,
-      maxItems: 10,
-      items: {
-        type: "object",
-        properties: {
-          content: {
-            type: "string",
-            description: "Short user-visible checklist item.",
-          },
-          done: {
-            type: "boolean",
-            description: "Whether this item is completed.",
-          },
-        },
-        required: ["content", "done"],
+const BUILTIN_TASK_TOOL_PARAMETERS = {
+  add_tasks: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      subjects: {
+        type: "array",
+        description:
+          "One to ten short task subjects to add. The app assigns numeric ids.",
+        minItems: 1,
+        maxItems: 10,
+        items: { type: "string" },
       },
     },
+    required: ["subjects"],
   },
-  required: ["items"],
+  delete_tasks: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      taskIds: {
+        type: "array",
+        description: "Numeric task ids to remove.",
+        minItems: 1,
+        items: { type: "integer" },
+      },
+    },
+    required: ["taskIds"],
+  },
+  complete_tasks: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      taskIds: {
+        type: "array",
+        description: "Numeric task ids to mark done.",
+        minItems: 1,
+        items: { type: "integer" },
+      },
+    },
+    required: ["taskIds"],
+  },
+  get_tasks_list: {
+    type: "object",
+    additionalProperties: false,
+    properties: {},
+  },
+  clear_tasks_list: {
+    type: "object",
+    additionalProperties: false,
+    properties: {},
+  },
 };
 
 type ToolDraft = {
@@ -744,7 +809,9 @@ function validateToolDraft(tool: LoadedToolInfo) {
   }
   if (
     tool.name === BUILTIN_ASK_USER_TOOL_NAME ||
-    tool.name === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
+    BUILTIN_TASK_TOOL_NAMES.includes(
+      tool.name as (typeof BUILTIN_TASK_TOOL_NAMES)[number],
+    ) ||
     tool.name === BUILTIN_LOAD_SKILL_TOOL_NAME ||
     tool.name === BUILTIN_WEB_FETCH_TOOL_NAME ||
     BUILTIN_FILE_TOOL_NAMES.includes(tool.name)
@@ -832,8 +899,10 @@ export const ToolsDialog = memo(function ToolsDialog({
   const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
 
   const isAskUserToolSelected = selectedToolName === BUILTIN_ASK_USER_TOOL_NAME;
-  const isChecklistWriteToolSelected =
-    selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME;
+  const selectedTaskToolInfo = BUILTIN_TASK_TOOL_META.find(
+    (tool) => tool.name === selectedToolName,
+  );
+  const isTaskToolsSelected = Boolean(selectedTaskToolInfo);
   const isLoadSkillToolSelected =
     selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME;
   const isWebFetchToolSelected =
@@ -849,12 +918,12 @@ export const ToolsDialog = memo(function ToolsDialog({
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 10;
+  const totalToolsCount = loadedTools.length + 14;
   const enabledToolsCount = useMemo(
     () =>
       loadedTools.filter((tool) => tool.enabled).length +
       (toolsSettings.askUserEnabled ? 1 : 0) +
-      (toolsSettings.checklistWriteEnabled ? 1 : 0) +
+      (toolsSettings.taskToolsEnabled ? BUILTIN_TASK_TOOL_NAMES.length : 0) +
       (toolsSettings.loadSkillEnabled ? 1 : 0) +
       (toolsSettings.webFetchEnabled ? 1 : 0) +
       (toolsSettings.fileReadEnabled ? 1 : 0) +
@@ -866,7 +935,7 @@ export const ToolsDialog = memo(function ToolsDialog({
     [
       loadedTools,
       toolsSettings.askUserEnabled,
-      toolsSettings.checklistWriteEnabled,
+      toolsSettings.taskToolsEnabled,
       toolsSettings.loadSkillEnabled,
       toolsSettings.webFetchEnabled,
       toolsSettings.fileReadEnabled,
@@ -901,10 +970,12 @@ export const ToolsDialog = memo(function ToolsDialog({
 
     if (
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
-      selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
+      isTaskToolsSelected ||
       selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
       selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME ||
-      Boolean(selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName))
+      Boolean(
+        selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName),
+      )
     ) {
       return;
     }
@@ -915,15 +986,17 @@ export const ToolsDialog = memo(function ToolsDialog({
     ) {
       setSelectedToolName(BUILTIN_ASK_USER_TOOL_NAME);
     }
-  }, [loadedTools, selectedToolName, toolDraft]);
+  }, [isTaskToolsSelected, loadedTools, selectedToolName, toolDraft]);
 
   useEffect(() => {
     if (
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
-      selectedToolName === BUILTIN_CHECKLIST_WRITE_TOOL_NAME ||
+      isTaskToolsSelected ||
       selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
       selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME ||
-      Boolean(selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName))
+      Boolean(
+        selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName),
+      )
     ) {
       setToolDraft(null);
       return;
@@ -933,7 +1006,7 @@ export const ToolsDialog = memo(function ToolsDialog({
     if (selected) {
       setToolDraft(toolToDraft(selected));
     }
-  }, [loadedTools, selectedToolName]);
+  }, [isTaskToolsSelected, loadedTools, selectedToolName]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -951,7 +1024,7 @@ export const ToolsDialog = memo(function ToolsDialog({
     if (
       !toolDraft ||
       isAskUserToolSelected ||
-      isChecklistWriteToolSelected ||
+      isTaskToolsSelected ||
       isLoadSkillToolSelected ||
       isWebFetchToolSelected
     ) {
@@ -965,8 +1038,9 @@ export const ToolsDialog = memo(function ToolsDialog({
     return !areToolDraftsEqual(toolDraft, originalDraft);
   }, [
     isAskUserToolSelected,
-    isChecklistWriteToolSelected,
+    isTaskToolsSelected,
     isLoadSkillToolSelected,
+    isWebFetchToolSelected,
     selectedTool,
     toolDraft,
   ]);
@@ -1204,8 +1278,8 @@ export const ToolsDialog = memo(function ToolsDialog({
         <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
           <DialogTitle>Tools</DialogTitle>
           <DialogDescription>
-            Define custom tools, choose which ones are available to the
-            model, and test them before use.
+            Define custom tools, choose which ones are available to the model,
+            and test them before use.
           </DialogDescription>
         </DialogHeader>
 
@@ -1358,52 +1432,54 @@ export const ToolsDialog = memo(function ToolsDialog({
                 />
               </div>
 
-              <div
-                key={BUILTIN_CHECKLIST_WRITE_TOOL_ID}
-                role="button"
-                tabIndex={0}
-                className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                  isChecklistWriteToolSelected
-                    ? "border-primary/30 bg-accent text-accent-foreground"
-                    : "border-transparent hover:border-border hover:bg-muted/60",
-                )}
-                onClick={() =>
-                  setSelectedToolName(BUILTIN_CHECKLIST_WRITE_TOOL_NAME)
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSelectedToolName(BUILTIN_CHECKLIST_WRITE_TOOL_NAME);
-                  }
-                }}
-              >
-                <ListTodo className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                    <span className="truncate">
-                      {BUILTIN_CHECKLIST_WRITE_TOOL_NAME}
-                    </span>
-                    <Lock className="size-3 shrink-0 text-muted-foreground" />
+              {BUILTIN_TASK_TOOL_META.map((taskTool) => {
+                const isSelected = selectedToolName === taskTool.name;
+
+                return (
+                  <div
+                    key={taskTool.id}
+                    role="button"
+                    tabIndex={0}
+                    className={cn(
+                      "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
+                      isSelected
+                        ? "border-primary/30 bg-accent text-accent-foreground"
+                        : "border-transparent hover:border-border hover:bg-muted/60",
+                    )}
+                    onClick={() => setSelectedToolName(taskTool.name)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedToolName(taskTool.name);
+                      }
+                    }}
+                  >
+                    <ListTodo className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
+                        <span className="truncate">{taskTool.name}</span>
+                        <Lock className="size-3 shrink-0 text-muted-foreground" />
+                      </div>
+                    </div>
+                    <Switch
+                      checked={toolsSettings.taskToolsEnabled}
+                      onClick={(event) => event.stopPropagation()}
+                      onCheckedChange={(checked) =>
+                        onToolsSettingsChange((current) => ({
+                          ...current,
+                          taskToolsEnabled: checked,
+                        }))
+                      }
+                      className="mt-0.5 shrink-0 cursor-pointer"
+                      title={
+                        toolsSettings.taskToolsEnabled
+                          ? "Disable task tools"
+                          : "Enable task tools"
+                      }
+                    />
                   </div>
-                </div>
-                <Switch
-                  checked={toolsSettings.checklistWriteEnabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onCheckedChange={(checked) =>
-                    onToolsSettingsChange((current) => ({
-                      ...current,
-                      checklistWriteEnabled: checked,
-                    }))
-                  }
-                  className="mt-0.5 shrink-0 cursor-pointer"
-                  title={
-                    toolsSettings.checklistWriteEnabled
-                      ? "Disable checklist_write"
-                      : "Enable checklist_write"
-                  }
-                />
-              </div>
+                );
+              })}
 
               <div
                 key={BUILTIN_LOAD_SKILL_TOOL_ID}
@@ -1462,9 +1538,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                     ? "border-primary/30 bg-accent text-accent-foreground"
                     : "border-transparent hover:border-border hover:bg-muted/60",
                 )}
-                onClick={() =>
-                  setSelectedToolName(BUILTIN_WEB_FETCH_TOOL_NAME)
-                }
+                onClick={() => setSelectedToolName(BUILTIN_WEB_FETCH_TOOL_NAME)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
@@ -1539,7 +1613,11 @@ export const ToolsDialog = memo(function ToolsDialog({
                         }))
                       }
                       className="mt-0.5 shrink-0 cursor-pointer"
-                      title={checked ? `Disable ${fileTool.name}` : `Enable ${fileTool.name}`}
+                      title={
+                        checked
+                          ? `Disable ${fileTool.name}`
+                          : `Enable ${fileTool.name}`
+                      }
                     />
                   </div>
                 );
@@ -1699,7 +1777,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                   </div>
                 </div>
               </>
-            ) : isChecklistWriteToolSelected ? (
+            ) : isTaskToolsSelected ? (
               <>
                 <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
                   <div className="flex w-full items-center justify-between gap-4">
@@ -1718,10 +1796,11 @@ export const ToolsDialog = memo(function ToolsDialog({
                     <div className="grid gap-1">
                       <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
                         <ListTodo className="size-5 text-muted-foreground" />
-                        {BUILTIN_CHECKLIST_WRITE_TOOL_NAME}
+                        {selectedTaskToolInfo?.name}
                       </h3>
                       <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {BUILTIN_CHECKLIST_WRITE_TOOL_DESCRIPTION}
+                        {selectedTaskToolInfo?.description ??
+                          BUILTIN_TASK_TOOLS_DESCRIPTION}
                       </p>
                     </div>
 
@@ -1729,14 +1808,15 @@ export const ToolsDialog = memo(function ToolsDialog({
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
-                          The assistant can call this tool during complex work
-                          to show a concise progress checklist in the chat. It
-                          completes immediately and does not pause generation.
+                          The assistant can use the task tools during complex
+                          work to add, delete, complete, get, or clear tasks
+                          in the current chat. The five task tools share this
+                          single settings switch.
                         </p>
                         <p>
-                          Each call creates a checklist snapshot. It supports up
-                          to 10 short items. Each item has only content and
-                          done.
+                          Tasks use numeric ids, a short subject, and a done
+                          boolean. Numeric ids are generated by the app and are
+                          not reused after clearing tasks. Every successful task tool renders the current task list in chat.
                         </p>
                       </div>
                     </div>
@@ -1745,7 +1825,11 @@ export const ToolsDialog = memo(function ToolsDialog({
                       <Label>Parameters JSON schema</Label>
                       {renderJsonCodeBlock(
                         JSON.stringify(
-                          BUILTIN_CHECKLIST_WRITE_TOOL_PARAMETERS,
+                          selectedTaskToolInfo
+                            ? BUILTIN_TASK_TOOL_PARAMETERS[
+                                selectedTaskToolInfo.name
+                              ]
+                            : {},
                           null,
                           2,
                         ),
@@ -1903,10 +1987,11 @@ export const ToolsDialog = memo(function ToolsDialog({
                           absolute paths, relative paths, or symlinks.
                         </p>
                         <p>
-                          Reads and searches run directly. file_replace_text, file_create,
-                          and file_delete ask for user confirmation before writing unless
-                          auto-approval is enabled for the chat. file_delete moves files
-                          to the operating system Trash.
+                          Reads and searches run directly. file_replace_text,
+                          file_create, and file_delete ask for user confirmation
+                          before writing unless auto-approval is enabled for the
+                          chat. file_delete moves files to the operating system
+                          Trash.
                         </p>
                       </div>
                     </div>
@@ -1923,7 +2008,9 @@ export const ToolsDialog = memo(function ToolsDialog({
                         </div>
                         <Switch
                           checked={
-                            toolsSettings[selectedFileToolAutoApproveSetting] === true
+                            toolsSettings[
+                              selectedFileToolAutoApproveSetting
+                            ] === true
                           }
                           onCheckedChange={(checked) =>
                             onToolsSettingsChange((current) => ({
@@ -1939,7 +2026,11 @@ export const ToolsDialog = memo(function ToolsDialog({
                     <div className="grid gap-2">
                       <Label>Parameters JSON schema</Label>
                       {renderJsonCodeBlock(
-                        JSON.stringify(selectedFileToolInfo.parameters, null, 2),
+                        JSON.stringify(
+                          selectedFileToolInfo.parameters,
+                          null,
+                          2,
+                        ),
                       )}
                     </div>
                   </div>
@@ -2036,7 +2127,9 @@ export const ToolsDialog = memo(function ToolsDialog({
 
                     <div className="flex items-start justify-between gap-3 border bg-muted/20 p-3">
                       <div className="grid gap-1">
-                        <Label htmlFor="tool-requires-approval">Requires approval</Label>
+                        <Label htmlFor="tool-requires-approval">
+                          Requires approval
+                        </Label>
                         <p className="text-sm leading-5 text-muted-foreground">
                           Ask for user approval before running this custom tool.
                         </p>
@@ -2318,8 +2411,9 @@ export const ToolsDialog = memo(function ToolsDialog({
           <div />
           <div className="flex gap-2">
             {!isAskUserToolSelected &&
-            !isChecklistWriteToolSelected &&
+            !isTaskToolsSelected &&
             !isLoadSkillToolSelected &&
+            !isWebFetchToolSelected &&
             toolDraft ? (
               <Button
                 type="button"
@@ -2344,8 +2438,9 @@ export const ToolsDialog = memo(function ToolsDialog({
               </Button>
             )}
             {!isAskUserToolSelected &&
-              !isChecklistWriteToolSelected &&
-              !isLoadSkillToolSelected && (
+              !isTaskToolsSelected &&
+              !isLoadSkillToolSelected &&
+              !isWebFetchToolSelected && (
                 <Button
                   type="button"
                   className=""

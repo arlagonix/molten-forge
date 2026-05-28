@@ -206,11 +206,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
 
     return options
       .filter((option) =>
-        query
-          ? `${option.name} ${option.description ?? ""}`
-              .toLowerCase()
-              .includes(query)
-          : true,
+        query ? option.name.toLowerCase().includes(query) : true,
       )
       .slice(0, 12);
   }, [activeMention, agentMentionOptions, disabled, skillMentionOptions, toolMentionOptions]);

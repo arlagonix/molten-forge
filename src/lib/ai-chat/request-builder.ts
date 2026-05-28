@@ -7,8 +7,8 @@ import {
 import {
   ASK_USER_TOOL,
   ASK_USER_TOOL_NAME,
-  CHECKLIST_WRITE_TOOL,
-  CHECKLIST_WRITE_TOOL_NAME,
+  TASK_TOOLS,
+  isTaskToolName,
   LOAD_SKILL_TOOL_NAME,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
@@ -105,7 +105,7 @@ export function getGlobalEnabledTools({
         (tool) =>
           tool.enabled &&
           tool.name !== ASK_USER_TOOL_NAME &&
-          tool.name !== CHECKLIST_WRITE_TOOL_NAME &&
+          !isTaskToolName(tool.name) &&
           tool.name !== LOAD_SKILL_TOOL_NAME &&
           tool.name !== WEB_FETCH_TOOL_NAME &&
           tool.name !== FILE_READ_TOOL_NAME &&
@@ -121,7 +121,7 @@ export function getGlobalEnabledTools({
 
   return [
     ...(toolsSettings.askUserEnabled ? [ASK_USER_TOOL] : []),
-    ...(toolsSettings.checklistWriteEnabled ? [CHECKLIST_WRITE_TOOL] : []),
+    ...(toolsSettings.taskToolsEnabled ? TASK_TOOLS : []),
     ...(toolsSettings.webFetchEnabled ? [WEB_FETCH_TOOL] : []),
     ...(toolsSettings.fileReadEnabled ? [FILE_READ_TOOL] : []),
     ...(toolsSettings.fileFindEnabled ? [FILE_FIND_TOOL] : []),

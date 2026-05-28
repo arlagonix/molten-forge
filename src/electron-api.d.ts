@@ -153,10 +153,12 @@ declare global {
   interface Window {
     chatForgeTools?: {
       execute: (request: {
+        executionId?: string;
         name: string;
         args: unknown;
         workspaceRoots?: ChatWorkspaceRoot[];
       }) => Promise<ToolCommandResult>;
+      cancel: (executionId: string) => Promise<{ cancelled: boolean }>;
       test: (request: {
         tool: LoadedToolInfo;
         args: unknown;

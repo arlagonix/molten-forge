@@ -45,6 +45,7 @@ type ChatSidebarProps = {
   activeChatId?: string;
   isCollapsed: boolean;
   generatingChatIds: string[];
+  completedGenerationChatIds: string[];
   titleGenerationChatIds: string[];
   onCollapsedChange: (isCollapsed: boolean) => void;
   onSwitchChat: (chatId: string) => void;
@@ -66,6 +67,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   activeChatId,
   isCollapsed,
   generatingChatIds,
+  completedGenerationChatIds,
   titleGenerationChatIds,
   onCollapsedChange,
   onSwitchChat,
@@ -81,6 +83,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
+  const [openChatOptionsChatId, setOpenChatOptionsChatId] = useState<string | null>(null);
   const [visibleChatLimit, setVisibleChatLimit] =
     useState(CHAT_LIST_BATCH_SIZE);
   const normalizedChatSearchQuery = chatSearchQuery.trim().toLocaleLowerCase();
@@ -193,8 +196,14 @@ export const ChatSidebar = memo(function ChatSidebar({
   function renderChatRow(chat: ChatSession) {
     const isActive = chat.id === activeChatId;
     const isRenaming = renamingChatId === chat.id;
-    const isGenerating = generatingChatIds.includes(chat.id);
+    const isChatGenerating = generatingChatIds.includes(chat.id);
+    const isGenerating = !isActive && isChatGenerating;
+    const hasCompletedGeneration =
+      !isActive && completedGenerationChatIds.includes(chat.id);
     const isGeneratingTitle = titleGenerationChatIds.includes(chat.id);
+    const isChatOptionsOpen = openChatOptionsChatId === chat.id;
+    const showStatusIndicator =
+      !isChatOptionsOpen && (isGenerating || hasCompletedGeneration);
 
     return (
       <div
@@ -247,19 +256,31 @@ export const ChatSidebar = memo(function ChatSidebar({
         </div>
 
         {!isRenaming ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="h-7 w-7 shrink-0  opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
-                onClick={(event) => event.stopPropagation()}
-                title="Chat options"
-              >
-                <MoreHorizontal className="size-3.5" />
-              </Button>
-            </DropdownMenuTrigger>
+          <div className="relative h-7 w-7 shrink-0">
+            {showStatusIndicator && isGenerating ? (
+              <Loader2 className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-3.5 -translate-x-1/2 -translate-y-1/2 animate-spin text-muted-foreground group-hover:opacity-0" />
+            ) : showStatusIndicator && hasCompletedGeneration ? (
+              <span className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary group-hover:opacity-0" />
+            ) : null}
+            <DropdownMenu
+              open={isChatOptionsOpen}
+              onOpenChange={(open) =>
+                setOpenChatOptionsChatId(open ? chat.id : null)
+              }
+            >
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="relative z-10 h-7 w-7 shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                  title="Chat options"
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+              </DropdownMenuTrigger>
             <DropdownMenuContent
               side="right"
               align="start"
@@ -278,7 +299,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               </DropdownMenuItem>
               <DropdownMenuItem
                 disabled={
-                  isGenerating ||
+                  isChatGenerating ||
                   isGeneratingTitle ||
                   chat.messages.length === 0
                 }
@@ -340,8 +361,9 @@ export const ChatSidebar = memo(function ChatSidebar({
                 <Trash2 className="size-4" />
                 Delete
               </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         ) : null}
       </div>
     );

@@ -9,8 +9,7 @@ import type {
   ChatToolCall,
   ChatToolResult,
   ChatWorkspaceRoot,
-  ChecklistItem,
-  ChecklistWriteRequest,
+  AgentTask,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -22,7 +21,7 @@ import type {
 export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
   askUserEnabled: true,
-  checklistWriteEnabled: true,
+  taskToolsEnabled: true,
   loadSkillEnabled: true,
   webFetchEnabled: false,
   fileReadEnabled: true,
@@ -55,7 +54,18 @@ export const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
 };
 
 export const ASK_USER_TOOL_NAME = "ask_user";
-export const CHECKLIST_WRITE_TOOL_NAME = "checklist_write";
+export const TASK_ADD_TOOL_NAME = "add_tasks";
+export const TASK_REMOVE_TOOL_NAME = "delete_tasks";
+export const TASK_COMPLETE_TOOL_NAME = "complete_tasks";
+export const TASK_GET_TOOL_NAME = "get_tasks_list";
+export const TASK_CLEAR_TOOL_NAME = "clear_tasks_list";
+export const TASK_TOOL_NAMES = [
+  TASK_ADD_TOOL_NAME,
+  TASK_REMOVE_TOOL_NAME,
+  TASK_COMPLETE_TOOL_NAME,
+  TASK_GET_TOOL_NAME,
+  TASK_CLEAR_TOOL_NAME,
+] as const;
 export const LOAD_SKILL_TOOL_NAME = "load_skill";
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
 export const FILE_READ_TOOL_NAME = "file_read";
@@ -86,8 +96,8 @@ const MAX_ASK_USER_DESCRIPTION_LENGTH = 500;
 const MAX_ASK_USER_QUESTION_LENGTH = 500;
 const MAX_ASK_USER_OPTION_LABEL_LENGTH = 160;
 const MAX_ASK_USER_OPTION_DESCRIPTION_LENGTH = 300;
-const MAX_CHECKLIST_ITEMS = 10;
-const MAX_CHECKLIST_CONTENT_LENGTH = 180;
+const MAX_TASK_SUBJECTS = 10;
+const MAX_TASK_SUBJECT_LENGTH = 180;
 
 export const ASK_USER_TOOL: LoadedToolInfo = {
   id: "builtin-ask-user",
@@ -166,47 +176,122 @@ export const ASK_USER_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
-export const CHECKLIST_WRITE_TOOL: LoadedToolInfo = {
-  id: "builtin-checklist-write",
-  name: CHECKLIST_WRITE_TOOL_NAME,
+export const TASK_ADD_TOOL: LoadedToolInfo = {
+  id: "builtin-add-tasks",
+  name: TASK_ADD_TOOL_NAME,
   enabled: true,
-  description:
-    "Create or update the visible checklist for complex multi-step work. Use this early for coding, debugging, research, planning, or any task with several steps. Call it again whenever progress changes. Always send the full current checklist snapshot, not just changed items. Keep items short and mark each item with done true or false.",
+  description: "Adds one or more tasks to the current chat checklist.",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
-      items: {
+      subjects: {
         type: "array",
         description:
-          "Full current checklist snapshot, not just changed items. Include one short item per meaningful step and explicitly set done to true or false on every item.",
+          "One to ten short task subjects to add. Do not include ids; the app assigns them.",
         minItems: 1,
-        maxItems: MAX_CHECKLIST_ITEMS,
+        maxItems: MAX_TASK_SUBJECTS,
         items: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            content: {
-              type: "string",
-              description: "Short user-visible checklist item.",
-            },
-            done: {
-              type: "boolean",
-              description:
-                "Whether this item is completed. Always provide true or false.",
-            },
-          },
-          required: ["content", "done"],
+          type: "string",
+          description: "Short user-visible task subject.",
         },
       },
     },
-    required: ["items"],
+    required: ["subjects"],
   },
   command: "",
   args: [],
   input: "none",
   timeoutMs: 0,
 };
+
+export const TASK_REMOVE_TOOL: LoadedToolInfo = {
+  id: "builtin-delete-tasks",
+  name: TASK_REMOVE_TOOL_NAME,
+  enabled: true,
+  description: "Deletes one or more tasks from the current chat checklist.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      taskIds: {
+        type: "array",
+        description: "Numeric task ids to remove.",
+        minItems: 1,
+        items: { type: "integer" },
+      },
+    },
+    required: ["taskIds"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const TASK_COMPLETE_TOOL: LoadedToolInfo = {
+  id: "builtin-complete-tasks",
+  name: TASK_COMPLETE_TOOL_NAME,
+  enabled: true,
+  description: "Marks one or more checklist tasks as done.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      taskIds: {
+        type: "array",
+        description: "Numeric task ids to mark done.",
+        minItems: 1,
+        items: { type: "integer" },
+      },
+    },
+    required: ["taskIds"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const TASK_GET_TOOL: LoadedToolInfo = {
+  id: "builtin-get-tasks-list",
+  name: TASK_GET_TOOL_NAME,
+  enabled: true,
+  description: "Gets the current chat checklist.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {},
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const TASK_CLEAR_TOOL: LoadedToolInfo = {
+  id: "builtin-clear-tasks-list",
+  name: TASK_CLEAR_TOOL_NAME,
+  enabled: true,
+  description: "Clears the current chat checklist.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {},
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const TASK_TOOLS = [
+  TASK_ADD_TOOL,
+  TASK_REMOVE_TOOL,
+  TASK_COMPLETE_TOOL,
+  TASK_GET_TOOL,
+  TASK_CLEAR_TOOL,
+] as const;
 
 export const WEB_FETCH_TOOL: LoadedToolInfo = {
   id: "builtin-web-fetch",
@@ -459,20 +544,27 @@ export const FILE_DELETE_TOOL: LoadedToolInfo = {
 };
 
 export function createCallAgentTool(agents: LoadedAgentInfo[]): LoadedToolInfo | null {
-  const enabledAgents = agents
-    .filter((agent) => agent.enabled)
-    .map((agent) => agent.name)
-    .filter(Boolean)
-    .sort((left, right) => left.localeCompare(right));
+  const enabledAgentList = agents
+    .filter((agent) => agent.enabled && agent.name.trim())
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const enabledAgents = enabledAgentList.map((agent) => agent.name);
 
   if (enabledAgents.length === 0) return null;
+
+  const agentDescriptions = enabledAgentList
+    .map((agent) => `- ${agent.name}: ${agent.description || "No description."}`)
+    .join("\n");
 
   return {
     id: "builtin-call-agent",
     name: CALL_AGENT_TOOL_NAME,
     enabled: true,
-    description:
+    description: [
       "Delegate a focused subtask to one configured agent. Use this when an agent's description closely matches a separable part of the user's request. The agent result will be returned so you can continue the final answer.",
+      "Built-in defaults: general is task-only and best for focused subtasks; general_full receives the full chat context and is best when the whole conversation matters.",
+      "Available agents:",
+      agentDescriptions,
+    ].join("\n"),
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -547,7 +639,7 @@ export function isValidToolName(toolName: string) {
 export function isBuiltInToolName(toolName: string) {
   return (
     toolName === ASK_USER_TOOL_NAME ||
-    toolName === CHECKLIST_WRITE_TOOL_NAME ||
+    isTaskToolName(toolName) ||
     toolName === LOAD_SKILL_TOOL_NAME ||
     toolName === WEB_FETCH_TOOL_NAME ||
     toolName === FILE_READ_TOOL_NAME ||
@@ -570,6 +662,10 @@ export function requiresFileToolApproval(toolName: string) {
     toolName === FILE_CREATE_TOOL_NAME ||
     toolName === FILE_DELETE_TOOL_NAME
   );
+}
+
+export function isTaskToolName(toolName: string) {
+  return TASK_TOOL_NAMES.includes(toolName as (typeof TASK_TOOL_NAMES)[number]);
 }
 
 function getToolArgValue(args: unknown, key: string) {
@@ -1128,77 +1224,101 @@ export function parseAskUserRequestFromToolCall(toolCall: ChatToolCall) {
   );
 }
 
-export function parseChecklistWriteRequest(
-  args: unknown,
-): ChecklistWriteRequest {
+function readTaskIds(args: unknown, toolName: string) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
-    throw new Error("checklist_write arguments must be a JSON object.");
+    throw new Error(`${toolName} arguments must be a JSON object.`);
   }
 
   const source = args as Record<string, unknown>;
-  if (!Array.isArray(source.items) || source.items.length === 0) {
-    throw new Error("checklist_write requires at least one checklist item.");
+  if (!Array.isArray(source.taskIds) || source.taskIds.length === 0) {
+    throw new Error(`${toolName} requires at least one task id.`);
   }
 
-  if (source.items.length > MAX_CHECKLIST_ITEMS) {
-    throw new Error(
-      `checklist_write supports at most ${MAX_CHECKLIST_ITEMS} items.`,
-    );
-  }
+  const ids = source.taskIds.map((rawId, index) => {
+    const parsedId =
+      typeof rawId === "number"
+        ? rawId
+        : typeof rawId === "string" && rawId.trim()
+          ? Number(rawId.trim())
+          : NaN;
 
-  const items: ChecklistItem[] = source.items.map((rawItem, index) => {
-    if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
-      throw new Error(`checklist_write item ${index + 1} must be an object.`);
+    if (!Number.isSafeInteger(parsedId) || parsedId <= 0) {
+      throw new Error(`${toolName} taskIds item ${index + 1} must be a positive integer.`);
     }
 
-    const itemSource = rawItem as Record<string, unknown>;
-    const content = readLimitedString(
-      itemSource,
-      "content",
-      MAX_CHECKLIST_CONTENT_LENGTH,
-      `checklist_write item ${index + 1} content`,
-    );
-
-    if (!content) {
-      throw new Error(`checklist_write item ${index + 1} is missing content.`);
-    }
-
-    if (typeof itemSource.done !== "boolean") {
-      throw new Error(
-        `checklist_write item ${index + 1} must explicitly set done to true or false.`,
-      );
-    }
-
-    return { content, done: itemSource.done };
+    return parsedId;
   });
 
-  return { items };
+  return [...new Set(ids)];
 }
 
-export function parseChecklistWriteRequestFromToolCall(toolCall: ChatToolCall) {
-  return parseChecklistWriteRequest(
-    parseToolArgumentsText(toolCall.function.arguments || "{}"),
-  );
+function parseNoArgTaskRequest(args: unknown, toolName: string) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error(`${toolName} arguments must be a JSON object.`);
+  }
 }
 
-export function createChecklistWriteToolResult(
-  toolCall: ChatToolCall,
-  request: ChecklistWriteRequest,
-): ChatToolResult {
-  const done = request.items.filter((item) => item.done).length;
+export function parseTaskAddRequest(args: unknown) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) {
+    throw new Error(`${TASK_ADD_TOOL_NAME} arguments must be a JSON object.`);
+  }
 
+  const source = args as Record<string, unknown>;
+  if (!Array.isArray(source.subjects) || source.subjects.length === 0) {
+    throw new Error(`${TASK_ADD_TOOL_NAME} requires at least one subject.`);
+  }
+
+  if (source.subjects.length > MAX_TASK_SUBJECTS) {
+    throw new Error(`${TASK_ADD_TOOL_NAME} supports at most ${MAX_TASK_SUBJECTS} subjects.`);
+  }
+
+  const subjects = source.subjects.map((rawSubject, index) => {
+    if (typeof rawSubject !== "string") {
+      throw new Error(`${TASK_ADD_TOOL_NAME} subject ${index + 1} must be a string.`);
+    }
+
+    const subject = rawSubject.trim();
+    if (!subject) {
+      throw new Error(`${TASK_ADD_TOOL_NAME} subject ${index + 1} is empty.`);
+    }
+
+    if (subject.length > MAX_TASK_SUBJECT_LENGTH) {
+      throw new Error(`${TASK_ADD_TOOL_NAME} subject ${index + 1} must be ${MAX_TASK_SUBJECT_LENGTH} characters or less.`);
+    }
+
+    return subject;
+  });
+
+  return { subjects };
+}
+
+export function parseTaskToolRequestFromToolCall(toolCall: ChatToolCall) {
+  const args = parseToolArgumentsText(toolCall.function.arguments || "{}");
+  const toolName = toolCall.function.name;
+
+  if (toolName === TASK_ADD_TOOL_NAME) return parseTaskAddRequest(args);
+  if (toolName === TASK_REMOVE_TOOL_NAME || toolName === TASK_COMPLETE_TOOL_NAME) {
+    return { taskIds: readTaskIds(args, toolName) };
+  }
+  if (toolName === TASK_GET_TOOL_NAME || toolName === TASK_CLEAR_TOOL_NAME) {
+    parseNoArgTaskRequest(args, toolName);
+    return {};
+  }
+
+  throw new Error(`Unsupported task tool: ${toolName}`);
+}
+
+export function createTaskToolResult({
+  toolCall,
+  tasks,
+}: {
+  toolCall: ChatToolCall;
+  tasks: AgentTask[];
+}): ChatToolResult {
   return {
     toolCallId: toolCall.id,
-    toolName: CHECKLIST_WRITE_TOOL_NAME,
-    content: JSON.stringify(
-      {
-        ok: true,
-        total: request.items.length,
-        done,
-      },
-      null,
-      2,
-    ),
+    toolName: toolCall.function.name,
+    content: JSON.stringify({ tasks }, null, 2),
   };
 }
 

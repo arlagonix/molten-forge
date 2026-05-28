@@ -29,10 +29,14 @@ import { useChatGeneration } from "@/hooks/use-chat-generation";
 import { useMessageContextMenu } from "@/hooks/use-message-context-menu";
 import { useStableCallback } from "@/hooks/use-stable-callback";
 import {
+  createBuiltInAgents,
+  isBuiltInAgentName,
+} from "@/lib/ai-chat/builtin-agents";
+import {
   ASK_USER_TOOL,
   ASK_USER_TOOL_NAME,
-  CHECKLIST_WRITE_TOOL,
-  CHECKLIST_WRITE_TOOL_NAME,
+  TASK_TOOLS,
+  isTaskToolName,
   DEFAULT_AGENTS_SETTINGS,
   DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
@@ -210,6 +214,7 @@ export default function Home() {
   );
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
+  const [completedGenerationChatIds, setCompletedGenerationChatIds] = useState<string[]>([]);
   const [titleGenerationChatIds, setTitleGenerationChatIds] = useState<
     string[]
   >([]);
@@ -524,7 +529,7 @@ export default function Home() {
 
     for (const tool of [
       ASK_USER_TOOL,
-      CHECKLIST_WRITE_TOOL,
+      ...TASK_TOOLS,
       WEB_FETCH_TOOL,
       FILE_READ_TOOL,
       FILE_FIND_TOOL,
@@ -551,8 +556,9 @@ export default function Home() {
     if (!toolsSettings.enabled) return names;
 
     if (toolsSettings.askUserEnabled) names.add(ASK_USER_TOOL_NAME);
-    if (toolsSettings.checklistWriteEnabled)
-      names.add(CHECKLIST_WRITE_TOOL_NAME);
+    if (toolsSettings.taskToolsEnabled) {
+      for (const tool of TASK_TOOLS) names.add(tool.name);
+    }
     if (toolsSettings.webFetchEnabled) names.add(WEB_FETCH_TOOL_NAME);
     if (toolsSettings.fileReadEnabled) names.add(FILE_READ_TOOL_NAME);
     if (toolsSettings.fileFindEnabled) names.add(FILE_FIND_TOOL_NAME);
@@ -565,7 +571,7 @@ export default function Home() {
       if (
         tool.enabled &&
         tool.name !== ASK_USER_TOOL_NAME &&
-        tool.name !== CHECKLIST_WRITE_TOOL_NAME &&
+        !isTaskToolName(tool.name) &&
         tool.name !== WEB_FETCH_TOOL_NAME &&
         tool.name !== FILE_READ_TOOL_NAME &&
         tool.name !== FILE_FIND_TOOL_NAME &&
@@ -695,8 +701,18 @@ export default function Home() {
   const availableAgents = useMemo(() => {
     const byName = new Map<string, LoadedAgentInfo>();
 
+    for (const agent of createBuiltInAgents()) {
+      byName.set(agent.name, agent);
+    }
+
     for (const agent of loadedAgents) {
-      if (!isValidToolName(agent.name) || byName.has(agent.name)) continue;
+      if (
+        !isValidToolName(agent.name) ||
+        isBuiltInAgentName(agent.name) ||
+        byName.has(agent.name)
+      ) {
+        continue;
+      }
       byName.set(agent.name, agent);
     }
 
@@ -1059,6 +1075,26 @@ export default function Home() {
     toast(message, description ? { description } : undefined);
   }
 
+  const activeChatIdRef = useRef(activeChatId);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+    if (!activeChatId) return;
+    setCompletedGenerationChatIds((currentChatIds) =>
+      currentChatIds.filter((chatId) => chatId !== activeChatId),
+    );
+  }, [activeChatId]);
+
+  useEffect(() => {
+    setCompletedGenerationChatIds((currentChatIds) =>
+      currentChatIds.filter(
+        (chatId) =>
+          !generatingChatIds.includes(chatId) &&
+          chats.some((chat) => chat.id === chatId),
+      ),
+    );
+  }, [chats, generatingChatIds]);
+
   function getToolsBridge() {
     if (!window.chatForgeTools) {
       throw new Error("Electron tools bridge is not available.");
@@ -1161,11 +1197,15 @@ export default function Home() {
     toolCall,
     toolResult,
     status,
+    isCollapsed,
+    onToggleCollapsed,
   }: {
     id: string;
     toolCall: ChatToolCall;
     toolResult?: ChatToolResult;
     status?: ToolExecutionStatus;
+    isCollapsed?: boolean;
+    onToggleCollapsed?: (stepId: string, nextCollapsed: boolean) => void;
   }) {
     return (
       <ToolExecutionBlock
@@ -1175,8 +1215,8 @@ export default function Home() {
         toolResult={toolResult}
         status={status}
         loadedTools={loadedTools}
-        isCollapsed={isToolExecutionCollapsed(id)}
-        onToggleCollapsed={toggleToolExecutionCollapsed}
+        isCollapsed={isCollapsed ?? isToolExecutionCollapsed(id)}
+        onToggleCollapsed={onToggleCollapsed ?? toggleToolExecutionCollapsed}
       />
     );
   }
@@ -1261,7 +1301,7 @@ export default function Home() {
     availableToolsByName,
     loadedSkills,
     availableSkillsByName,
-    loadedAgents,
+    loadedAgents: availableAgents,
     availableAgentsByName,
     autoScrollEnabledRef,
     generatingChatIds,
@@ -1276,12 +1316,58 @@ export default function Home() {
     scheduleStickyScrollToBottom,
     isStickyScrollSuppressed,
     syncChatScrollState,
-    executeExternalTool: (toolName, args, context) =>
-      getToolsBridge().execute({
-        name: toolName,
-        args,
-        workspaceRoots: context?.workspaceRoots,
-      }),
+    executeExternalTool: (toolName, args, context) => {
+      const bridge = getToolsBridge();
+      const executionId = createId();
+
+      return new Promise<ToolCommandResult>((resolve, reject) => {
+        let settled = false;
+
+        const cleanup = () => {
+          context?.signal?.removeEventListener("abort", abortHandler);
+        };
+
+        const settleResolve = (value: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolve(value as Awaited<ReturnType<typeof bridge.execute>>);
+        };
+
+        const settleReject = (error: unknown) => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          reject(error);
+        };
+
+        const abortHandler = () => {
+          void bridge.cancel(executionId).catch(() => undefined);
+          settleReject(new DOMException("Tool execution was cancelled.", "AbortError"));
+        };
+
+        if (context?.signal?.aborted) {
+          abortHandler();
+          return;
+        }
+
+        context?.signal?.addEventListener("abort", abortHandler, { once: true });
+        bridge
+          .execute({
+            executionId,
+            name: toolName,
+            args,
+            workspaceRoots: context?.workspaceRoots,
+          })
+          .then(settleResolve, settleReject);
+      });
+    },
+    onChatGenerationFinished: (chatId, options) => {
+      if (options.wasCancelled || activeChatIdRef.current === chatId) return;
+      setCompletedGenerationChatIds((currentChatIds) => [
+        ...new Set([...currentChatIds, chatId]),
+      ]);
+    },
     showError,
   });
   function updateProvidersState(
@@ -1609,17 +1695,33 @@ export default function Home() {
         activeChatId={activeChat?.id}
         isCollapsed={isSidebarCollapsed}
         generatingChatIds={generatingChatIds}
+        completedGenerationChatIds={completedGenerationChatIds}
         titleGenerationChatIds={titleGenerationChatIds}
         onCollapsedChange={setIsSidebarCollapsed}
-        onSwitchChat={switchChat}
+        onSwitchChat={(chatId) => {
+          setCompletedGenerationChatIds((currentChatIds) =>
+            currentChatIds.filter((currentChatId) => currentChatId !== chatId),
+          );
+          void switchChat(chatId);
+        }}
         onRenameChat={stableRenameChat}
         onToggleChatPinned={stableToggleChatPinned}
         onGenerateChatTitle={stableGenerateChatTitle}
-        onRemoveChat={removeChat}
+        onRemoveChat={(chatId) => {
+          setCompletedGenerationChatIds((currentChatIds) =>
+            currentChatIds.filter((currentChatId) => currentChatId !== chatId),
+          );
+          void removeChat(chatId);
+        }}
         onCreateNewChat={createNewChat}
         onCreateChatWithSameSettings={createChatWithSameSettings}
         onOpenSettings={() => setSettingsOpen(true)}
-        onClearChat={clearChat}
+        onClearChat={(chatId) => {
+          setCompletedGenerationChatIds((currentChatIds) =>
+            currentChatIds.filter((currentChatId) => currentChatId !== chatId),
+          );
+          void clearChat(chatId);
+        }}
       />
 
       <section className="relative grid min-h-0 flex-1 grid-rows-[1fr_auto] bg-background px-4">

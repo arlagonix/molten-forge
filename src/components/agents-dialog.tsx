@@ -59,6 +59,11 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  BUILTIN_AGENT_NAMES,
+  createBuiltInAgents,
+  isBuiltInAgentName,
+} from "@/lib/ai-chat/builtin-agents";
+import {
   createId,
   getEnabledProviderModels,
   labelForError,
@@ -188,6 +193,11 @@ function validateAgentDraft(agent: LoadedAgentInfo) {
       "call_agent is a built-in tool name and cannot be used by an agent.",
     );
   }
+  if (isBuiltInAgentName(agent.name)) {
+    throw new Error(
+      `${agent.name} is a built-in agent name and cannot be used by a custom agent. Reserved names: ${BUILTIN_AGENT_NAMES.join(", ")}.`,
+    );
+  }
   if (!agent.description) throw new Error("Agent description is required.");
   if (!agent.instructions) throw new Error("Agent instructions are required.");
 }
@@ -264,12 +274,23 @@ export const AgentsDialog = memo(function AgentsDialog({
   const [agentSearch, setAgentSearch] = useState("");
   const [instructionsEditorOpen, setInstructionsEditorOpen] = useState(false);
 
+  const builtInAgents = useMemo(() => createBuiltInAgents(), []);
+  const displayedAgents = useMemo(
+    () => [
+      ...builtInAgents,
+      ...loadedAgents.filter((agent) => !isBuiltInAgentName(agent.name)),
+    ],
+    [builtInAgents, loadedAgents],
+  );
   const selectedAgent = useMemo(
     () =>
-      loadedAgents.find((agent) => agent.name === selectedAgentName) ?? null,
-    [loadedAgents, selectedAgentName],
+      displayedAgents.find((agent) => agent.name === selectedAgentName) ?? null,
+    [displayedAgents, selectedAgentName],
   );
-  const enabledAgentsCount = loadedAgents.filter(
+  const selectedAgentIsBuiltIn = selectedAgent
+    ? isBuiltInAgentName(selectedAgent.name)
+    : false;
+  const enabledAgentsCount = displayedAgents.filter(
     (agent) => agent.enabled,
   ).length;
 
@@ -301,31 +322,31 @@ export const AgentsDialog = memo(function AgentsDialog({
 
     if (
       !selectedAgentName ||
-      !loadedAgents.some((agent) => agent.name === selectedAgentName)
+      !displayedAgents.some((agent) => agent.name === selectedAgentName)
     ) {
-      setSelectedAgentName(loadedAgents[0]?.name ?? null);
+      setSelectedAgentName(displayedAgents[0]?.name ?? null);
     }
-  }, [loadedAgents, selectedAgentName, agentDraft]);
+  }, [displayedAgents, loadedAgents, selectedAgentName, agentDraft]);
 
   useEffect(() => {
-    const selected = loadedAgents.find(
+    const selected = displayedAgents.find(
       (agent) => agent.name === selectedAgentName,
     );
     if (selected) setAgentDraft(agentToDraft(selected));
     else if (selectedAgentName) setAgentDraft(null);
-  }, [loadedAgents, selectedAgentName]);
+  }, [displayedAgents, selectedAgentName]);
 
   function updateAgentDraft(patch: Partial<AgentDraft>) {
     setAgentDraft((current) => (current ? { ...current, ...patch } : current));
   }
 
   const hasAgentDraftChanges = useMemo(() => {
-    if (!agentDraft) return false;
+    if (!agentDraft || selectedAgentIsBuiltIn) return false;
     const originalDraft = selectedAgent
       ? agentToDraft(selectedAgent)
       : { ...createBlankAgentDraft(), id: agentDraft.id };
     return !areAgentDraftsEqual(agentDraft, originalDraft);
-  }, [selectedAgent, agentDraft]);
+  }, [selectedAgent, selectedAgentIsBuiltIn, agentDraft]);
 
   async function saveCurrentAgentDraft() {
     if (!agentDraft) return;
@@ -489,7 +510,7 @@ export const AgentsDialog = memo(function AgentsDialog({
   );
 
   const agentSearchText = agentSearch.trim().toLowerCase();
-  const visibleAgents = loadedAgents.filter((agent) => {
+  const visibleAgents = displayedAgents.filter((agent) => {
     if (agent.id === agentDraft?.id) return false;
     if (!agentSearchText) return true;
     return `${agent.name} ${agent.description}`
@@ -497,8 +518,8 @@ export const AgentsDialog = memo(function AgentsDialog({
       .includes(agentSearchText);
   });
   const agentsByName = useMemo(
-    () => new Map(loadedAgents.map((agent) => [agent.name, agent] as const)),
-    [loadedAgents],
+    () => new Map(displayedAgents.map((agent) => [agent.name, agent] as const)),
+    [displayedAgents],
   );
 
   return (
@@ -520,7 +541,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                   Agents
                 </Label>
                 <span className="text-sm text-muted-foreground">
-                  {enabledAgentsCount}/{loadedAgents.length} enabled
+                  {enabledAgentsCount}/{displayedAgents.length} enabled
                 </span>
               </div>
 
@@ -610,7 +631,10 @@ export const AgentsDialog = memo(function AgentsDialog({
               </div>
 
               <div className="grid gap-1.5">
-                {loadedAgents.map((agent) => (
+                {displayedAgents.map((agent) => {
+                  const isAgentBuiltIn = isBuiltInAgentName(agent.name);
+
+                  return (
                   <div
                     key={agent.id}
                     role="button"
@@ -636,29 +660,36 @@ export const AgentsDialog = memo(function AgentsDialog({
                         {agent.description}
                       </div>
                     </div>
-                    <Switch
-                      checked={agent.enabled}
-                      onClick={(event) => event.stopPropagation()}
-                      onCheckedChange={async (checked) => {
-                        const updated = { ...agent, enabled: checked };
-                        try {
-                          const saved = await saveAgent(updated);
-                          onLoadedAgentsChange((current) =>
-                            current.map((item) => (item.id === saved.id ? saved : item)),
-                          );
-                          if (agentDraft?.id === saved.id)
-                            setAgentDraft(agentToDraft(saved));
-                        } catch (error) {
-                          showError("Failed to update agent", labelForError(error));
-                        }
-                      }}
-                      className="mt-0.5 shrink-0 cursor-pointer"
-                      title={agent.enabled ? "Disable agent" : "Enable agent"}
-                    />
+                    {isAgentBuiltIn ? (
+                      <span className="mt-0.5 shrink-0 border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
+                        Built-in
+                      </span>
+                    ) : (
+                      <Switch
+                        checked={agent.enabled}
+                        onClick={(event) => event.stopPropagation()}
+                        onCheckedChange={async (checked) => {
+                          const updated = { ...agent, enabled: checked };
+                          try {
+                            const saved = await saveAgent(updated);
+                            onLoadedAgentsChange((current) =>
+                              current.map((item) => (item.id === saved.id ? saved : item)),
+                            );
+                            if (agentDraft?.id === saved.id)
+                              setAgentDraft(agentToDraft(saved));
+                          } catch (error) {
+                            showError("Failed to update agent", labelForError(error));
+                          }
+                        }}
+                        className="mt-0.5 shrink-0 cursor-pointer"
+                        title={agent.enabled ? "Disable agent" : "Enable agent"}
+                      />
+                    )}
                   </div>
-                ))}
+                  );
+                })}
 
-                {loadedAgents.length === 0 && (
+                {displayedAgents.length === 0 && (
                   <div className="border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
                     No agents configured.
                   </div>
@@ -691,9 +722,13 @@ export const AgentsDialog = memo(function AgentsDialog({
                   <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
                     <div className="flex w-full items-center justify-between gap-4">
                       <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                        {selectedAgent ? "Edit agent" : "New agent"}
+                        {selectedAgentIsBuiltIn
+                          ? "Built-in agent"
+                          : selectedAgent
+                            ? "Edit agent"
+                            : "New agent"}
                       </Label>
-                      {selectedAgent && agentDraft && (
+                      {selectedAgent && agentDraft && !selectedAgentIsBuiltIn && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
@@ -739,6 +774,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                             updateAgentDraft({ name: event.target.value })
                           }
                           placeholder="reviewer"
+                          disabled={selectedAgentIsBuiltIn}
                         />
                       </div>
 
@@ -749,6 +785,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                           value={agentDraft.description}
                           onChange={(event) => updateAgentDraft({ description: event.target.value })}
                           placeholder="What this agent is good at and when the main model should call it."
+                          disabled={selectedAgentIsBuiltIn}
                           className="min-h-24 leading-6"
                         />
                       </div>
@@ -762,6 +799,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                             size="sm"
                             className="h-8 px-2 text-sm"
                             onClick={() => setInstructionsEditorOpen(true)}
+                            disabled={selectedAgentIsBuiltIn}
                           >
                             <Maximize2 className="size-4" />
                             Open editor
@@ -774,6 +812,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                             updateAgentDraft({ instructions: event.target.value })
                           }
                           placeholder="Agent system prompt / instructions."
+                          disabled={selectedAgentIsBuiltIn}
                           className="min-h-72 text-sm leading-6"
                         />
                       </div>
@@ -782,6 +821,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                         <Label htmlFor="agent-context-mode">Context mode</Label>
                         <Select
                           value={agentDraft.contextMode}
+                          disabled={selectedAgentIsBuiltIn}
                           onValueChange={(value) =>
                             updateAgentDraft({
                               contextMode:
@@ -816,6 +856,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                               role="combobox"
                               aria-expanded={modelPickerOpen}
                               className="w-full justify-between px-3 text-left font-normal"
+                              disabled={selectedAgentIsBuiltIn}
                               title={
                                 agentDraft.providerId && agentDraft.model
                                   ? `${agentDraft.model}`
@@ -933,9 +974,16 @@ export const AgentsDialog = memo(function AgentsDialog({
                           onChange={(event) =>
                             updateAgentDraft({ maxNestingDepth: event.target.value })
                           }
+                          disabled={selectedAgentIsBuiltIn}
                         />
                       </div>
 
+                      {selectedAgentIsBuiltIn ? (
+                        <div className="border bg-muted/25 px-3 py-2 text-sm leading-5 text-muted-foreground">
+                          Built-in agents mirror the current chat's effective tools, skills, and allowed agents at runtime, so there is no separate permission list to edit here.
+                        </div>
+                      ) : (
+                        <>
                       <div className="grid gap-2">
                         <Label>Loaded skills</Label>
                         <Popover
@@ -1157,7 +1205,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                                 variant="outline"
                                 role="combobox"
                                 className="w-full justify-between px-3 text-left font-normal"
-                                disabled={loadedAgents.length <= 1}
+                                disabled={displayedAgents.length <= 1}
                               >
                                 <span
                                   className={cn(
@@ -1167,7 +1215,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                                 >
                                   {agentDraft.allowedAgentNames.length > 0
                                     ? `${agentDraft.allowedAgentNames.length} allowed agent${agentDraft.allowedAgentNames.length === 1 ? "" : "s"}`
-                                    : loadedAgents.length > 1
+                                    : displayedAgents.length > 1
                                       ? "Select allowed agents"
                                       : "No other agents are available"}
                                 </span>
@@ -1245,28 +1293,38 @@ export const AgentsDialog = memo(function AgentsDialog({
                             </div>
                           )}
                       </div>
+                        </>
+                      )}
                     </div>
                   </div>
 
                   <DialogFooter className="shrink-0 border-t bg-background px-5 py-4">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        if (selectedAgent) setAgentDraft(agentToDraft(selectedAgent));
-                        else setAgentDraft(createBlankAgentDraft());
-                      }}
-                      disabled={!hasAgentDraftChanges || isSavingAgent}
-                    >
-                      Reset
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={() => void saveCurrentAgentDraft()}
-                      disabled={!hasAgentDraftChanges || isSavingAgent}
-                    >
-                      {isSavingAgent ? "Saving..." : "Save"}
-                    </Button>
+                    {selectedAgentIsBuiltIn ? (
+                      <div className="w-full text-sm leading-5 text-muted-foreground">
+                        Built-in agents are read-only. They are always available when agents are enabled and mirror the current chat's effective tools and skills.
+                      </div>
+                    ) : (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            if (selectedAgent) setAgentDraft(agentToDraft(selectedAgent));
+                            else setAgentDraft(createBlankAgentDraft());
+                          }}
+                          disabled={!hasAgentDraftChanges || isSavingAgent}
+                        >
+                          Reset
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={() => void saveCurrentAgentDraft()}
+                          disabled={!hasAgentDraftChanges || isSavingAgent}
+                        >
+                          {isSavingAgent ? "Saving..." : "Save"}
+                        </Button>
+                      </>
+                    )}
                   </DialogFooter>
                 </>
               ) : (
@@ -1307,6 +1365,7 @@ export const AgentsDialog = memo(function AgentsDialog({
                 updateAgentDraft({ instructions: event.target.value })
               }
               placeholder="Agent system prompt / instructions."
+              disabled={selectedAgentIsBuiltIn}
               className="min-h-0 flex-1 resize-none text-sm leading-6"
             />
 

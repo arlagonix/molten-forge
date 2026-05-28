@@ -15,6 +15,7 @@ type QueuedToolRun<T> = {
   resolve: (value: T) => void;
   reject: (error: unknown) => void;
   onStatusChange?: (status: Extract<ToolExecutionStatus, "pending" | "running">) => void;
+  signal?: AbortSignal;
 };
 
 type ToolQueueState = {
@@ -53,6 +54,21 @@ function normalizeExecutionPolicy(
   };
 }
 
+function createAbortError() {
+  return new DOMException("Tool execution was cancelled.", "AbortError");
+}
+
+function removeQueuedRun(state: ToolQueueState, queuedRun: QueuedToolRun<unknown>) {
+  const index = state.queue.indexOf(queuedRun);
+  if (index >= 0) state.queue.splice(index, 1);
+}
+
+function cleanupQueueIfIdle(toolName: string, state: ToolQueueState) {
+  if (state.queue.length === 0 && state.running === 0 && !state.timer) {
+    toolQueues.delete(toolName);
+  }
+}
+
 function scheduleToolQueue(toolName: string) {
   const state = toolQueues.get(toolName);
   if (!state || state.timer) return;
@@ -79,6 +95,11 @@ function scheduleToolQueue(toolName: string) {
 
     const queuedRun = state.queue.shift();
     if (!queuedRun) return;
+
+    if (queuedRun.signal?.aborted) {
+      queuedRun.reject(createAbortError());
+      continue;
+    }
 
     state.running += 1;
     state.lastStartedAt = Date.now();
@@ -108,8 +129,13 @@ export function runQueuedTool<T>(
   policy: Partial<ToolExecutionPolicy> | undefined,
   operation: () => Promise<T>,
   onStatusChange?: (status: Extract<ToolExecutionStatus, "pending" | "running">) => void,
+  signal?: AbortSignal,
 ): Promise<T> {
   const normalizedPolicy = normalizeExecutionPolicy(policy);
+
+  if (signal?.aborted) {
+    return Promise.reject(createAbortError());
+  }
 
   if (!normalizedPolicy) {
     onStatusChange?.("running");
@@ -131,6 +157,20 @@ export function runQueuedTool<T>(
     state.policy = normalizedPolicy;
     toolQueues.set(toolName, state);
 
+    const queuedRun: QueuedToolRun<unknown> = {
+      operation,
+      resolve: resolve as (value: unknown) => void,
+      reject,
+      onStatusChange,
+      signal,
+    };
+
+    const abortHandler = () => {
+      removeQueuedRun(state, queuedRun);
+      reject(createAbortError());
+      cleanupQueueIfIdle(toolName, state);
+    };
+
     const canStartImmediately =
       state.running < normalizedPolicy.maxConcurrentRuns &&
       (!state.lastStartedAt ||
@@ -142,12 +182,24 @@ export function runQueuedTool<T>(
       onStatusChange?.("pending");
     }
 
-    state.queue.push({
-      operation,
-      resolve: resolve as (value: unknown) => void,
-      reject,
-      onStatusChange,
-    });
+    state.queue.push(queuedRun);
+
+    signal?.addEventListener("abort", abortHandler, { once: true });
+
+    const cleanup = () => {
+      signal?.removeEventListener("abort", abortHandler);
+    };
+
+    const originalResolve = queuedRun.resolve;
+    const originalReject = queuedRun.reject;
+    queuedRun.resolve = (value) => {
+      cleanup();
+      originalResolve(value);
+    };
+    queuedRun.reject = (error) => {
+      cleanup();
+      originalReject(error);
+    };
 
     scheduleToolQueue(toolName);
   });

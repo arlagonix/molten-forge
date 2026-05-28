@@ -5,7 +5,7 @@ import { Spinner } from "@/components/ui/spinner";
 import {
   ASK_USER_TOOL,
   CALL_AGENT_TOOL_NAME,
-  CHECKLIST_WRITE_TOOL,
+  TASK_TOOLS,
   FILE_CREATE_TOOL,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL,
@@ -21,6 +21,7 @@ import {
   LOAD_SKILL_TOOL_NAME,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
+  isTaskToolName,
 } from "@/lib/ai-chat/builtin-tools";
 import { buildToolExecutionPreviewForCall } from "@/lib/ai-chat/tool-preview";
 import type {
@@ -36,7 +37,7 @@ const TOOL_INFO_CODE_BLOCK_CLASS_NAME =
 
 const BUILTIN_TOOL_DESCRIPTIONS: Record<string, string> = {
   [ASK_USER_TOOL.name]: ASK_USER_TOOL.description,
-  [CHECKLIST_WRITE_TOOL.name]: CHECKLIST_WRITE_TOOL.description,
+  ...Object.fromEntries(TASK_TOOLS.map((tool) => [tool.name, tool.description])),
   [WEB_FETCH_TOOL.name]: WEB_FETCH_TOOL.description,
   [FILE_READ_TOOL.name]: FILE_READ_TOOL.description,
   [FILE_FIND_TOOL.name]: FILE_FIND_TOOL.description,
@@ -342,13 +343,14 @@ export function ToolExecutionBlock({
   const loadedSkillName = getLoadSkillName(toolCall, toolResult);
   const loadSkillDetails = getLoadSkillDetails(toolResult);
   const isLoadSkillTool = toolCall.function.name === LOAD_SKILL_TOOL_NAME;
+  const isTaskTool = isTaskToolName(toolCall.function.name);
   const toolDescription = getToolDescription(
     toolCall.function.name,
     loadedTools,
   );
   const showToolInput =
     hasMeaningfulToolInput(toolCall.function.arguments || "") &&
-    (!executionPreview || executionPreview.usesStdin);
+    (isTaskTool || !executionPreview || executionPreview.usesStdin);
   const toolHeaderDetail = isLoadSkillTool
     ? loadedSkillName
     : getToolHeaderDetail(toolCall);
@@ -394,7 +396,7 @@ export function ToolExecutionBlock({
                 {toolDescription}
               </div>
             ) : null}
-            {renderToolExecutionPreview(executionPreview)}
+            {!isTaskTool && renderToolExecutionPreview(executionPreview)}
             {showToolInput && (
               <div className="grid gap-1.5">
                 <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">

@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { memo, useEffect, useLayoutEffect, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -20,7 +20,9 @@ import type {
   AskUserQuestionType,
   AskUserRequest,
   AskUserResponse,
-  ChecklistWriteRequest,
+  AgentTask,
+  ChatToolCall,
+  ChatToolResult,
   ToolApprovalRequest,
   ToolApprovalResponse,
   ToolExecutionStatus,
@@ -1093,7 +1095,9 @@ export const ToolApprovalBlock = memo(function ToolApprovalBlock({
                 <div className="grid gap-1 text-sm">
                   {request.details.map((detail) => (
                     <div key={detail.label} className="min-w-0">
-                      <span className="text-muted-foreground">{detail.label}: </span>
+                      <span className="text-muted-foreground">
+                        {detail.label}:{" "}
+                      </span>
                       <span className="text-muted-foreground/85 [overflow-wrap:anywhere]">
                         {detail.value}
                       </span>
@@ -1144,7 +1148,7 @@ export const ToolApprovalBlock = memo(function ToolApprovalBlock({
   );
 });
 
-function getChecklistItemIcon(done: boolean) {
+function getTaskItemIcon(done: boolean) {
   if (done) {
     return <Check className="size-3.5 text-green-600 dark:text-green-400" />;
   }
@@ -1152,26 +1156,62 @@ function getChecklistItemIcon(done: boolean) {
   return <Square className="size-3.5 text-muted-foreground/70" />;
 }
 
-export const ChecklistBlock = memo(function ChecklistBlock({
+function parseTaskToolResult(toolResult?: ChatToolResult): AgentTask[] {
+  if (!toolResult?.content || toolResult.isError) return [];
+
+  try {
+    const parsed = JSON.parse(toolResult.content) as { tasks?: unknown };
+    if (!Array.isArray(parsed.tasks)) return [];
+
+    return parsed.tasks.filter((task): task is AgentTask => {
+      if (!task || typeof task !== "object" || Array.isArray(task))
+        return false;
+      const source = task as Record<string, unknown>;
+      return (
+        typeof source.id === "number" &&
+        typeof source.subject === "string" &&
+        typeof source.done === "boolean"
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+export const TaskListBlock = memo(function TaskListBlock({
   id,
-  request,
+  toolCall,
+  toolResult,
+  status,
   isCollapsed,
   onToggleCollapsed,
   onLayoutChange,
 }: {
   id: string;
-  request: ChecklistWriteRequest;
+  toolCall: ChatToolCall;
+  toolResult?: ChatToolResult;
   status?: ToolExecutionStatus;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
   onLayoutChange?: () => void;
 }) {
-  const totalCount = request.items.length;
-  const doneCount = request.items.filter((item) => item.done).length;
+  const tasks = useMemo(() => parseTaskToolResult(toolResult), [toolResult]);
+  const totalCount = tasks.length;
+  const doneCount = tasks.filter((task) => task.done).length;
+  const isPending = !toolResult && status !== "complete" && status !== "failed";
+  const isError = toolResult?.isError === true || status === "failed";
 
   useLayoutEffect(() => {
     onLayoutChange?.();
-  }, [doneCount, isCollapsed, onLayoutChange, request.items, totalCount]);
+  }, [
+    doneCount,
+    isCollapsed,
+    isError,
+    isPending,
+    onLayoutChange,
+    tasks,
+    totalCount,
+  ]);
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
@@ -1185,10 +1225,16 @@ export const ChecklistBlock = memo(function ChecklistBlock({
           <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
             <div className="flex min-w-0 items-center gap-2">
               <ListTodo className="size-3.5 shrink-0" />
-              <span className="truncate">Checklist</span>
+              <span className="truncate">Tasks</span>
               <span className="text-muted-foreground/60">•</span>
               <span className="text-muted-foreground/80">
-                {doneCount}/{totalCount} done
+                {isPending
+                  ? "updating"
+                  : isError
+                    ? "failed"
+                    : totalCount === 0
+                      ? "none"
+                      : `${doneCount}/${totalCount} done`}
               </span>
             </div>
             {isCollapsed ? (
@@ -1200,27 +1246,42 @@ export const ChecklistBlock = memo(function ChecklistBlock({
         </button>
 
         {!isCollapsed && (
-          <ul className="mt-3 grid gap-0 text-sm normal-case leading-5 tracking-normal">
-            {request.items.map((item, index) => (
-              <li
-                key={`${index}-${item.content}`}
-                className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2  px-2 py-1.5"
-              >
-                <span className="mt-0.5">
-                  {getChecklistItemIcon(item.done)}
-                </span>
-                <div
-                  className={cn(
-                    "min-w-0 font-medium text-foreground/85",
-                    item.done &&
-                      "text-muted-foreground line-through decoration-muted-foreground/50",
-                  )}
-                >
-                  {item.content}
-                </div>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-3">
+            {isPending ? (
+              <div className="flex items-center gap-2 px-2 py-1.5 text-sm leading-5 text-muted-foreground">
+                <Spinner className="size-3.5" />
+                <span>Updating tasks…</span>
+              </div>
+            ) : isError ? (
+              <div className="border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm leading-5 text-destructive">
+                {toolResult?.content || "Task tool failed."}
+              </div>
+            ) : totalCount === 0 ? (
+              <div className="px-2 py-1.5 text-sm leading-5 text-muted-foreground">
+                No active tasks.
+              </div>
+            ) : (
+              <ul className="grid gap-0 text-sm normal-case leading-5 tracking-normal">
+                {tasks.map((task) => (
+                  <li
+                    key={task.id}
+                    className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2  px-2 py-1.5"
+                  >
+                    <span className="mt-0.5">{getTaskItemIcon(task.done)}</span>
+                    <div
+                      className={cn(
+                        "min-w-0 font-medium text-foreground/85",
+                        task.done &&
+                          "text-muted-foreground line-through decoration-muted-foreground/50",
+                      )}
+                    >
+                      {task.subject}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
     </article>

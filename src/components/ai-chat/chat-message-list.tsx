@@ -12,7 +12,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo } from "react";
 
 import { AgentCallBlock } from "@/components/ai-chat/agent-call-block";
 import { type ToolMentionOption } from "@/components/ai-chat/chat-composer";
@@ -21,18 +21,18 @@ import { SmoothAssistantMessageContent } from "@/components/ai-chat/smooth-assis
 import { ThinkingBlock } from "@/components/ai-chat/thinking-block";
 import {
   AskUserBlock,
-  ChecklistBlock,
+  TaskListBlock,
   ToolApprovalBlock,
 } from "@/components/ai-chat/tool-interaction-blocks";
 import { TooltipIconButton } from "@/components/ai-chat/tooltip-icon-button";
 import { UserMessageEditor } from "@/components/ai-chat/user-message-editor";
 import { Button } from "@/components/ui/button";
-import { Spinner } from "@/components/ui/spinner";
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Tooltip,
   TooltipContent,
@@ -42,13 +42,12 @@ import { getActiveVariant } from "@/lib/ai-chat/chat-utils";
 import type {
   AskUserRequest,
   AskUserResponse,
-  ToolApprovalResponse,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatMessage,
   ChatToolCall,
   ChatToolResult,
-  ThinkingStatus,
+  ToolApprovalResponse,
   ToolExecutionStatus,
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
@@ -59,6 +58,57 @@ const USER_MENTION_PATTERN =
 type VisibleAssistantProcessStep = ChatAssistantProcessStep & {
   sourceStepIds: string[];
 };
+
+type VisibleAssistantProcessStepGroup =
+  | { kind: "single"; step: VisibleAssistantProcessStep }
+  | {
+      kind: "tool_batch";
+      toolBatchId: string;
+      steps: VisibleAssistantProcessStep[];
+    };
+
+function getVisibleStepToolBatchId(step: VisibleAssistantProcessStep) {
+  if (step.type === "tasks") {
+    return undefined;
+  }
+
+  return "toolBatchId" in step ? step.toolBatchId : undefined;
+}
+
+function groupVisibleAssistantProcessSteps(
+  steps: VisibleAssistantProcessStep[],
+): VisibleAssistantProcessStepGroup[] {
+  const groups: VisibleAssistantProcessStepGroup[] = [];
+  let index = 0;
+
+  while (index < steps.length) {
+    const step = steps[index];
+    const toolBatchId = getVisibleStepToolBatchId(step);
+
+    if (!toolBatchId) {
+      groups.push({ kind: "single", step });
+      index += 1;
+      continue;
+    }
+
+    const batchSteps: VisibleAssistantProcessStep[] = [];
+    while (
+      index < steps.length &&
+      getVisibleStepToolBatchId(steps[index]) === toolBatchId
+    ) {
+      batchSteps.push(steps[index]);
+      index += 1;
+    }
+
+    if (batchSteps.length > 1) {
+      groups.push({ kind: "tool_batch", toolBatchId, steps: batchSteps });
+    } else {
+      groups.push({ kind: "single", step: batchSteps[0] });
+    }
+  }
+
+  return groups;
+}
 
 export type MessageContextMenuState = {
   messageId: string;
@@ -145,7 +195,7 @@ type ChatMessageListProps = {
   ) => void;
 };
 
-function keepOnlyLatestChecklistListStep<T extends ChatAssistantProcessStep>(
+function keepOnlyLatestTaskListStep<T extends ChatAssistantProcessStep>(
   processSteps: T[],
 ): T[] {
   return processSteps;
@@ -156,7 +206,7 @@ function getVisibleAssistantProcessSteps(
 ): VisibleAssistantProcessStep[] {
   const visibleSteps: VisibleAssistantProcessStep[] = [];
 
-  for (const step of keepOnlyLatestChecklistListStep(processSteps)) {
+  for (const step of keepOnlyLatestTaskListStep(processSteps)) {
     if (step.type === "thinking" && !step.content.trim()) {
       continue;
     }
@@ -307,7 +357,7 @@ function getRelevantCollapsedKeys(message: ChatMessage) {
       step.type === "user_input" ||
       step.type === "approval" ||
       step.type === "file_approval" ||
-      step.type === "checklist"
+      step.type === "tasks"
     ) {
       keys.add(step.id);
     }
@@ -448,6 +498,238 @@ const ChatMessageItem = memo(
     const activeVariantNumber =
       message.role === "assistant" ? message.activeVariantIndex + 1 : 0;
 
+    const processStepGroups =
+      groupVisibleAssistantProcessSteps(visibleProcessSteps);
+
+    const renderProcessStep = (step: VisibleAssistantProcessStep) => {
+      const isLatestProcessStep = step.sourceStepIds.includes(
+        latestProcessStepId ?? "",
+      );
+      const stepFlushVersion = step.sourceStepIds.reduce(
+        (total, sourceStepId) =>
+          total + (visualFlushRequests[`${message.id}:${sourceStepId}`] ?? 0),
+        0,
+      );
+
+      if (step.type === "thinking") {
+        if (!step.content.trim()) return null;
+
+        const isThinkingStreaming =
+          status === "streaming" && isLatestProcessStep;
+
+        const manualCollapsed = collapsedThinkingStepIds[step.id];
+        const isCollapsed = manualCollapsed ?? !isThinkingStreaming;
+
+        return (
+          <ThinkingBlock
+            key={step.id}
+            id={step.id}
+            content={step.content}
+            status={step.status}
+            startedAt={step.startedAt}
+            completedAt={step.completedAt}
+            isStreaming={isThinkingStreaming}
+            isCollapsed={isCollapsed}
+            flushVersion={stepFlushVersion}
+            forceInstant={!isThinkingStreaming}
+            onToggleCollapsed={() => {
+              const nextCollapsed = !isCollapsed;
+              if (nextCollapsed) {
+                onAssistantVisualStreamingChange(
+                  `${message.id}:${step.id}`,
+                  false,
+                );
+              }
+              onToggleThinkingCollapsed(step.id, nextCollapsed);
+            }}
+            onVisualProgress={() => onAssistantVisualProgress(activeChatId)}
+            onVisualStreamingChange={(isStreaming) =>
+              onAssistantVisualStreamingChange(
+                `${message.id}:${step.id}`,
+                isStreaming,
+              )
+            }
+          />
+        );
+      }
+
+      if (step.type === "assistant_message") {
+        if (!step.content.trim()) return null;
+
+        const isAssistantBlockStreaming =
+          status === "streaming" && isLatestProcessStep;
+        return (
+          <div key={step.id} className="grid gap-1">
+            <article
+              className="flex w-full min-w-0 max-w-full justify-start"
+              onContextMenu={(event) =>
+                onCaptureMessageContext(event, message.id)
+              }
+            >
+              <div className="w-full min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]">
+                <SmoothAssistantMessageContent
+                  content={step.content}
+                  isApiStreaming={isAssistantBlockStreaming}
+                  skipSyntaxHighlight={isAssistantBlockStreaming}
+                  flushVersion={stepFlushVersion}
+                  onVisualProgress={() =>
+                    onAssistantVisualProgress(activeChatId)
+                  }
+                  onVisualStreamingChange={(isStreaming) =>
+                    onAssistantVisualStreamingChange(
+                      `${message.id}:${step.id}`,
+                      isStreaming,
+                    )
+                  }
+                />
+              </div>
+            </article>
+          </div>
+        );
+      }
+
+      if (step.type === "tool_building") {
+        const toolNames = [
+          ...new Set(
+            step.toolCalls
+              .map((toolCall) => toolCall.function.name.trim())
+              .filter(Boolean),
+          ),
+        ];
+        const toolName = toolNames.join(", ");
+
+        return (
+          <article
+            key={step.id}
+            className="flex w-full min-w-0 max-w-full justify-start"
+          >
+            <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+              <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                <div className="flex min-w-0 items-center gap-2">
+                  <Wrench className="size-3.5 shrink-0" />
+                  <span className="shrink-0 truncate">Tool building</span>
+                  <span className="shrink-0 text-muted-foreground/60">•</span>
+                  <span className="inline-flex shrink-0 items-center gap-1 text-amber-600 dark:text-amber-400">
+                    <Spinner className="size-3.5" />
+                    In progress
+                  </span>
+                  {toolName ? (
+                    <>
+                      <span className="shrink-0 text-muted-foreground/60">
+                        •
+                      </span>
+                      <span className="min-w-0 truncate normal-case tracking-normal text-muted-foreground/85">
+                        {toolName}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </article>
+        );
+      }
+
+      if (step.type === "agent_call") {
+        void isLatestProcessStep;
+        void stepFlushVersion;
+
+        return (
+          <AgentCallBlock
+            key={step.id}
+            id={step.id}
+            agentCall={step.agentCall}
+            status={step.status}
+            renderToolExecutionBlock={renderToolExecutionBlock}
+            canSubmitAskUserResponse={canSubmitAskUserResponse}
+            onSubmitAskUserResponse={onSubmitAskUserResponse}
+            onCancelAskUserRequest={onCancelAskUserRequest}
+            onAskUserLayoutChange={onAskUserLayoutChange}
+          />
+        );
+      }
+
+      if (step.type === "user_input") {
+        const manualCollapsed = collapsedToolStepIds[step.id];
+        const isCollapsed = manualCollapsed ?? step.status !== "waiting";
+
+        return (
+          <AskUserBlock
+            key={step.id}
+            id={step.id}
+            request={step.request}
+            response={step.response}
+            status={step.status}
+            canSubmit={canSubmitAskUserResponse(step.toolCall.id)}
+            isCollapsed={isCollapsed}
+            onToggleCollapsed={() =>
+              onToggleToolExecutionCollapsed(step.id, !isCollapsed)
+            }
+            onSubmit={(response) =>
+              onSubmitAskUserResponse(step.toolCall, step.request, response)
+            }
+            onCancel={() => onCancelAskUserRequest(step.toolCall.id)}
+            onLayoutChange={onAskUserLayoutChange}
+          />
+        );
+      }
+
+      if (step.type === "approval" || step.type === "file_approval") {
+        const manualCollapsed = collapsedToolStepIds[step.id];
+        const isCollapsed = manualCollapsed ?? step.status !== "waiting";
+
+        return (
+          <ToolApprovalBlock
+            key={step.id}
+            id={step.id}
+            request={step.request}
+            response={step.response}
+            status={step.status}
+            canSubmit={canSubmitAskUserResponse(step.toolCall.id)}
+            isCollapsed={isCollapsed}
+            onToggleCollapsed={() =>
+              onToggleToolExecutionCollapsed(step.id, !isCollapsed)
+            }
+            onSubmit={(response) =>
+              onSubmitFileToolApprovalResponse(step.toolCall, response)
+            }
+            onLayoutChange={onAskUserLayoutChange}
+          />
+        );
+      }
+
+      if (step.type === "tasks") {
+        const manualCollapsed = collapsedToolStepIds[step.id];
+        const isCollapsed = manualCollapsed ?? false;
+
+        return (
+          <TaskListBlock
+            key={step.id}
+            id={step.id}
+            toolCall={step.toolCall}
+            toolResult={step.toolResult}
+            status={step.status}
+            isCollapsed={isCollapsed}
+            onToggleCollapsed={() =>
+              onToggleToolExecutionCollapsed(step.id, !isCollapsed)
+            }
+            onLayoutChange={onAskUserLayoutChange}
+          />
+        );
+      }
+
+      if (step.type === "tool_execution") {
+        return renderToolExecutionBlock({
+          id: step.id,
+          toolCall: step.toolCall,
+          toolResult: step.toolResult,
+          status: step.status,
+        });
+      }
+
+      return null;
+    };
+
     return (
       <div
         ref={registerMessageElement(message.id)}
@@ -456,235 +738,24 @@ const ChatMessageItem = memo(
       >
         {message.role === "assistant" && hasVisibleProcessSteps && (
           <div className="grid gap-2">
-            {visibleProcessSteps.map((step) => {
-              const isLatestProcessStep = step.sourceStepIds.includes(
-                latestProcessStepId ?? "",
-              );
-              const stepFlushVersion = step.sourceStepIds.reduce(
-                (total, sourceStepId) =>
-                  total +
-                  (visualFlushRequests[`${message.id}:${sourceStepId}`] ?? 0),
-                0,
-              );
-
-              if (step.type === "thinking") {
-                if (!step.content.trim()) return null;
-
-                const isThinkingStreaming =
-                  status === "streaming" && isLatestProcessStep;
-
-                const manualCollapsed = collapsedThinkingStepIds[step.id];
-                const isCollapsed = manualCollapsed ?? !isThinkingStreaming;
-
+            {processStepGroups.map((group) => {
+              if (group.kind === "tool_batch") {
                 return (
-                  <ThinkingBlock
-                    key={step.id}
-                    id={step.id}
-                    content={step.content}
-                    status={step.status}
-                    startedAt={step.startedAt}
-                    completedAt={step.completedAt}
-                    isStreaming={isThinkingStreaming}
-                    isCollapsed={isCollapsed}
-                    flushVersion={stepFlushVersion}
-                    forceInstant={!isThinkingStreaming}
-                    onToggleCollapsed={() => {
-                      const nextCollapsed = !isCollapsed;
-                      if (nextCollapsed) {
-                        onAssistantVisualStreamingChange(
-                          `${message.id}:${step.id}`,
-                          false,
-                        );
-                      }
-                      onToggleThinkingCollapsed(step.id, nextCollapsed);
-                    }}
-                    onVisualProgress={() =>
-                      onAssistantVisualProgress(activeChatId)
-                    }
-                    onVisualStreamingChange={(isStreaming) =>
-                      onAssistantVisualStreamingChange(
-                        `${message.id}:${step.id}`,
-                        isStreaming,
-                      )
-                    }
-                  />
-                );
-              }
-
-              if (step.type === "assistant_message") {
-                if (!step.content.trim()) return null;
-
-                const isAssistantBlockStreaming =
-                  status === "streaming" && isLatestProcessStep;
-                return (
-                  <div key={step.id} className="grid gap-1">
-                    <article
-                      className="flex w-full min-w-0 max-w-full justify-start"
-                      onContextMenu={(event) =>
-                        onCaptureMessageContext(event, message.id)
-                      }
-                    >
-                      <div className="w-full min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]">
-                        <SmoothAssistantMessageContent
-                          content={step.content}
-                          isApiStreaming={isAssistantBlockStreaming}
-                          skipSyntaxHighlight={isAssistantBlockStreaming}
-                          flushVersion={stepFlushVersion}
-                          onVisualProgress={() =>
-                            onAssistantVisualProgress(activeChatId)
-                          }
-                          onVisualStreamingChange={(isStreaming) =>
-                            onAssistantVisualStreamingChange(
-                              `${message.id}:${step.id}`,
-                              isStreaming,
-                            )
-                          }
-                        />
-                      </div>
-                    </article>
+                  <div
+                    key={group.toolBatchId}
+                    className="grid gap-2 border border-dashed bg-transparent px-2 py-2 shadow-xs"
+                  >
+                    <div className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
+                      Parallel tool calls
+                    </div>
+                    <div className="grid gap-2">
+                      {group.steps.map(renderProcessStep)}
+                    </div>
                   </div>
                 );
               }
 
-              if (step.type === "tool_building") {
-                const toolNames = [
-                  ...new Set(
-                    step.toolCalls
-                      .map((toolCall) => toolCall.function.name.trim())
-                      .filter(Boolean),
-                  ),
-                ];
-                const toolName = toolNames.join(", ");
-
-                return (
-                  <article
-                    key={step.id}
-                    className="flex w-full min-w-0 max-w-full justify-start"
-                  >
-                    <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
-                      <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Wrench className="size-3.5 shrink-0" />
-                          <span className="shrink-0 truncate">Tool building</span>
-                          <span className="shrink-0 text-muted-foreground/60">•</span>
-                          <span className="inline-flex shrink-0 items-center gap-1 text-amber-600 dark:text-amber-400">
-                            <Spinner className="size-3.5" />
-                            In progress
-                          </span>
-                          {toolName ? (
-                            <>
-                              <span className="shrink-0 text-muted-foreground/60">•</span>
-                              <span className="min-w-0 truncate normal-case tracking-normal text-muted-foreground/85">
-                                {toolName}
-                              </span>
-                            </>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                  </article>
-                );
-              }
-
-              if (step.type === "agent_call") {
-                void isLatestProcessStep;
-                void stepFlushVersion;
-
-                return (
-                  <AgentCallBlock
-                    key={step.id}
-                    id={step.id}
-                    agentCall={step.agentCall}
-                    status={step.status}
-                    renderToolExecutionBlock={renderToolExecutionBlock}
-                  />
-                );
-              }
-
-              if (step.type === "user_input") {
-                const manualCollapsed = collapsedToolStepIds[step.id];
-                const isCollapsed =
-                  manualCollapsed ?? step.status !== "waiting";
-
-                return (
-                  <AskUserBlock
-                    key={step.id}
-                    id={step.id}
-                    request={step.request}
-                    response={step.response}
-                    status={step.status}
-                    canSubmit={canSubmitAskUserResponse(step.toolCall.id)}
-                    isCollapsed={isCollapsed}
-                    onToggleCollapsed={() =>
-                      onToggleToolExecutionCollapsed(step.id, !isCollapsed)
-                    }
-                    onSubmit={(response) =>
-                      onSubmitAskUserResponse(
-                        step.toolCall,
-                        step.request,
-                        response,
-                      )
-                    }
-                    onCancel={() => onCancelAskUserRequest(step.toolCall.id)}
-                    onLayoutChange={onAskUserLayoutChange}
-                  />
-                );
-              }
-
-              if (step.type === "approval" || step.type === "file_approval") {
-                const manualCollapsed = collapsedToolStepIds[step.id];
-                const isCollapsed =
-                  manualCollapsed ?? step.status !== "waiting";
-
-                return (
-                  <ToolApprovalBlock
-                    key={step.id}
-                    id={step.id}
-                    request={step.request}
-                    response={step.response}
-                    status={step.status}
-                    canSubmit={canSubmitAskUserResponse(step.toolCall.id)}
-                    isCollapsed={isCollapsed}
-                    onToggleCollapsed={() =>
-                      onToggleToolExecutionCollapsed(step.id, !isCollapsed)
-                    }
-                    onSubmit={(response) =>
-                      onSubmitFileToolApprovalResponse(step.toolCall, response)
-                    }
-                    onLayoutChange={onAskUserLayoutChange}
-                  />
-                );
-              }
-
-              if (step.type === "checklist") {
-                const manualCollapsed = collapsedToolStepIds[step.id];
-                const isCollapsed = manualCollapsed ?? false;
-
-                return (
-                  <ChecklistBlock
-                    key={step.id}
-                    id={step.id}
-                    request={step.request}
-                    status={step.status}
-                    isCollapsed={isCollapsed}
-                    onToggleCollapsed={() =>
-                      onToggleToolExecutionCollapsed(step.id, !isCollapsed)
-                    }
-                    onLayoutChange={onAskUserLayoutChange}
-                  />
-                );
-              }
-
-              if (step.type === "tool_execution") {
-                return renderToolExecutionBlock({
-                  id: step.id,
-                  toolCall: step.toolCall,
-                  toolResult: step.toolResult,
-                  status: step.status,
-                });
-              }
-
-              return null;
+              return renderProcessStep(group.step);
             })}
           </div>
         )}

@@ -122,7 +122,22 @@ type WorkspaceRoot = {
 
 type ToolExecutionContext = {
   workspaceRoots?: WorkspaceRoot[];
+  signal?: AbortSignal;
 };
+
+type ActiveToolExecution = {
+  cancel: () => void;
+};
+
+const activeToolExecutions = new Map<string, ActiveToolExecution>();
+
+function createAbortError(message = "Tool execution was cancelled.") {
+  return new DOMException(message, "AbortError");
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw createAbortError();
+}
 
 type PublicToolDefinition = ToolDefinition;
 
@@ -293,6 +308,10 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
 };
 const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 const WEB_FETCH_TOOL_NAME = "web_fetch";
+const BUILTIN_AGENT_NAMES = ["general", "general_full"] as const;
+function isBuiltInAgentName(name: string) {
+  return (BUILTIN_AGENT_NAMES as readonly string[]).includes(name);
+}
 const FILE_READ_TOOL_NAME = "file_read";
 const FILE_FIND_TOOL_NAME = "file_find";
 const FILE_SEARCH_TEXT_TOOL_NAME = "file_search_text";
@@ -1020,6 +1039,11 @@ function validateAgentDefinition(agent: AgentDefinition) {
       "call_agent is a built-in tool name and cannot be used by an agent.",
     );
   }
+  if (isBuiltInAgentName(agent.name)) {
+    throw new Error(
+      `${agent.name} is a built-in agent name and cannot be used by a custom agent. Reserved names: ${BUILTIN_AGENT_NAMES.join(", ")}.`,
+    );
+  }
   if (!agent.description) throw new Error("Agent description is required.");
   if (!agent.instructions) throw new Error("Agent instructions are required.");
 }
@@ -1161,8 +1185,10 @@ type CommandExecutionResult = ToolCommandResult;
 async function runCommandTool(
   tool: ToolDefinition,
   modelArgs: unknown,
+  signal?: AbortSignal,
 ): Promise<CommandExecutionResult> {
   validateToolDefinition(tool);
+  throwIfAborted(signal);
   const commandArgs = materializeCommandArgs(tool.args, modelArgs);
   const execution = buildToolExecutionPreview(tool, modelArgs, commandArgs);
 
@@ -1176,17 +1202,54 @@ async function runCommandTool(
       cwd: tool.cwd || undefined,
       shell: false,
       windowsHide: true,
+      detached: process.platform !== "win32",
     });
+
+    const killProcessTree = () => {
+      if (child.pid && process.platform === "win32") {
+        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          windowsHide: true,
+        }).on("error", () => undefined);
+        return;
+      }
+
+      if (child.pid && process.platform !== "win32") {
+        try {
+          process.kill(-child.pid, "SIGTERM");
+          return;
+        } catch {
+          // Fall back to killing only the child process.
+        }
+      }
+
+      child.kill();
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", abortHandler);
+    };
 
     const finish = (result: CommandExecutionResult) => {
       if (settled) return;
       settled = true;
+      cleanup();
       resolve({ ...result, execution });
+    };
+
+    const abortHandler = () => {
+      killProcessTree();
+      finish({
+        exitCode: null,
+        stdout,
+        stderr: stderr || "Cancelled by user.",
+        timedOut: false,
+      });
     };
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill();
+      killProcessTree();
       finish({
         exitCode: null,
         stdout,
@@ -1196,6 +1259,12 @@ async function runCommandTool(
         timedOut: true,
       });
     }, tool.timeoutMs);
+
+    if (signal?.aborted) {
+      abortHandler();
+      return;
+    }
+    signal?.addEventListener("abort", abortHandler, { once: true });
 
     child.stdout?.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -1355,7 +1424,7 @@ function isAllowedWebFetchContentType(contentType: string) {
   return WEB_FETCH_ALLOWED_CONTENT_TYPES.has(contentType);
 }
 
-async function readResponseTextWithLimit(response: Response) {
+async function readResponseTextWithLimit(response: Response, signal?: AbortSignal) {
   const contentLength = Number(response.headers.get("content-length") ?? 0);
   if (
     Number.isFinite(contentLength) &&
@@ -1368,6 +1437,7 @@ async function readResponseTextWithLimit(response: Response) {
 
   const reader = response.body?.getReader();
   if (!reader) {
+    throwIfAborted(signal);
     const buffer = Buffer.from(await response.arrayBuffer());
     if (buffer.byteLength > WEB_FETCH_MAX_RESPONSE_BYTES) {
       throw new Error(
@@ -1379,26 +1449,36 @@ async function readResponseTextWithLimit(response: Response) {
 
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+  const abortHandler = () => {
+    void reader.cancel().catch(() => undefined);
+  };
+  signal?.addEventListener("abort", abortHandler, { once: true });
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
+  try {
+    while (true) {
+      throwIfAborted(signal);
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
 
-    totalBytes += value.byteLength;
-    if (totalBytes > WEB_FETCH_MAX_RESPONSE_BYTES) {
-      try {
-        await reader.cancel();
-      } catch {
-        // Ignore cancellation errors.
+      totalBytes += value.byteLength;
+      if (totalBytes > WEB_FETCH_MAX_RESPONSE_BYTES) {
+        try {
+          await reader.cancel();
+        } catch {
+          // Ignore cancellation errors.
+        }
+        throw new Error(
+          `web_fetch response is too large. Maximum is ${WEB_FETCH_MAX_RESPONSE_BYTES} bytes.`,
+        );
       }
-      throw new Error(
-        `web_fetch response is too large. Maximum is ${WEB_FETCH_MAX_RESPONSE_BYTES} bytes.`,
-      );
+      chunks.push(value);
     }
-    chunks.push(value);
+  } finally {
+    signal?.removeEventListener("abort", abortHandler);
   }
 
+  throwIfAborted(signal);
   const bytes = new Uint8Array(totalBytes);
   let offset = 0;
   for (const chunk of chunks) {
@@ -1409,7 +1489,7 @@ async function readResponseTextWithLimit(response: Response) {
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
-async function fetchWebUrl(startUrl: URL) {
+async function fetchWebUrl(startUrl: URL, signal?: AbortSignal) {
   let currentUrl = new URL(startUrl.toString());
   currentUrl.hash = "";
 
@@ -1418,10 +1498,18 @@ async function fetchWebUrl(startUrl: URL) {
     redirectCount <= WEB_FETCH_MAX_REDIRECTS;
     redirectCount += 1
   ) {
+    throwIfAborted(signal);
     await assertFetchablePublicUrl(currentUrl);
+    throwIfAborted(signal);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), WEB_FETCH_TIMEOUT_MS);
+    let timedOut = false;
+    const abortHandler = () => controller.abort();
+    signal?.addEventListener("abort", abortHandler, { once: true });
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, WEB_FETCH_TIMEOUT_MS);
 
     let response: Response;
     try {
@@ -1436,6 +1524,7 @@ async function fetchWebUrl(startUrl: URL) {
       });
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
+        if (!timedOut && signal?.aborted) throw createAbortError();
         throw new Error(
           `web_fetch timed out after ${Math.round(WEB_FETCH_TIMEOUT_MS / 1000)} seconds.`,
         );
@@ -1443,6 +1532,7 @@ async function fetchWebUrl(startUrl: URL) {
       throw error;
     } finally {
       clearTimeout(timeout);
+      signal?.removeEventListener("abort", abortHandler);
     }
 
     if (response.status >= 300 && response.status < 400) {
@@ -1471,7 +1561,7 @@ async function fetchWebUrl(startUrl: URL) {
       );
     }
 
-    const text = await readResponseTextWithLimit(response);
+    const text = await readResponseTextWithLimit(response, signal);
     return {
       finalUrl: currentUrl.toString(),
       contentType,
@@ -1664,14 +1754,16 @@ function decodeUrlComponentSafely(value: string) {
   }
 }
 
-async function executeWebFetchTool(args: unknown): Promise<ToolCommandResult> {
+async function executeWebFetchTool(args: unknown, signal?: AbortSignal): Promise<ToolCommandResult> {
+  throwIfAborted(signal);
   const { url: rawUrl } = parseWebFetchArgs(args);
   const requestedUrl = parseWebFetchUrl(rawUrl);
   const requestedFragment = requestedUrl.hash
     ? decodeUrlComponentSafely(requestedUrl.hash.slice(1))
     : "";
 
-  const fetched = await fetchWebUrl(requestedUrl);
+  const fetched = await fetchWebUrl(requestedUrl, signal);
+  throwIfAborted(signal);
   const title = fetched.contentType.includes("html")
     ? extractTitleFromHtml(fetched.text)
     : "";
@@ -2534,8 +2626,10 @@ async function executeToolManifest(
   const toolName = typeof name === "string" ? name.trim() : "";
   if (!toolName) throw new Error("Tool name is required.");
 
+  throwIfAborted(context.signal);
+
   if (toolName === WEB_FETCH_TOOL_NAME) {
-    return executeWebFetchTool(args);
+    return executeWebFetchTool(args, context.signal);
   }
 
   if (
@@ -2553,7 +2647,7 @@ async function executeToolManifest(
   const tool = tools.find((candidate) => candidate.name === toolName);
   if (!tool) throw new Error(`Tool is not configured: ${toolName}`);
 
-  const result = await runCommandTool(tool, args);
+  const result = await runCommandTool(tool, args, context.signal);
   const content = buildModelToolResultContent(result, tool.timeoutMs);
 
   return {
@@ -4567,9 +4661,34 @@ ipcMain.handle("storage:agents:open-folder", async () =>
 
 ipcMain.handle("tools:execute", async (_event, request: unknown) => {
   const value = isPlainObject(request) ? request : {};
-  return executeToolManifest(value.name, value.args, {
-    workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
-  });
+  const executionId = safeString(value.executionId).trim();
+  const controller = new AbortController();
+
+  if (executionId) {
+    activeToolExecutions.set(executionId, {
+      cancel: () => controller.abort(),
+    });
+  }
+
+  try {
+    return await executeToolManifest(value.name, value.args, {
+      workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
+      signal: controller.signal,
+    });
+  } finally {
+    if (executionId) activeToolExecutions.delete(executionId);
+  }
+});
+
+ipcMain.handle("tools:cancel", async (_event, executionId: unknown) => {
+  const key = safeString(executionId).trim();
+  if (!key) return { cancelled: false };
+  const execution = activeToolExecutions.get(key);
+  if (!execution) return { cancelled: false };
+
+  execution.cancel();
+  activeToolExecutions.delete(key);
+  return { cancelled: true };
 });
 
 ipcMain.handle("workspace:select-folder", async () => selectWorkspaceFolder());

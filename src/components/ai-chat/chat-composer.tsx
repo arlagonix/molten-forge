@@ -229,11 +229,7 @@ export const ChatComposer = memo(
             : toolMentionOptions;
       const query = activeMention.query.trim().toLowerCase();
       const filteredOptions = query
-        ? options.filter((option) =>
-            `${option.name} ${option.description ?? ""}`
-              .toLowerCase()
-              .includes(query),
-          )
+        ? options.filter((option) => option.name.toLowerCase().includes(query))
         : options;
 
       return filteredOptions.slice(0, 12);

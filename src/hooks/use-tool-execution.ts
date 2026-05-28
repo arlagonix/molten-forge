@@ -2,7 +2,7 @@ import { useRef } from "react";
 
 import {
   ASK_USER_TOOL_NAME,
-  CHECKLIST_WRITE_TOOL_NAME,
+  isTaskToolName,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL_NAME,
   FILE_REPLACE_TEXT_TOOL_NAME,
@@ -13,10 +13,8 @@ import {
   createAskUserToolResult,
   createCancelledToolResult,
   createToolApprovalRequest,
-  createChecklistWriteToolResult,
   isFileToolApprovalResponseApproved,
   parseAskUserRequestFromToolCall,
-  parseChecklistWriteRequestFromToolCall,
   parseFileToolApprovalRequestFromToolCall,
 } from "@/lib/ai-chat/builtin-tools";
 import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
@@ -46,6 +44,7 @@ type PendingUserInputRequest = {
   reject: (error: unknown) => void;
   cleanup: () => void;
   workspaceRoots?: ChatWorkspaceRoot[];
+  signal?: AbortSignal;
 };
 
 export function useToolExecution({
@@ -58,6 +57,7 @@ export function useToolExecution({
   activeSkillNames,
   onSkillActivated,
   executeExternalTool,
+  executeTaskTool,
   abortChatGeneration,
   completeAssistantUserInputStep,
   completeAssistantFileApprovalStep,
@@ -80,8 +80,9 @@ export function useToolExecution({
   executeExternalTool: (
     toolName: string,
     args: unknown,
-    context?: { workspaceRoots?: ChatWorkspaceRoot[] },
+    context?: { workspaceRoots?: ChatWorkspaceRoot[]; signal?: AbortSignal },
   ) => Promise<ToolCommandResult>;
+  executeTaskTool: (toolCall: ChatToolCall, chatId: string) => ChatToolResult;
   abortChatGeneration: (chatId: string) => void;
   completeAssistantUserInputStep: (
     chatId: string,
@@ -208,12 +209,6 @@ export function useToolExecution({
     });
   }
 
-  async function executeChecklistWriteToolCall(
-    toolCall: ChatToolCall,
-  ): Promise<ChatToolResult> {
-    const request = parseChecklistWriteRequestFromToolCall(toolCall);
-    return createChecklistWriteToolResult(toolCall, request);
-  }
 
   async function executeToolCallWithApproval(
     toolCall: ChatToolCall,
@@ -281,6 +276,7 @@ export function useToolExecution({
         variantId: options.variantId,
         stepId: options.stepId,
         workspaceRoots: options.workspaceRoots ?? workspaceRoots,
+        signal: options.signal,
         resolve: settleResolve,
         reject: settleReject,
         cleanup,
@@ -386,6 +382,7 @@ export function useToolExecution({
       variantId: string;
       stepId: string;
       workspaceRoots?: ChatWorkspaceRoot[];
+      signal?: AbortSignal;
     },
   ): Promise<ChatToolResult> {
     const toolName = toolCall.function.name;
@@ -401,8 +398,11 @@ export function useToolExecution({
           toolName,
           args,
           isFileToolName(toolName)
-            ? { workspaceRoots: options.workspaceRoots ?? workspaceRoots }
-            : undefined,
+            ? {
+                workspaceRoots: options.workspaceRoots ?? workspaceRoots,
+                signal: options.signal,
+              }
+            : { signal: options.signal },
         ),
       (status) =>
         updateAssistantToolStepStatus(
@@ -412,6 +412,7 @@ export function useToolExecution({
           options.stepId,
           status,
         ),
+      options.signal,
     );
 
     return {
@@ -443,8 +444,8 @@ export function useToolExecution({
         return await executeAskUserToolCall(toolCall, options);
       }
 
-      if (toolName === CHECKLIST_WRITE_TOOL_NAME) {
-        return await executeChecklistWriteToolCall(toolCall);
+      if (isTaskToolName(toolName)) {
+        return executeTaskTool(toolCall, options.chatId);
       }
 
       if (toolName === LOAD_SKILL_TOOL_NAME) {
@@ -549,6 +550,7 @@ export function useToolExecution({
         const args = JSON.parse(argsText);
         const execution = await executeExternalTool(toolCall.function.name, args, {
           workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,
+          signal: pendingRequest.signal,
         });
 
         toolResult = {

@@ -181,14 +181,20 @@ function normalizeProvidersState(value?: ProvidersState): ProvidersState {
 function normalizeToolsSettings(
   value: Partial<ToolsSettings> | undefined,
 ): ToolsSettings {
+  const legacyChecklistWriteEnabled = (
+    value as Partial<ToolsSettings> & { checklistWriteEnabled?: unknown }
+  )?.checklistWriteEnabled;
+
   return {
     enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
     askUserEnabled:
       typeof value?.askUserEnabled === "boolean" ? value.askUserEnabled : true,
-    checklistWriteEnabled:
-      typeof value?.checklistWriteEnabled === "boolean"
-        ? value.checklistWriteEnabled
-        : true,
+    taskToolsEnabled:
+      typeof value?.taskToolsEnabled === "boolean"
+        ? value.taskToolsEnabled
+        : typeof legacyChecklistWriteEnabled === "boolean"
+          ? legacyChecklistWriteEnabled
+          : true,
     loadSkillEnabled:
       typeof value?.loadSkillEnabled === "boolean"
         ? value.loadSkillEnabled

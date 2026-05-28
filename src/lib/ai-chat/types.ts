@@ -213,13 +213,10 @@ export type UserInputStatus = "waiting" | "complete" | "cancelled" | "failed";
 
 export type ThinkingStatus = "waiting" | "in_progress" | "complete";
 
-export type ChecklistItem = {
-  content: string;
+export type AgentTask = {
+  id: number;
+  subject: string;
   done: boolean;
-};
-
-export type ChecklistWriteRequest = {
-  items: ChecklistItem[];
 };
 
 export type ChatAssistantProcessStep =
@@ -246,6 +243,7 @@ export type ChatAssistantProcessStep =
   | {
       id: string;
       type: "tool_execution";
+      toolBatchId?: string;
       status?: ToolExecutionStatus;
       toolCall: ChatToolCall;
       toolResult?: ChatToolResult;
@@ -253,6 +251,7 @@ export type ChatAssistantProcessStep =
   | {
       id: string;
       type: "agent_call";
+      toolBatchId?: string;
       status?: AgentCallStatus;
       toolCall: ChatToolCall;
       agentCall: ChatAgentCall;
@@ -260,6 +259,7 @@ export type ChatAssistantProcessStep =
   | {
       id: string;
       type: "user_input";
+      toolBatchId?: string;
       status?: UserInputStatus;
       toolCall: ChatToolCall;
       request: AskUserRequest;
@@ -269,6 +269,7 @@ export type ChatAssistantProcessStep =
   | {
       id: string;
       type: "approval" | "file_approval";
+      toolBatchId?: string;
       status?: UserInputStatus;
       toolCall: ChatToolCall;
       request: ToolApprovalRequest;
@@ -277,10 +278,10 @@ export type ChatAssistantProcessStep =
     }
   | {
       id: string;
-      type: "checklist";
+      type: "tasks";
+      toolBatchId?: string;
       status?: ToolExecutionStatus;
       toolCall: ChatToolCall;
-      request: ChecklistWriteRequest;
       toolResult?: ChatToolResult;
     };
 
@@ -357,6 +358,8 @@ export type ChatSession = {
   activeSkillNames?: string[];
   workspaceRoots?: ChatWorkspaceRoot[];
   fileToolAutoApproval?: ChatFileToolAutoApproval;
+  tasks?: AgentTask[];
+  nextTaskId?: number;
 };
 
 export type ApiToolCall = ChatToolCall;
@@ -508,7 +511,7 @@ export type AgentExportResult = {
 export type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
-  checklistWriteEnabled: boolean;
+  taskToolsEnabled: boolean;
   loadSkillEnabled: boolean;
   webFetchEnabled: boolean;
   fileReadEnabled: boolean;
