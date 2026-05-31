@@ -565,6 +565,8 @@ const ChatMessageItem = memo(
               <div className="w-full min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]">
                 <SmoothAssistantMessageContent
                   content={step.content}
+                  messageId={`${message.id}:${step.id}`}
+                  chatId={activeChatId}
                   isApiStreaming={isAssistantBlockStreaming}
                   skipSyntaxHighlight={isAssistantBlockStreaming}
                   flushVersion={stepFlushVersion}
@@ -858,6 +860,8 @@ const ChatMessageItem = memo(
                   {message.role === "assistant" ? (
                     <SmoothAssistantMessageContent
                       content={content}
+                      messageId={`${message.id}:content`}
+                      chatId={activeChatId}
                       isApiStreaming={status === "streaming"}
                       skipSyntaxHighlight={status === "streaming"}
                       flushVersion={visualFlushRequests[message.id] ?? 0}

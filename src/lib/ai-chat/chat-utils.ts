@@ -72,7 +72,9 @@ export function isCustomProviderModel(provider: ProviderConfig, model: string) {
   const normalizedModel = model.trim();
   return Boolean(
     normalizedModel &&
-      normalizeProviderModels(provider.customModels ?? []).includes(normalizedModel),
+    normalizeProviderModels(provider.customModels ?? []).includes(
+      normalizedModel,
+    ),
   );
 }
 
@@ -93,7 +95,8 @@ export function isModelShownInMenu(provider: ProviderConfig, model: string) {
 
 export function isModelEnabled(provider: ProviderConfig, model: string) {
   const normalizedModel = model.trim();
-  if (!normalizedModel || !isModelShownInMenu(provider, normalizedModel)) return false;
+  if (!normalizedModel || !isModelShownInMenu(provider, normalizedModel))
+    return false;
 
   const config = provider.modelConfigs?.[normalizedModel];
   if (typeof config?.enabled === "boolean") return config.enabled;
@@ -121,7 +124,11 @@ export function getEnabledProviderModels(provider: ProviderConfig) {
 
 export function getProviderFallbackModel(provider: ProviderConfig) {
   const currentModel = provider.model.trim();
-  if (currentModel && isProviderEnabled(provider) && isModelEnabled(provider, currentModel)) {
+  if (
+    currentModel &&
+    isProviderEnabled(provider) &&
+    isModelEnabled(provider, currentModel)
+  ) {
     return currentModel;
   }
 
@@ -129,16 +136,25 @@ export function getProviderFallbackModel(provider: ProviderConfig) {
 }
 
 export function providerLabel(provider: ProviderConfig) {
-  const model = getProviderFallbackModel(provider) || provider.model.trim() || "No model selected";
+  const model =
+    getProviderFallbackModel(provider) ||
+    provider.model.trim() ||
+    "No model selected";
   return `${providerDisplayName(provider)} · ${model}`;
 }
 
-export function getModelConfig(provider: ProviderConfig, model = provider.model) {
+export function getModelConfig(
+  provider: ProviderConfig,
+  model = provider.model,
+) {
   const normalizedModel = model.trim();
   return normalizedModel ? provider.modelConfigs?.[normalizedModel] : undefined;
 }
 
-export function getEffectiveModelContext(provider: ProviderConfig, model = provider.model) {
+export function getEffectiveModelContext(
+  provider: ProviderConfig,
+  model = provider.model,
+) {
   const context = getModelConfig(provider, model)?.context;
   const manual = context?.manualContextLength;
   const detected = context?.detectedContextLength;
@@ -152,7 +168,11 @@ export function getEffectiveModelContext(provider: ProviderConfig, model = provi
     return { length: detected, source: "detected" as const };
   }
 
-  if (speculated !== undefined && Number.isFinite(speculated) && speculated > 0) {
+  if (
+    speculated !== undefined &&
+    Number.isFinite(speculated) &&
+    speculated > 0
+  ) {
     return { length: speculated, source: "speculated" as const };
   }
 
@@ -423,7 +443,9 @@ export function getAssistantContent(message: ChatMessage) {
   return getActiveVariant(message)?.content ?? "";
 }
 
-export function getChatTitleMode(chat: Pick<ChatSession, "titleMode">): ChatTitleMode {
+export function getChatTitleMode(
+  chat: Pick<ChatSession, "titleMode">,
+): ChatTitleMode {
   return chat.titleMode ?? "manual";
 }
 
@@ -451,7 +473,9 @@ export function titleFromMessage(message: string) {
   const cleanTitle = firstSentence.replace(/[.!?]+$/g, "").trim();
   if (!cleanTitle) return DEFAULT_CHAT_TITLE;
 
-  return cleanTitle.length > 44 ? `${cleanTitle.slice(0, 44).trimEnd()}...` : cleanTitle;
+  return cleanTitle.length > 44
+    ? `${cleanTitle.slice(0, 44).trimEnd()}...`
+    : cleanTitle;
 }
 
 function extractTitleFromJson(value: string) {
@@ -482,7 +506,7 @@ export function cleanGeneratedChatTitle(title: string) {
   const rawTitle = jsonTitle ?? withoutReasoning;
   const firstUsefulLine = rawTitle
     .split(/\r?\n/)
-    .map((line) => line.trim())
+    .map((line: string) => line.trim())
     .find(Boolean);
 
   if (!firstUsefulLine) return undefined;
@@ -492,13 +516,18 @@ export function cleanGeneratedChatTitle(title: string) {
     .replace(/^[-*•>\d.)\s]+/, "")
     .replace(/^(?:chat\s*)?(?:conversation\s*)?title\s*[:：\-–—]\s*/i, "")
     .replace(/^(?:the\s+)?title\s+(?:is|would\s+be)\s*[:：\-–—]?\s*/i, "")
-    .replace(/^sure[,\s]+(?:here(?:'s| is)\s+)?(?:a\s+)?(?:concise\s+)?(?:title\s*)?[:：\-–—]?\s*/i, "")
+    .replace(
+      /^sure[,\s]+(?:here(?:'s| is)\s+)?(?:a\s+)?(?:concise\s+)?(?:title\s*)?[:：\-–—]?\s*/i,
+      "",
+    )
     .replace(/^[`'"“”‘’]+|[`'"“”‘’]+$/g, "")
     .replace(/[.!?。！？]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
 
-  const titlePrefixMatch = cleanTitle.match(/^(?:.*?\btitle\b.*?)[:：]\s*(.+)$/i);
+  const titlePrefixMatch = cleanTitle.match(
+    /^(?:.*?\btitle\b.*?)[:：]\s*(.+)$/i,
+  );
   if (titlePrefixMatch?.[1]) {
     cleanTitle = titlePrefixMatch[1]
       .replace(/^[`'"“”‘’]+|[`'"“”‘’]+$/g, "")
@@ -509,7 +538,9 @@ export function cleanGeneratedChatTitle(title: string) {
 
   if (!cleanTitle) return undefined;
 
-  return cleanTitle.length > 60 ? `${cleanTitle.slice(0, 60).trimEnd()}...` : cleanTitle;
+  return cleanTitle.length > 60
+    ? `${cleanTitle.slice(0, 60).trimEnd()}...`
+    : cleanTitle;
 }
 
 function getValidDateTime(value?: string) {
@@ -655,7 +686,9 @@ export function groupChatsByActivityDate(chats: ChatSession[]) {
   return groups;
 }
 
-export function groupChatsByPinnedAndActivityDate(chats: ChatSession[]): GroupedChatList {
+export function groupChatsByPinnedAndActivityDate(
+  chats: ChatSession[],
+): GroupedChatList {
   const sortedChats = sortChatsByUpdatedAt(chats);
   const pinnedChats = sortedChats.filter((chat) => chat.isPinned === true);
   const unpinnedChats = sortedChats.filter((chat) => chat.isPinned !== true);

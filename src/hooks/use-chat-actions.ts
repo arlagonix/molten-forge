@@ -42,6 +42,8 @@ export function useChatActions({
   setCopiedMessageId,
   setEditingMessageId,
   resetChatScrollState,
+  saveCurrentChatScrollSnapshot,
+  forgetChatScrollSnapshot,
   focusDraftTextarea,
   isChatGenerating,
   stopChatGeneration,
@@ -68,6 +70,8 @@ export function useChatActions({
   setCopiedMessageId: Dispatch<SetStateAction<string | null>>;
   setEditingMessageId: Dispatch<SetStateAction<string | null>>;
   resetChatScrollState: () => void;
+  saveCurrentChatScrollSnapshot: () => void;
+  forgetChatScrollSnapshot: (chatId: string) => void;
   focusDraftTextarea: () => void;
   isChatGenerating: (chatId: string) => boolean;
   stopChatGeneration: (chatId: string) => void;
@@ -177,9 +181,7 @@ export function useChatActions({
           ? titleFromMessage(userMessage)
           : chat.title,
       titleMode:
-        userIndex === 0 && isAutoTitledChat(chat)
-          ? "auto"
-          : chat.titleMode,
+        userIndex === 0 && isAutoTitledChat(chat) ? "auto" : chat.titleMode,
       messages: chat.messages.map((message) =>
         message.id === messageId && message.role === "user"
           ? { ...message, content: userMessage }
@@ -201,6 +203,7 @@ export function useChatActions({
       ...createEmptyChat(),
       fileToolAutoApproval: { ...fileToolAutoApprovalDefaults },
     };
+    saveCurrentChatScrollSnapshot();
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
     setEditingMessageId(null);
@@ -248,6 +251,7 @@ export function useChatActions({
       updatedAt: now,
     };
 
+    saveCurrentChatScrollSnapshot();
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
     setEditingMessageId(null);
@@ -264,13 +268,21 @@ export function useChatActions({
   }
 
   async function switchChat(chatId: string) {
+    if (chatId === activeChatId) {
+      setEditingMessageId(null);
+      return;
+    }
+
+    saveCurrentChatScrollSnapshot();
     setActiveChatId(chatId);
     setEditingMessageId(null);
-    resetChatScrollState();
   }
 
   async function clearChat(chatId: string) {
     if (isChatGenerating(chatId)) stopChatGeneration(chatId);
+
+    forgetChatScrollSnapshot(chatId);
+    if (chatId === activeChatId) resetChatScrollState();
 
     const now = new Date().toISOString();
     updateChat(chatId, (chat) => ({
@@ -286,6 +298,9 @@ export function useChatActions({
 
   async function removeChat(chatId: string) {
     if (isChatGenerating(chatId)) stopChatGeneration(chatId);
+
+    if (chatId === activeChatId) saveCurrentChatScrollSnapshot();
+    forgetChatScrollSnapshot(chatId);
 
     const remainingChats = sortChatsByUpdatedAt(
       chats.filter((chat) => chat.id !== chatId),
@@ -319,7 +334,9 @@ export function useChatActions({
   }
 
   function cloneMessagesForBranch(messages: ChatMessage[], messageId: string) {
-    const messageIndex = messages.findIndex((message) => message.id === messageId);
+    const messageIndex = messages.findIndex(
+      (message) => message.id === messageId,
+    );
     if (messageIndex < 0) return undefined;
 
     return messages.slice(0, messageIndex + 1).map((message) => {
@@ -391,6 +408,7 @@ export function useChatActions({
       updatedAt: now,
     };
 
+    saveCurrentChatScrollSnapshot();
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
     setEditingMessageId(null);
@@ -443,8 +461,6 @@ export function useChatActions({
       };
     });
   }
-
-
 
   function toggleActiveChatFileToolAutoApproval(
     key: keyof ChatFileToolAutoApproval,
@@ -511,7 +527,6 @@ export function useChatActions({
       };
     });
   }
-
 
   function toggleActiveChatAgent(agentName: string) {
     if (!activeChat) return;

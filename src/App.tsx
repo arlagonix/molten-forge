@@ -4,6 +4,7 @@ import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AgentsDialog } from "@/components/agents-dialog";
+import { ChatCapabilitiesDialog } from "@/components/ai-chat/chat-capabilities-dialog";
 import {
   ChatComposer,
   type ChatComposerHandle,
@@ -11,11 +12,10 @@ import {
 } from "@/components/ai-chat/chat-composer";
 import { ChatMessageList } from "@/components/ai-chat/chat-message-list";
 import { ComposerFooter } from "@/components/ai-chat/composer-footer";
-import { ChatCapabilitiesDialog } from "@/components/ai-chat/chat-capabilities-dialog";
-import { WorkspaceRootsControl } from "@/components/ai-chat/workspace-roots-control";
 import { EmptyChatState } from "@/components/ai-chat/empty-chat-state";
 import { FindBar } from "@/components/ai-chat/find-bar";
 import { ToolExecutionBlock } from "@/components/ai-chat/tool-execution-block";
+import { WorkspaceRootsControl } from "@/components/ai-chat/workspace-roots-control";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { SystemPromptDialog } from "@/components/dialogs/system-prompt-dialog";
 import { ProviderSettingsDialog } from "@/components/provider-settings-dialog";
@@ -35,28 +35,28 @@ import {
 import {
   ASK_USER_TOOL,
   ASK_USER_TOOL_NAME,
-  TASK_TOOLS,
-  isTaskToolName,
   DEFAULT_AGENTS_SETTINGS,
   DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
-  WEB_FETCH_TOOL,
-  WEB_FETCH_TOOL_NAME,
-  FILE_READ_TOOL,
-  FILE_READ_TOOL_NAME,
-  FILE_FIND_TOOL,
-  FILE_FIND_TOOL_NAME,
-  FILE_SEARCH_TEXT_TOOL,
-  FILE_SEARCH_TEXT_TOOL_NAME,
-  FILE_REPLACE_TEXT_TOOL,
-  FILE_REPLACE_TEXT_TOOL_NAME,
   FILE_CREATE_TOOL,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL,
   FILE_DELETE_TOOL_NAME,
+  FILE_FIND_TOOL,
+  FILE_FIND_TOOL_NAME,
+  FILE_READ_TOOL,
+  FILE_READ_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL,
+  FILE_REPLACE_TEXT_TOOL_NAME,
+  FILE_SEARCH_TEXT_TOOL,
+  FILE_SEARCH_TEXT_TOOL_NAME,
+  TASK_TOOLS,
+  WEB_FETCH_TOOL,
+  WEB_FETCH_TOOL_NAME,
   buildFileToolAutoApprovalFromToolsSettings,
   compareToolsByDisplayOrder,
   isBuiltInToolName,
+  isTaskToolName,
   isValidToolName,
 } from "@/lib/ai-chat/builtin-tools";
 import {
@@ -207,6 +207,9 @@ export default function Home() {
   const [loadedAgents, setLoadedAgents] = useState<LoadedAgentInfo[]>([]);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
+  const [chatSwitchLoadingChatId, setChatSwitchLoadingChatId] = useState<
+    string | null
+  >(null);
   const [initialComposerDrafts] = useState<Record<string, string>>(() =>
     loadComposerDrafts(),
   );
@@ -215,7 +218,9 @@ export default function Home() {
   );
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
-  const [completedGenerationChatIds, setCompletedGenerationChatIds] = useState<string[]>([]);
+  const [completedGenerationChatIds, setCompletedGenerationChatIds] = useState<
+    string[]
+  >([]);
   const [titleGenerationChatIds, setTitleGenerationChatIds] = useState<
     string[]
   >([]);
@@ -232,7 +237,8 @@ export default function Home() {
   const [isSidebarModelComboboxOpen, setIsSidebarModelComboboxOpen] =
     useState(false);
   const [sidebarModelSearchValue, setSidebarModelSearchValue] = useState("");
-  const [isChatCapabilitiesDialogOpen, setIsChatCapabilitiesDialogOpen] = useState(false);
+  const [isChatCapabilitiesDialogOpen, setIsChatCapabilitiesDialogOpen] =
+    useState(false);
   const [isChatToolPickerOpen, setIsChatToolPickerOpen] = useState(false);
   const [chatToolSearchValue, setChatToolSearchValue] = useState("");
   const [isWorkspacePickerOpen, setIsWorkspacePickerOpen] = useState(false);
@@ -272,6 +278,9 @@ export default function Home() {
   const composerDraftSaveTimeoutRef = useRef<number | null>(null);
   const chatSaveTimeoutRef = useRef<number | null>(null);
   const savedChatSnapshotsRef = useRef<Record<string, string>>({});
+  const pendingChatSwitchTargetRef = useRef<string | null>(null);
+  const pendingChatSwitchFrameRef = useRef<number | null>(null);
+  const finishChatSwitchLoadingFrameRef = useRef<number | null>(null);
 
   const { resolvedTheme, setTheme } = useTheme();
 
@@ -563,8 +572,10 @@ export default function Home() {
     if (toolsSettings.webFetchEnabled) names.add(WEB_FETCH_TOOL_NAME);
     if (toolsSettings.fileReadEnabled) names.add(FILE_READ_TOOL_NAME);
     if (toolsSettings.fileFindEnabled) names.add(FILE_FIND_TOOL_NAME);
-    if (toolsSettings.fileSearchTextEnabled) names.add(FILE_SEARCH_TEXT_TOOL_NAME);
-    if (toolsSettings.fileReplaceTextEnabled) names.add(FILE_REPLACE_TEXT_TOOL_NAME);
+    if (toolsSettings.fileSearchTextEnabled)
+      names.add(FILE_SEARCH_TEXT_TOOL_NAME);
+    if (toolsSettings.fileReplaceTextEnabled)
+      names.add(FILE_REPLACE_TEXT_TOOL_NAME);
     if (toolsSettings.fileCreateEnabled) names.add(FILE_CREATE_TOOL_NAME);
     if (toolsSettings.fileDeleteEnabled) names.add(FILE_DELETE_TOOL_NAME);
 
@@ -796,6 +807,8 @@ export default function Home() {
     showScrollToBottomButton,
     isChatScrollable,
     resetChatScrollState,
+    saveCurrentChatScrollSnapshot,
+    forgetChatScrollSnapshot,
     armStickyScrollToBottom,
     scheduleStickyScrollToBottom,
     isStickyScrollSuppressed,
@@ -1344,7 +1357,9 @@ export default function Home() {
 
         const abortHandler = () => {
           void bridge.cancel(executionId).catch(() => undefined);
-          settleReject(new DOMException("Tool execution was cancelled.", "AbortError"));
+          settleReject(
+            new DOMException("Tool execution was cancelled.", "AbortError"),
+          );
         };
 
         if (context?.signal?.aborted) {
@@ -1352,7 +1367,9 @@ export default function Home() {
           return;
         }
 
-        context?.signal?.addEventListener("abort", abortHandler, { once: true });
+        context?.signal?.addEventListener("abort", abortHandler, {
+          once: true,
+        });
         bridge
           .execute({
             executionId,
@@ -1523,6 +1540,8 @@ export default function Home() {
     setCopiedMessageId,
     setEditingMessageId,
     resetChatScrollState,
+    saveCurrentChatScrollSnapshot,
+    forgetChatScrollSnapshot,
     focusDraftTextarea,
     isChatGenerating,
     stopChatGeneration,
@@ -1532,6 +1551,70 @@ export default function Home() {
     updateActiveChatMessages,
     updateChat,
   });
+
+  function cancelPendingChatSwitchFrames() {
+    if (pendingChatSwitchFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingChatSwitchFrameRef.current);
+      pendingChatSwitchFrameRef.current = null;
+    }
+
+    if (finishChatSwitchLoadingFrameRef.current !== null) {
+      window.cancelAnimationFrame(finishChatSwitchLoadingFrameRef.current);
+      finishChatSwitchLoadingFrameRef.current = null;
+    }
+  }
+
+  function switchChatWithLoading(chatId: string) {
+    if (chatId === activeChatId) {
+      void switchChat(chatId);
+      return;
+    }
+
+    cancelPendingChatSwitchFrames();
+    pendingChatSwitchTargetRef.current = chatId;
+    setChatSwitchLoadingChatId(chatId);
+
+    pendingChatSwitchFrameRef.current = window.requestAnimationFrame(() => {
+      pendingChatSwitchFrameRef.current = window.requestAnimationFrame(() => {
+        pendingChatSwitchFrameRef.current = null;
+
+        if (pendingChatSwitchTargetRef.current !== chatId) return;
+
+        void switchChat(chatId);
+      });
+    });
+  }
+
+  useEffect(() => {
+    if (!chatSwitchLoadingChatId) return;
+    if (activeChatId !== chatSwitchLoadingChatId) return;
+
+    finishChatSwitchLoadingFrameRef.current = window.requestAnimationFrame(
+      () => {
+        finishChatSwitchLoadingFrameRef.current = null;
+
+        if (pendingChatSwitchTargetRef.current !== chatSwitchLoadingChatId) {
+          return;
+        }
+
+        pendingChatSwitchTargetRef.current = null;
+        setChatSwitchLoadingChatId(null);
+      },
+    );
+
+    return () => {
+      if (finishChatSwitchLoadingFrameRef.current !== null) {
+        window.cancelAnimationFrame(finishChatSwitchLoadingFrameRef.current);
+        finishChatSwitchLoadingFrameRef.current = null;
+      }
+    };
+  }, [activeChatId, chatSwitchLoadingChatId]);
+
+  useEffect(() => {
+    return () => {
+      cancelPendingChatSwitchFrames();
+    };
+  }, []);
 
   async function generateChatTitle(chatId: string) {
     const chat = chats.find((item) => item.id === chatId);
@@ -1674,6 +1757,8 @@ export default function Home() {
     handleAssistantVisualStreamingChange,
   );
 
+  const showChatSwitchLoading = Boolean(chatSwitchLoadingChatId);
+
   if (!mounted) {
     return (
       <main className="flex h-dvh items-center justify-center bg-background text-foreground">
@@ -1704,7 +1789,7 @@ export default function Home() {
           setCompletedGenerationChatIds((currentChatIds) =>
             currentChatIds.filter((currentChatId) => currentChatId !== chatId),
           );
-          void switchChat(chatId);
+          switchChatWithLoading(chatId);
         }}
         onRenameChat={stableRenameChat}
         onToggleChatPinned={stableToggleChatPinned}
@@ -1744,9 +1829,20 @@ export default function Home() {
           onWheel={handleChatWheel}
           onPointerDown={handleChatPointerDown}
         >
+          {showChatSwitchLoading && (
+            <div
+              className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-background/45 text-foreground backdrop-blur-lg"
+              aria-label="Loading chat"
+              aria-live="polite"
+            >
+              <div className="select-none px-8 py-4 text-[30px] font-bold leading-tight text-muted-foreground">
+                Loading...
+              </div>
+            </div>
+          )}
+
           <div
             ref={chatScrollRef}
-            data-chat-scroll
             onScroll={handleChatScroll}
             className={cn(
               "chat-scrollbar h-full w-full [overflow-anchor:none]",
@@ -1761,7 +1857,9 @@ export default function Home() {
               )}
             >
               {!hasMessages ? (
-                <EmptyChatState onOpenProviders={() => setProviderSettingsOpen(true)} />
+                <EmptyChatState
+                  onOpenProviders={() => setProviderSettingsOpen(true)}
+                />
               ) : (
                 <ChatMessageList
                   messages={messages}

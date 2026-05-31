@@ -17,6 +17,60 @@ const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
 const STICKY_SCROLL_SETTLE_FRAMES = 5;
 const FORCED_SCROLL_SETTLE_FRAMES = 8;
+const CHAT_SCROLL_SNAPSHOTS_STORAGE_KEY = "chat-forge-chat-scroll-snapshots";
+const CHAT_SCROLL_SNAPSHOT_PERSIST_DEBOUNCE_MS = 250;
+const MAX_STORED_CHAT_SCROLL_SNAPSHOTS = 250;
+
+type ChatScrollSnapshot = {
+  scrollTop: number;
+  isNearBottom: boolean;
+  updatedAt: number;
+};
+
+function isValidChatScrollSnapshot(
+  value: unknown,
+): value is ChatScrollSnapshot {
+  if (!value || typeof value !== "object") return false;
+
+  const snapshot = value as Partial<ChatScrollSnapshot>;
+  return (
+    typeof snapshot.scrollTop === "number" &&
+    typeof snapshot.isNearBottom === "boolean" &&
+    typeof snapshot.updatedAt === "number"
+  );
+}
+
+function readChatScrollSnapshots() {
+  try {
+    const stored = window.localStorage.getItem(
+      CHAT_SCROLL_SNAPSHOTS_STORAGE_KEY,
+    );
+    if (!stored) return {};
+
+    const parsed: unknown = JSON.parse(stored);
+    if (!parsed || typeof parsed !== "object") return {};
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, ChatScrollSnapshot] =>
+          isValidChatScrollSnapshot(entry[1]),
+      ),
+    );
+  } catch (error) {
+    console.warn("Failed to load chat scroll positions:", error);
+    return {};
+  }
+}
+
+function pruneChatScrollSnapshots(
+  snapshots: Record<string, ChatScrollSnapshot>,
+) {
+  const entries = Object.entries(snapshots).sort(
+    (left, right) => right[1].updatedAt - left[1].updatedAt,
+  );
+
+  return Object.fromEntries(entries.slice(0, MAX_STORED_CHAT_SCROLL_SNAPSHOTS));
+}
 
 export function useChatAutoscroll({
   activeChatId,
@@ -32,10 +86,11 @@ export function useChatAutoscroll({
   setVisualStreamingMessageIds: Dispatch<SetStateAction<string[]>>;
 }) {
   const [isNearChatBottom, setIsNearChatBottom] = useState(true);
+  const isNearChatBottomRef = useRef(true);
   const [showScrollToBottomButton, setShowScrollToBottomButton] =
     useState(false);
   const [isChatScrollable, setIsChatScrollable] = useState(false);
-  const [, setAutoScrollEnabled] = useState(true);
+  const [, setAutoScrollEnabled] = useState(false);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatContentRef = useRef<HTMLDivElement | null>(null);
@@ -52,7 +107,17 @@ export function useChatAutoscroll({
   const lastChatScrollTopRef = useRef(0);
   const manualScrollInputUntilRef = useRef(0);
   const isChatScrollableRef = useRef(false);
-  const autoScrollEnabledRef = useRef(true);
+  const autoScrollEnabledRef = useRef(false);
+  const activeChatIdRef = useRef(activeChatId);
+  const generatingChatIdsRef = useRef(generatingChatIds);
+  const chatScrollSnapshotsRef = useRef<Record<string, ChatScrollSnapshot>>(
+    readChatScrollSnapshots(),
+  );
+  const persistChatScrollSnapshotsTimeoutRef = useRef<number | null>(null);
+  const restoreScrollFrameRef = useRef<number | null>(null);
+
+  activeChatIdRef.current = activeChatId;
+  generatingChatIdsRef.current = generatingChatIds;
 
   function getChatDistanceFromBottom() {
     const scrollElement = chatScrollRef.current;
@@ -82,6 +147,11 @@ export function useChatAutoscroll({
         : nextIsScrollable,
     );
     return nextIsScrollable;
+  }
+
+  function updateIsNearChatBottom(isNearBottom: boolean) {
+    isNearChatBottomRef.current = isNearBottom;
+    setIsNearChatBottom(isNearBottom);
   }
 
   function setChatAutoScrollEnabled(enabled: boolean) {
@@ -122,6 +192,7 @@ export function useChatAutoscroll({
       manualScrollSuppressionTimeoutRef.current = null;
 
       if (!isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX)) return;
+      if (!isActiveChatGenerating()) return;
 
       setChatAutoScrollEnabled(true);
       scheduleStickyScrollToBottom();
@@ -136,8 +207,16 @@ export function useChatAutoscroll({
     return Date.now() < manualScrollInputUntilRef.current;
   }
 
-  function isActiveChatGenerating() {
-    return Boolean(activeChatId && generatingChatIds.includes(activeChatId));
+  function isActiveChatGenerating(chatId = activeChatIdRef.current) {
+    return Boolean(chatId && generatingChatIdsRef.current.includes(chatId));
+  }
+
+  function shouldStickToChatBottom() {
+    return (
+      isActiveChatGenerating() &&
+      autoScrollEnabledRef.current &&
+      !isStickyScrollSuppressed()
+    );
   }
 
   function getStickyScrollSettleFrames() {
@@ -180,6 +259,7 @@ export function useChatAutoscroll({
     );
     scrollElement.scrollTop = finalScrollTop;
     lastChatScrollTopRef.current = finalScrollTop;
+    saveCurrentChatScrollSnapshot();
   }
 
   function syncChatScrollState() {
@@ -189,7 +269,7 @@ export function useChatAutoscroll({
     const isNearBottom =
       !canChatScroll() || distanceFromBottom <= CHAT_BOTTOM_THRESHOLD_PX;
 
-    setIsNearChatBottom(isNearBottom);
+    updateIsNearChatBottom(isNearBottom);
     setShowScrollToBottomButton(
       canChatScroll() &&
         distanceFromBottom > SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX,
@@ -198,14 +278,161 @@ export function useChatAutoscroll({
     return { distanceFromBottom, isNearBottom };
   }
 
+  function persistChatScrollSnapshots() {
+    try {
+      chatScrollSnapshotsRef.current = pruneChatScrollSnapshots(
+        chatScrollSnapshotsRef.current,
+      );
+      window.localStorage.setItem(
+        CHAT_SCROLL_SNAPSHOTS_STORAGE_KEY,
+        JSON.stringify(chatScrollSnapshotsRef.current),
+      );
+    } catch (error) {
+      console.warn("Failed to save chat scroll positions:", error);
+    }
+  }
+
+  function schedulePersistChatScrollSnapshots() {
+    if (persistChatScrollSnapshotsTimeoutRef.current !== null) {
+      window.clearTimeout(persistChatScrollSnapshotsTimeoutRef.current);
+    }
+
+    persistChatScrollSnapshotsTimeoutRef.current = window.setTimeout(() => {
+      persistChatScrollSnapshotsTimeoutRef.current = null;
+      persistChatScrollSnapshots();
+    }, CHAT_SCROLL_SNAPSHOT_PERSIST_DEBOUNCE_MS);
+  }
+
+  function saveChatScrollSnapshot(chatId: string) {
+    const scrollElement = chatScrollRef.current;
+    if (!scrollElement) return;
+
+    chatScrollSnapshotsRef.current = {
+      ...chatScrollSnapshotsRef.current,
+      [chatId]: {
+        scrollTop: scrollElement.scrollTop,
+        isNearBottom: isNearChatBottomRef.current,
+        updatedAt: Date.now(),
+      },
+    };
+    schedulePersistChatScrollSnapshots();
+  }
+
+  function saveCurrentChatScrollSnapshot() {
+    const chatId = activeChatIdRef.current;
+    if (!chatId) return;
+
+    saveChatScrollSnapshot(chatId);
+  }
+
+  function forgetChatScrollSnapshot(chatId: string) {
+    if (!(chatId in chatScrollSnapshotsRef.current)) return;
+
+    const remainingSnapshots = { ...chatScrollSnapshotsRef.current };
+    delete remainingSnapshots[chatId];
+    chatScrollSnapshotsRef.current = remainingSnapshots;
+    schedulePersistChatScrollSnapshots();
+  }
+
+  const getChatScrollSnapshot = useCallback((chatId: string) => {
+    return chatScrollSnapshotsRef.current[chatId];
+  }, []);
+
+  function cancelRestoreScrollPosition() {
+    if (restoreScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(restoreScrollFrameRef.current);
+      restoreScrollFrameRef.current = null;
+    }
+  }
+
+  function cancelStickyScrollToBottom() {
+    pendingChatBottomScrollRef.current = false;
+    stickyScrollForceRef.current = false;
+    stickyScrollSettleFramesRef.current = 0;
+
+    if (stickyScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(stickyScrollFrameRef.current);
+      stickyScrollFrameRef.current = null;
+    }
+  }
+
+  function restoreScrollTopForChat({
+    chatId,
+    scrollTop,
+    settleFrames = 2,
+  }: {
+    chatId: string;
+    scrollTop: number;
+    settleFrames?: number;
+  }) {
+    cancelRestoreScrollPosition();
+
+    let remainingFrames = Math.max(1, settleFrames);
+
+    const applyScrollTop = () => {
+      restoreScrollFrameRef.current = null;
+      if (activeChatIdRef.current !== chatId) return;
+
+      const scrollElement = chatScrollRef.current;
+      if (!scrollElement) return;
+
+      const nextScrollTop = Math.min(
+        Math.max(0, scrollTop),
+        Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight),
+      );
+
+      markProgrammaticChatScroll(200);
+      scrollElement.scrollTop = nextScrollTop;
+      lastChatScrollTopRef.current = nextScrollTop;
+      syncChatScrollState();
+
+      remainingFrames -= 1;
+      if (remainingFrames > 0) {
+        restoreScrollFrameRef.current =
+          window.requestAnimationFrame(applyScrollTop);
+      }
+    };
+
+    applyScrollTop();
+  }
+
+  function restoreActiveChatScrollSnapshot() {
+    const chatId = activeChatIdRef.current;
+    const scrollElement = chatScrollRef.current;
+    if (!chatId || !scrollElement) return;
+
+    cancelStickyScrollToBottom();
+    cancelRestoreScrollPosition();
+    clearStickyScrollSuppression();
+
+    const snapshot = chatScrollSnapshotsRef.current[chatId];
+    const activeChatIsGenerating = isActiveChatGenerating(chatId);
+
+    if (!snapshot) {
+      setChatAutoScrollEnabled(false);
+      restoreScrollTopForChat({ chatId, scrollTop: 0, settleFrames: 1 });
+      return;
+    }
+
+    if (snapshot.isNearBottom && activeChatIsGenerating) {
+      setChatAutoScrollEnabled(true);
+      scheduleStickyScrollToBottom({ force: true, settleFrames: 6 });
+      return;
+    }
+
+    setChatAutoScrollEnabled(false);
+    restoreScrollTopForChat({
+      chatId,
+      scrollTop: snapshot.scrollTop,
+      settleFrames: 6,
+    });
+  }
+
   function scheduleStickyScrollToBottom({
     force = false,
     settleFrames,
   }: { force?: boolean; settleFrames?: number } = {}) {
-    if (!force) {
-      if (!autoScrollEnabledRef.current) return;
-      if (isStickyScrollSuppressed()) return;
-    }
+    if (!force && !shouldStickToChatBottom()) return;
 
     stickyScrollForceRef.current = stickyScrollForceRef.current || force;
     stickyScrollSettleFramesRef.current = Math.max(
@@ -220,21 +447,14 @@ export function useChatAutoscroll({
 
       const shouldForce = stickyScrollForceRef.current;
 
-      if (!shouldForce) {
-        if (!autoScrollEnabledRef.current) {
-          stickyScrollSettleFramesRef.current = 0;
-          return;
-        }
-
-        if (isStickyScrollSuppressed()) {
-          stickyScrollSettleFramesRef.current = 0;
-          return;
-        }
+      if (!shouldForce && !shouldStickToChatBottom()) {
+        stickyScrollSettleFramesRef.current = 0;
+        return;
       }
 
       scrollToBottomInstant();
       syncChatScrollableState();
-      setIsNearChatBottom(true);
+      updateIsNearChatBottom(true);
       setShowScrollToBottomButton(false);
 
       stickyScrollSettleFramesRef.current = Math.max(
@@ -257,13 +477,19 @@ export function useChatAutoscroll({
 
   function resetChatScrollState() {
     clearStickyScrollSuppression();
-    setChatAutoScrollEnabled(true);
-    setIsNearChatBottom(true);
+    cancelStickyScrollToBottom();
+    cancelRestoreScrollPosition();
+    setChatAutoScrollEnabled(false);
+    updateIsNearChatBottom(true);
     setShowScrollToBottomButton(false);
   }
 
   function armStickyScrollToBottom() {
-    resetChatScrollState();
+    clearStickyScrollSuppression();
+    cancelRestoreScrollPosition();
+    setChatAutoScrollEnabled(true);
+    updateIsNearChatBottom(true);
+    setShowScrollToBottomButton(false);
     markProgrammaticChatScroll(500);
     requestChatBottomScrollAfterRender();
     scheduleStickyScrollToBottom({
@@ -276,7 +502,7 @@ export function useChatAutoscroll({
     (chatId: string) => {
       if (chatId !== activeChatId) return;
 
-      if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+      if (shouldStickToChatBottom()) {
         scheduleStickyScrollToBottom();
         return;
       }
@@ -304,15 +530,9 @@ export function useChatAutoscroll({
           : currentMessageIds;
       });
 
-      if (
-        activeChatId &&
-        autoScrollEnabledRef.current &&
-        !isStickyScrollSuppressed()
-      ) {
+      if (activeChatId && shouldStickToChatBottom()) {
         scheduleStickyScrollToBottom({
-          settleFrames: isActiveChatGenerating()
-            ? STICKY_SCROLL_SETTLE_FRAMES
-            : 1,
+          settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
         });
       }
     },
@@ -320,16 +540,22 @@ export function useChatAutoscroll({
   );
 
   const handleAskUserLayoutChange = useCallback(() => {
-    if (
-      isActiveChatGenerating() &&
-      autoScrollEnabledRef.current &&
-      !isStickyScrollSuppressed()
-    ) {
+    if (shouldStickToChatBottom()) {
       scheduleStickyScrollToBottom({ settleFrames: 2 });
       return;
     }
 
     syncChatScrollState();
+  }, [activeChatId, generatingChatIds]);
+
+  useLayoutEffect(() => {
+    restoreActiveChatScrollSnapshot();
+  }, [activeChatId]);
+
+  useEffect(() => {
+    if (!isActiveChatGenerating()) {
+      setChatAutoScrollEnabled(false);
+    }
   }, [activeChatId, generatingChatIds]);
 
   useLayoutEffect(() => {
@@ -341,7 +567,7 @@ export function useChatAutoscroll({
       return;
     }
 
-    if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+    if (shouldStickToChatBottom()) {
       scheduleStickyScrollToBottom();
       return;
     }
@@ -355,11 +581,7 @@ export function useChatAutoscroll({
     if (!scrollElement) return;
 
     function handleResize() {
-      if (
-        isActiveChatGenerating() &&
-        autoScrollEnabledRef.current &&
-        !isStickyScrollSuppressed()
-      ) {
+      if (shouldStickToChatBottom()) {
         scheduleStickyScrollToBottom({
           settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
         });
@@ -384,9 +606,7 @@ export function useChatAutoscroll({
 
   useEffect(() => {
     if (!activeChatId) return;
-    if (!generatingChatIds.includes(activeChatId)) return;
-    if (!autoScrollEnabledRef.current) return;
-    if (isStickyScrollSuppressed()) return;
+    if (!shouldStickToChatBottom()) return;
 
     scheduleStickyScrollToBottom();
   }, [activeChatId, generatingChatIds, messages]);
@@ -394,15 +614,16 @@ export function useChatAutoscroll({
   useEffect(() => {
     if (!activeChatId) return;
 
-    if (autoScrollEnabledRef.current && !isStickyScrollSuppressed()) {
+    if (shouldStickToChatBottom()) {
       scheduleStickyScrollToBottom({
-        settleFrames: isActiveChatGenerating()
-          ? STICKY_SCROLL_SETTLE_FRAMES
-          : 2,
+        settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
       });
       return;
     }
 
+    if (!isActiveChatGenerating()) {
+      setChatAutoScrollEnabled(false);
+    }
     syncChatScrollState();
   }, [activeChatId, generatingChatIds]);
 
@@ -440,6 +661,20 @@ export function useChatAutoscroll({
   }, []);
 
   useEffect(() => {
+    function handleBeforeUnload() {
+      saveCurrentChatScrollSnapshot();
+      persistChatScrollSnapshots();
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      handleBeforeUnload();
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current);
@@ -447,8 +682,14 @@ export function useChatAutoscroll({
       if (stickyScrollFrameRef.current !== null) {
         window.cancelAnimationFrame(stickyScrollFrameRef.current);
       }
+      if (restoreScrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(restoreScrollFrameRef.current);
+      }
       if (autoScrollResetTimeoutRef.current !== null) {
         window.clearTimeout(autoScrollResetTimeoutRef.current);
+      }
+      if (persistChatScrollSnapshotsTimeoutRef.current !== null) {
+        window.clearTimeout(persistChatScrollSnapshotsTimeoutRef.current);
       }
       if (manualScrollSuppressionTimeoutRef.current !== null) {
         window.clearTimeout(manualScrollSuppressionTimeoutRef.current);
@@ -457,7 +698,14 @@ export function useChatAutoscroll({
   }, []);
 
   function scrollChatToBottom() {
-    armStickyScrollToBottom();
+    clearStickyScrollSuppression();
+    cancelRestoreScrollPosition();
+    setChatAutoScrollEnabled(isActiveChatGenerating());
+    markProgrammaticChatScroll(500);
+    scheduleStickyScrollToBottom({
+      force: true,
+      settleFrames: FORCED_SCROLL_SETTLE_FRAMES,
+    });
   }
 
   function handleChatScroll() {
@@ -475,6 +723,7 @@ export function useChatAutoscroll({
       lastChatScrollTopRef.current = currentScrollTop;
 
       const { isNearBottom } = syncChatScrollState();
+      saveCurrentChatScrollSnapshot();
 
       if (!isAutoScrollingRef.current) {
         if (
@@ -485,18 +734,17 @@ export function useChatAutoscroll({
           return;
         }
 
-        if (isNearBottom && !isStickyScrollSuppressed()) {
+        if (
+          isNearBottom &&
+          isActiveChatGenerating() &&
+          !isStickyScrollSuppressed()
+        ) {
           setChatAutoScrollEnabled(true);
         } else if (!isNearBottom && hasRecentManualScrollInput()) {
           setChatAutoScrollEnabled(false);
-        } else if (
-          !isNearBottom &&
-          isActiveChatGenerating() &&
-          autoScrollEnabledRef.current &&
-          !isStickyScrollSuppressed()
-        ) {
+        } else if (!isNearBottom && shouldStickToChatBottom()) {
           scheduleStickyScrollToBottom();
-        } else if (!isNearBottom && !isActiveChatGenerating()) {
+        } else if (!isActiveChatGenerating()) {
           setChatAutoScrollEnabled(false);
         }
       }
@@ -545,6 +793,9 @@ export function useChatAutoscroll({
     clearStickyScrollSuppression,
     setChatAutoScrollEnabled,
     resetChatScrollState,
+    saveCurrentChatScrollSnapshot,
+    forgetChatScrollSnapshot,
+    getChatScrollSnapshot,
     armStickyScrollToBottom,
     scheduleStickyScrollToBottom,
     isStickyScrollSuppressed,
