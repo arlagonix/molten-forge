@@ -8,11 +8,6 @@
 @import "@fontsource/ibm-plex-mono/600.css";
 @import "@fontsource/ibm-plex-mono/700.css";
 
-@import "@fontsource/open-sans/400.css";
-@import "@fontsource/open-sans/500.css";
-@import "@fontsource/open-sans/600.css";
-@import "@fontsource/open-sans/700.css";
-
 @import "@fontsource/ibm-plex-sans/400.css";
 @import "@fontsource/ibm-plex-sans/500.css";
 @import "@fontsource/ibm-plex-sans/600.css";
@@ -26,7 +21,6 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-open-sans: "Open Sans", sans-serif;
   --font-ibm-plex-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-ibm-plex-mono:
     "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
@@ -214,7 +208,6 @@
     border-radius: 999px;
     background-color: color-mix(in oklab, currentColor 22%, transparent);
   }
-
 
   @keyframes chat-forge-loading-fade {
     to {
