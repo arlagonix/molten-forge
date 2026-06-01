@@ -3,6 +3,28 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 
 import type { MessageContextMenuState } from "@/components/ai-chat/chat-message-list";
 
+function getRenderedTextWithin(element: HTMLElement) {
+  const contentElement = element.querySelector<HTMLElement>(
+    "[data-message-content]",
+  );
+
+  if (!contentElement) return "";
+
+  const clone = contentElement.cloneNode(true) as HTMLElement;
+  clone
+    .querySelectorAll(
+      [
+        "[data-codeblock-ui='true']",
+        ".chat-code-header",
+        ".chat-code-toolbar-actions",
+        ".chat-code-action",
+      ].join(","),
+    )
+    .forEach((node) => node.remove());
+
+  return clone.innerText.trim();
+}
+
 function getSelectedTextWithin(element: HTMLElement) {
   const selection = window.getSelection();
 
@@ -48,7 +70,7 @@ export function useMessageContextMenu() {
     const target = event.target instanceof Element ? event.target : null;
     const link = target?.closest("a[href]");
     const menuWidth = 220;
-    const menuHeight = 180;
+    const menuHeight = 220;
     const margin = 8;
     const x = Math.max(
       margin,
@@ -65,6 +87,7 @@ export function useMessageContextMenu() {
       y,
       linkHref: link instanceof HTMLAnchorElement ? link.href : null,
       selectedText: getSelectedTextWithin(event.currentTarget),
+      renderedText: getRenderedTextWithin(event.currentTarget),
     });
   }
 

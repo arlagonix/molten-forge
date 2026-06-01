@@ -39,6 +39,7 @@ export function useChatActions({
   messageElementRefs,
   setActiveChatId,
   setChats,
+  setIsNewChatDraft,
   setCopiedMessageId,
   setEditingMessageId,
   resetChatScrollState,
@@ -67,6 +68,7 @@ export function useChatActions({
   messageElementRefs: MutableRefObject<Map<string, HTMLDivElement>>;
   setActiveChatId: Dispatch<SetStateAction<string | undefined>>;
   setChats: Dispatch<SetStateAction<ChatSession[]>>;
+  setIsNewChatDraft: Dispatch<SetStateAction<boolean>>;
   setCopiedMessageId: Dispatch<SetStateAction<string | null>>;
   setEditingMessageId: Dispatch<SetStateAction<string | null>>;
   resetChatScrollState: () => void;
@@ -151,6 +153,7 @@ export function useChatActions({
     }
   }
 
+
   async function saveEditedUserMessage(
     messageId: string,
     editedContent: string,
@@ -198,24 +201,15 @@ export function useChatActions({
     stopChatGeneration(activeChat.id);
   }
 
-  async function createNewChat() {
-    const chat: ChatSession = {
-      ...createEmptyChat(),
-      fileToolAutoApproval: { ...fileToolAutoApprovalDefaults },
-    };
+  function createNewChat() {
+    // Don't persist a chat here — enter the unsaved "New chat" draft state.
+    // The real chat is created on first send (see handleComposerSend in App).
     saveCurrentChatScrollSnapshot();
-    setChats((currentChats) => [chat, ...currentChats]);
-    setActiveChatId(chat.id);
+    setIsNewChatDraft(true);
+    setActiveChatId(undefined);
     setEditingMessageId(null);
     resetChatScrollState();
     focusDraftTextarea();
-
-    try {
-      await saveChat(chat);
-      await saveActiveChatId(chat.id);
-    } catch (error) {
-      console.error("Failed to save new chat:", error);
-    }
   }
 
   async function createChatWithSameSettings(chatId: string) {
@@ -254,6 +248,7 @@ export function useChatActions({
     saveCurrentChatScrollSnapshot();
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
+    setIsNewChatDraft(false);
     setEditingMessageId(null);
     resetChatScrollState();
     focusDraftTextarea();
@@ -269,11 +264,13 @@ export function useChatActions({
 
   async function switchChat(chatId: string) {
     if (chatId === activeChatId) {
+      setIsNewChatDraft(false);
       setEditingMessageId(null);
       return;
     }
 
     saveCurrentChatScrollSnapshot();
+    setIsNewChatDraft(false);
     setActiveChatId(chatId);
     setEditingMessageId(null);
   }
@@ -305,28 +302,33 @@ export function useChatActions({
     const remainingChats = sortChatsByUpdatedAt(
       chats.filter((chat) => chat.id !== chatId),
     );
-    const nextChats =
-      remainingChats.length > 0
-        ? remainingChats
-        : [
-            {
-              ...createEmptyChat(),
-              fileToolAutoApproval: { ...fileToolAutoApprovalDefaults },
-            },
-          ];
+
+    // When the last chat is removed, fall back to the unsaved "New chat"
+    // draft state rather than auto-creating an empty chat.
+    if (remainingChats.length === 0) {
+      setChats([]);
+      setActiveChatId(undefined);
+      setIsNewChatDraft(true);
+      resetChatScrollState();
+
+      try {
+        await deleteChat(chatId);
+      } catch (error) {
+        console.error("Failed to delete chat:", error);
+      }
+      return;
+    }
+
     const nextActiveId =
       activeChatId === chatId
-        ? nextChats[0].id
-        : (activeChatId ?? nextChats[0].id);
+        ? remainingChats[0].id
+        : (activeChatId ?? remainingChats[0].id);
 
-    setChats(nextChats);
+    setChats(remainingChats);
     setActiveChatId(nextActiveId);
 
     try {
       await deleteChat(chatId);
-      if (remainingChats.length === 0) {
-        await saveChat(nextChats[0]);
-      }
       await saveActiveChatId(nextActiveId);
     } catch (error) {
       console.error("Failed to delete chat:", error);
@@ -411,6 +413,7 @@ export function useChatActions({
     saveCurrentChatScrollSnapshot();
     setChats((currentChats) => [chat, ...currentChats]);
     setActiveChatId(chat.id);
+    setIsNewChatDraft(false);
     setEditingMessageId(null);
     resetChatScrollState();
 
@@ -587,6 +590,7 @@ export function useChatActions({
   }
 
   return {
+    // chat action handlers
     startEditingUserMessage,
     cancelEditingUserMessage,
     copyLinkHref,

@@ -1,4 +1,5 @@
 import { Spinner as RadixSpinner } from "@radix-ui/themes";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Check,
   ChevronLeft,
@@ -24,7 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { createPortal } from "react-dom";
 
 import { AgentCallBlock } from "@/components/ai-chat/agent-call-block";
 import { type ToolMentionOption } from "@/components/ai-chat/chat-composer";
@@ -66,6 +67,26 @@ import { cn } from "@/lib/utils";
 
 const USER_MENTION_PATTERN =
   /(^|\s)@(tool|skill|agent):([A-Za-z0-9_-]+)(?=$|\s)/g;
+
+function MarkdownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M7 15V9l3 4 3-4v6" />
+      <path d="M16 9v6" />
+      <path d="m14 13 2 2 2-2" />
+    </svg>
+  );
+}
 
 type VisibleAssistantProcessStep = ChatAssistantProcessStep & {
   sourceStepIds: string[];
@@ -124,6 +145,7 @@ export type MessageContextMenuState = {
   y: number;
   linkHref: string | null;
   selectedText: string;
+  renderedText: string;
 };
 
 type RenderToolExecutionBlockArgs = {
@@ -342,6 +364,55 @@ const UserMessageContent = memo(function UserMessageContent({
   return <div className="whitespace-pre-wrap">{parts}</div>;
 });
 
+const SourceMarkdownContent = memo(function SourceMarkdownContent({
+  content,
+}: {
+  content: string;
+}) {
+  return (
+    <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-6 sm:text-base">
+      {content}
+    </pre>
+  );
+});
+
+function getRenderedMessageText(trigger: HTMLElement) {
+  const messageElement = trigger.closest<HTMLElement>("[data-message-id]");
+  const contentElement = messageElement?.querySelector<HTMLElement>(
+    "[data-message-content]",
+  );
+
+  if (!contentElement) return "";
+
+  const clone = contentElement.cloneNode(true) as HTMLElement;
+  clone
+    .querySelectorAll(
+      [
+        "[data-codeblock-ui='true']",
+        ".chat-code-header",
+        ".chat-code-toolbar-actions",
+        ".chat-code-action",
+      ].join(","),
+    )
+    .forEach((node) => node.remove());
+
+  return clone.innerText.trim();
+}
+
+function getMessageCopyContent(
+  isSourceView: boolean,
+  trigger: HTMLElement,
+  sourceContent: string,
+) {
+  if (isSourceView) return sourceContent;
+
+  return getRenderedMessageText(trigger) || sourceContent;
+}
+
+function getSourceViewToggleLabel(isSourceView: boolean) {
+  return isSourceView ? "Show rendered Markdown" : "Show Markdown source";
+}
+
 function getRelevantVisualFlushKeys(message: ChatMessage) {
   if (message.role !== "assistant") return [message.id];
 
@@ -440,7 +511,8 @@ function areContextMenusEqualForMessage(
     previousRelevant.x === nextRelevant.x &&
     previousRelevant.y === nextRelevant.y &&
     previousRelevant.linkHref === nextRelevant.linkHref &&
-    previousRelevant.selectedText === nextRelevant.selectedText
+    previousRelevant.selectedText === nextRelevant.selectedText &&
+    previousRelevant.renderedText === nextRelevant.renderedText
   );
 }
 
@@ -497,6 +569,7 @@ const ChatMessageItem = memo(
       message.role === "assistant"
         ? (activeVariant?.content ?? "")
         : message.content;
+    const [isSourceView, setIsSourceView] = useState(false);
     const reasoning = activeVariant?.reasoning ?? "";
     const toolCalls = activeVariant?.toolCalls ?? [];
     const toolResults = activeVariant?.toolResults ?? [];
@@ -507,6 +580,10 @@ const ChatMessageItem = memo(
     const assistantMessageProcessSteps = visibleProcessSteps.filter(
       (step) => step.type === "assistant_message",
     );
+    const messageSourceContent =
+      content ||
+      assistantMessageProcessSteps.map((step) => step.content).join("\n\n");
+    const hasMessageSourceContent = messageSourceContent.trim().length > 0;
     const hasInlineAssistantMessageSteps =
       assistantMessageProcessSteps.length > 0;
     const status = activeVariant?.status;
@@ -586,23 +663,33 @@ const ChatMessageItem = memo(
                 onCaptureMessageContext(event, message.id)
               }
             >
-              <div className="w-full min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]">
-                <SmoothAssistantMessageContent
-                  content={step.content}
-                  messageId={`${message.id}:${step.id}`}
-                  isApiStreaming={isAssistantBlockStreaming}
-                  skipSyntaxHighlight={isAssistantBlockStreaming}
-                  flushVersion={stepFlushVersion}
-                  onVisualProgress={() =>
-                    onAssistantVisualProgress(activeChatId)
-                  }
-                  onVisualStreamingChange={(isStreaming) =>
-                    onAssistantVisualStreamingChange(
-                      `${message.id}:${step.id}`,
-                      isStreaming,
-                    )
-                  }
-                />
+              <div
+                className={cn(
+                  "w-full min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]",
+                )}
+                data-message-content
+                data-message-view-mode={isSourceView ? "source" : "rendered"}
+              >
+                {isSourceView ? (
+                  <SourceMarkdownContent content={step.content} />
+                ) : (
+                  <SmoothAssistantMessageContent
+                    content={step.content}
+                    messageId={`${message.id}:${step.id}`}
+                    isApiStreaming={isAssistantBlockStreaming}
+                    skipSyntaxHighlight={isAssistantBlockStreaming}
+                    flushVersion={stepFlushVersion}
+                    onVisualProgress={() =>
+                      onAssistantVisualProgress(activeChatId)
+                    }
+                    onVisualStreamingChange={(isStreaming) =>
+                      onAssistantVisualStreamingChange(
+                        `${message.id}:${step.id}`,
+                        isStreaming,
+                      )
+                    }
+                  />
+                )}
               </div>
             </article>
           </div>
@@ -872,6 +959,7 @@ const ChatMessageItem = memo(
                 }
               >
                 <div
+                  data-message-content
                   className={cn(
                     "min-w-0 text-base leading-6 [overflow-wrap:anywhere] w-full ",
                     message.role === "user"
@@ -879,8 +967,11 @@ const ChatMessageItem = memo(
                       : "min-w-0 max-w-full overflow-visible px-0 py-1 text-card-foreground shadow-xs",
                     status === "error" && "border-destructive/50",
                   )}
+                  data-message-view-mode={isSourceView ? "source" : "rendered"}
                 >
-                  {message.role === "assistant" ? (
+                  {isSourceView ? (
+                    <SourceMarkdownContent content={content} />
+                  ) : message.role === "assistant" ? (
                     <SmoothAssistantMessageContent
                       content={content}
                       messageId={`${message.id}:content`}
@@ -902,128 +993,148 @@ const ChatMessageItem = memo(
                   )}
                 </div>
               </article>
+            </>
+          )
+        )}
 
-              {messageContextMenu?.messageId === message.id && (
-                <div
-                  data-message-context-menu
-                  className="fixed z-50 min-w-55  border bg-popover p-1 text-base text-popover-foreground shadow-md"
-                  style={{
-                    left: messageContextMenu.x,
-                    top: messageContextMenu.y,
-                  }}
-                  onContextMenu={(event) => event.preventDefault()}
-                >
-                  {messageContextMenu.linkHref && (
-                    <>
-                      <button
-                        type="button"
-                        className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-                        onClick={() => {
-                          void onCopyLinkHref(messageContextMenu.linkHref);
-                          onCloseMessageContextMenu();
-                        }}
-                      >
-                        <Copy className="size-4" />
-                        Copy link
-                      </button>
-                      <div className="-mx-1 my-1 h-px bg-border" />
-                    </>
-                  )}
+        {messageContextMenu?.messageId === message.id &&
+          createPortal(
+            <div
+              data-message-context-menu
+              className="fixed z-50 min-w-55  border bg-popover p-1 text-base text-popover-foreground shadow-md"
+              style={{
+                left: messageContextMenu.x,
+                top: messageContextMenu.y,
+              }}
+              onContextMenu={(event) => event.preventDefault()}
+            >
+              {messageContextMenu.linkHref && (
+                <>
                   <button
                     type="button"
                     className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-                    disabled={
-                      !messageContextMenu.selectedText.trim() && !content.trim()
-                    }
                     onClick={() => {
-                      void onCopyMessageContent(
-                        message.id,
-                        messageContextMenu.selectedText || content,
-                      );
+                      void onCopyLinkHref(messageContextMenu.linkHref);
                       onCloseMessageContextMenu();
                     }}
                   >
                     <Copy className="size-4" />
-                    {messageContextMenu.selectedText.trim()
-                      ? "Copy selection"
-                      : message.role === "assistant"
-                        ? "Copy answer"
-                        : "Copy message"}
+                    Copy link
+                  </button>
+                  <div className="-mx-1 my-1 h-px bg-border" />
+                </>
+              )}
+              <button
+                type="button"
+                className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                disabled={
+                  !messageContextMenu.selectedText.trim() &&
+                  !hasMessageSourceContent
+                }
+                onClick={(event) => {
+                  void onCopyMessageContent(
+                    message.id,
+                    messageContextMenu.selectedText ||
+                      (isSourceView
+                        ? messageSourceContent
+                        : messageContextMenu.renderedText ||
+                          messageSourceContent),
+                  );
+                  onCloseMessageContextMenu();
+                }}
+              >
+                <Copy className="size-4" />
+                {messageContextMenu.selectedText.trim()
+                  ? "Copy selection"
+                  : isSourceView
+                    ? "Copy source"
+                    : message.role === "assistant"
+                      ? "Copy answer"
+                      : "Copy message"}
+              </button>
+              <button
+                type="button"
+                className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                disabled={!hasMessageSourceContent}
+                onClick={() => {
+                  setIsSourceView((current) => !current);
+                  onCloseMessageContextMenu();
+                }}
+              >
+                <MarkdownIcon className="size-4" />
+                {getSourceViewToggleLabel(isSourceView)}
+              </button>
+              <div className="-mx-1 my-1 h-px bg-border" />
+              <button
+                type="button"
+                className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                disabled={isSending || isMessageStreaming}
+                onClick={() => {
+                  void onBranchFromMessage(message.id);
+                  onCloseMessageContextMenu();
+                }}
+              >
+                <GitBranch className="size-4" />
+                Branch from here
+              </button>
+              {message.role === "assistant" && (
+                <>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                    disabled={isSending}
+                    onClick={() => {
+                      void onRegenerateAssistantMessage(message.id);
+                      onCloseMessageContextMenu();
+                    }}
+                  >
+                    <RefreshCcw className="size-4" />
+                    {status === "error" ? "Retry answer" : "Regenerate answer"}
                   </button>
                   <button
                     type="button"
                     className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
                     disabled={isSending || isMessageStreaming}
                     onClick={() => {
-                      void onBranchFromMessage(message.id);
+                      void onContinueAssistantMessage(message.id);
                       onCloseMessageContextMenu();
                     }}
                   >
-                    <GitBranch className="size-4" />
-                    Branch from here
+                    <ChevronRight className="size-4" />
+                    Continue generating
                   </button>
-                  {message.role === "assistant" && (
-                    <>
-                      <button
-                        type="button"
-                        className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-                        disabled={isSending}
-                        onClick={() => {
-                          void onRegenerateAssistantMessage(message.id);
-                          onCloseMessageContextMenu();
-                        }}
-                      >
-                        <RefreshCcw className="size-4" />
-                        {status === "error"
-                          ? "Retry answer"
-                          : "Regenerate answer"}
-                      </button>
-                      <button
-                        type="button"
-                        className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-                        disabled={isSending || isMessageStreaming}
-                        onClick={() => {
-                          void onContinueAssistantMessage(message.id);
-                          onCloseMessageContextMenu();
-                        }}
-                      >
-                        <ChevronRight className="size-4" />
-                        Continue generating
-                      </button>
-                    </>
-                  )}
-                  {message.role === "user" && (
-                    <button
-                      type="button"
-                      className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
-                      disabled={isSending}
-                      onClick={() => {
-                        onStartEditingUserMessage(message.id);
-                        onCloseMessageContextMenu();
-                      }}
-                    >
-                      <Pencil className="size-4" />
-                      Edit message
-                    </button>
-                  )}
-                  <div className="-mx-1 my-1 h-px bg-border" />
-                  <button
-                    type="button"
-                    className="flex w-full items-center gap-2  px-2 py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-destructive/20"
-                    disabled={isSending}
-                    onClick={() => {
-                      onDeleteMessage(message.id);
-                      onCloseMessageContextMenu();
-                    }}
-                  >
-                    <Trash2 className="size-4" />
-                    Delete message
-                  </button>
-                </div>
+                </>
               )}
-            </>
-          )
-        )}
+              {message.role === "user" && (
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2  px-2 py-1.5 text-left hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
+                  disabled={isSending}
+                  onClick={() => {
+                    onStartEditingUserMessage(message.id);
+                    onCloseMessageContextMenu();
+                  }}
+                >
+                  <Pencil className="size-4" />
+                  Edit message
+                </button>
+              )}
+              <div className="-mx-1 my-1 h-px bg-border" />
+              <button
+                type="button"
+                className="flex w-full items-center gap-2  px-2 py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-destructive/20"
+                disabled={isSending}
+                onClick={() => {
+                  onDeleteMessage(message.id);
+                  onCloseMessageContextMenu();
+                }}
+              >
+                <Trash2 className="size-4" />
+                Delete message
+              </button>
+            </div>,
+            document.body,
+          )}
 
         {message.role === "user" && editingMessageId !== message.id && (
           <div className="flex justify-end gap-1.5 text-sm leading-5 text-muted-foreground opacity-0 transition-opacity focus-within:opacity-100 group-hover/message:opacity-100">
@@ -1042,7 +1153,6 @@ const ChatMessageItem = memo(
               type="button"
               variant="ghost"
               size="icon-sm"
-              className="text-destructive hover:text-destructive"
               label="Delete message"
               onClick={() => onDeleteMessage(message.id)}
               disabled={isSending}
@@ -1054,8 +1164,34 @@ const ChatMessageItem = memo(
               type="button"
               variant="ghost"
               size="icon-sm"
-              label={copiedMessageId === message.id ? "Copied" : "Copy message"}
-              onClick={() => onCopyMessageContent(message.id, message.content)}
+              label={getSourceViewToggleLabel(isSourceView)}
+              onClick={() => setIsSourceView((current) => !current)}
+              disabled={!message.content.trim()}
+            >
+              <MarkdownIcon className="size-3" />
+            </TooltipIconButton>
+
+            <TooltipIconButton
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              label={
+                copiedMessageId === message.id
+                  ? "Copied"
+                  : isSourceView
+                    ? "Copy source"
+                    : "Copy message"
+              }
+              onClick={(event) =>
+                onCopyMessageContent(
+                  message.id,
+                  getMessageCopyContent(
+                    isSourceView,
+                    event.currentTarget,
+                    message.content,
+                  ),
+                )
+              }
               disabled={!message.content.trim()}
             >
               {copiedMessageId === message.id ? (
@@ -1195,7 +1331,6 @@ const ChatMessageItem = memo(
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  className="text-destructive hover:text-destructive"
                   label="Delete message"
                   onClick={() => onDeleteMessage(message.id)}
                   disabled={isSending}
@@ -1231,11 +1366,35 @@ const ChatMessageItem = memo(
                   type="button"
                   variant="ghost"
                   size="icon-sm"
+                  label={getSourceViewToggleLabel(isSourceView)}
+                  onClick={() => setIsSourceView((current) => !current)}
+                  disabled={!hasMessageSourceContent}
+                >
+                  <MarkdownIcon className="size-3" />
+                </TooltipIconButton>
+
+                <TooltipIconButton
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
                   label={
-                    copiedMessageId === message.id ? "Copied" : "Copy answer"
+                    copiedMessageId === message.id
+                      ? "Copied"
+                      : isSourceView
+                        ? "Copy source"
+                        : "Copy answer"
                   }
-                  onClick={() => onCopyMessageContent(message.id, content)}
-                  disabled={!content.trim()}
+                  onClick={(event) =>
+                    onCopyMessageContent(
+                      message.id,
+                      getMessageCopyContent(
+                        isSourceView,
+                        event.currentTarget,
+                        messageSourceContent,
+                      ),
+                    )
+                  }
+                  disabled={!hasMessageSourceContent}
                 >
                   {copiedMessageId === message.id ? (
                     <Check className="size-3" />

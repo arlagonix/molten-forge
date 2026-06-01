@@ -128,6 +128,9 @@ const APP_TITLE = `${APP_NAME} ${APP_VERSION_LABEL}`;
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
 const COMPOSER_DRAFTS_STORAGE_KEY = "chat-forge-composer-drafts";
+// Draft-state key for the unsaved "New chat" composer. A real chat is only
+// created (and persisted) once the user sends the first message.
+const NEW_CHAT_DRAFT_KEY = "__new_chat_draft__";
 
 function loadComposerDrafts(): Record<string, string> {
   if (typeof window === "undefined") return {};
@@ -207,6 +210,13 @@ export default function Home() {
   const [loadedAgents, setLoadedAgents] = useState<LoadedAgentInfo[]>([]);
   const [chats, setChats] = useState<ChatSession[]>([]);
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
+  // When true, we're composing an unsaved "New chat". No chat exists yet; the
+  // real chat is created on first send. The composer draft lives under
+  // NEW_CHAT_DRAFT_KEY so it survives switching to another chat and back.
+  const [isNewChatDraft, setIsNewChatDraft] = useState(false);
+  const pendingDraftSendRef = useRef<{ chatId: string; content: string } | null>(
+    null,
+  );
   const [chatSwitchLoadingChatId, setChatSwitchLoadingChatId] = useState<
     string | null
   >(null);
@@ -470,12 +480,16 @@ export default function Home() {
   );
 
   const activeChat = useMemo(() => {
+    if (isNewChatDraft) return undefined;
     return (
       sortedChats.find((chat) => chat.id === activeChatId) ?? sortedChats[0]
     );
-  }, [activeChatId, sortedChats]);
-  const activeComposerDraft = activeChatId
-    ? (composerDraftsRef.current[activeChatId] ?? "")
+  }, [isNewChatDraft, activeChatId, sortedChats]);
+  const composerDraftKey = isNewChatDraft
+    ? NEW_CHAT_DRAFT_KEY
+    : (activeChatId ?? "");
+  const activeComposerDraft = composerDraftKey
+    ? (composerDraftsRef.current[composerDraftKey] ?? "")
     : "";
 
   const providers = providersState.providers.length
@@ -875,19 +889,14 @@ export default function Home() {
         )
           ? loadedProvidersState.activeProviderId
           : normalizedProviders[0].id;
-        let nextChats = loadedChats;
+        const nextChats = loadedChats;
         let nextActiveChatId = loadedActiveChatId;
+        // Don't auto-create a chat when there are none — start in the unsaved
+        // "New chat" draft state and only persist once the user sends.
+        const startInNewChatDraft = nextChats.length === 0;
 
-        if (nextChats.length === 0) {
-          const chat = {
-            ...createEmptyChat(),
-            fileToolAutoApproval:
-              buildFileToolAutoApprovalFromToolsSettings(loadedToolsSettings),
-          };
-          nextChats = [chat];
-          nextActiveChatId = chat.id;
-          await saveChat(chat);
-          await saveActiveChatId(chat.id);
+        if (startInNewChatDraft) {
+          nextActiveChatId = undefined;
         } else if (
           !nextActiveChatId ||
           !nextChats.some((chat) => chat.id === nextActiveChatId)
@@ -915,25 +924,20 @@ export default function Home() {
         );
         setChats(nextChats);
         setActiveChatId(nextActiveChatId);
+        setIsNewChatDraft(startInNewChatDraft);
         didHydrateRef.current = true;
         setMounted(true);
       } catch (error) {
         console.error("Failed to load app data from IndexedDB:", error);
         const fallbackProvider = normalizeProviderForState(defaultProvider);
-        const fallbackChat = {
-          ...createEmptyChat(),
-          fileToolAutoApproval:
-            buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
-        };
-        savedChatSnapshotsRef.current = {
-          [fallbackChat.id]: JSON.stringify(fallbackChat),
-        };
+        savedChatSnapshotsRef.current = {};
         setProvidersState({
           providers: [fallbackProvider],
           activeProviderId: fallbackProvider.id,
         });
-        setChats([fallbackChat]);
-        setActiveChatId(fallbackChat.id);
+        setChats([]);
+        setActiveChatId(undefined);
+        setIsNewChatDraft(true);
         didHydrateRef.current = true;
         setMounted(true);
         showError("Storage failed", labelForError(error));
@@ -1273,12 +1277,13 @@ export default function Home() {
 
   const updateActiveComposerDraft = useCallback(
     (draft: string) => {
-      if (!activeChatId) return;
+      const key = isNewChatDraft ? NEW_CHAT_DRAFT_KEY : activeChatId;
+      if (!key) return;
 
       const nextDrafts = { ...composerDraftsRef.current };
 
-      if (draft.length === 0) delete nextDrafts[activeChatId];
-      else nextDrafts[activeChatId] = draft;
+      if (draft.length === 0) delete nextDrafts[key];
+      else nextDrafts[key] = draft;
 
       composerDraftsRef.current = nextDrafts;
 
@@ -1291,7 +1296,7 @@ export default function Home() {
         saveComposerDrafts(composerDraftsRef.current);
       }, 250);
     },
-    [activeChatId],
+    [isNewChatDraft, activeChatId],
   );
 
   const {
@@ -1394,6 +1399,73 @@ export default function Home() {
     },
     showError,
   });
+
+  // Once the chat created on first send is committed to state (so `activeChat`
+  // reflects it), dispatch the queued message.
+  useEffect(() => {
+    const pending = pendingDraftSendRef.current;
+    if (!pending) return;
+    if (activeChat?.id !== pending.chatId) return;
+
+    pendingDraftSendRef.current = null;
+    void sendMessage(pending.content);
+  }, [activeChat, sendMessage]);
+
+  const handleComposerSend = useCallback(
+    async (content: string) => {
+      if (!isNewChatDraft) {
+        return sendMessage(content);
+      }
+
+      const trimmed = content.trim();
+      if (!trimmed) {
+        showError("Message is required.");
+        return false;
+      }
+
+      // Create and persist the real chat now, then queue the send for after
+      // the new chat becomes the active chat (see the effect above).
+      const chat: ChatSession = {
+        ...createEmptyChat(),
+        fileToolAutoApproval: buildFileToolAutoApprovalFromToolsSettings(
+          toolsSettings,
+        ),
+      };
+
+      saveCurrentChatScrollSnapshot();
+      setChats((currentChats) => [chat, ...currentChats]);
+      setActiveChatId(chat.id);
+      setIsNewChatDraft(false);
+      setEditingMessageId(null);
+      resetChatScrollState();
+
+      // Clear the draft stored under the new-chat key now that it's consumed.
+      const nextDrafts = { ...composerDraftsRef.current };
+      delete nextDrafts[NEW_CHAT_DRAFT_KEY];
+      composerDraftsRef.current = nextDrafts;
+      saveComposerDrafts(nextDrafts);
+
+      pendingDraftSendRef.current = { chatId: chat.id, content: trimmed };
+
+      try {
+        await saveChat(chat);
+        await saveActiveChatId(chat.id);
+      } catch (error) {
+        console.error("Failed to save new chat:", error);
+      }
+
+      return true;
+    },
+    [
+      isNewChatDraft,
+      sendMessage,
+      toolsSettings,
+      saveCurrentChatScrollSnapshot,
+      resetChatScrollState,
+      showError,
+    ],
+  );
+
   function updateProvidersState(
     updater: (state: ProvidersState) => ProvidersState,
   ) {
@@ -1543,6 +1615,7 @@ export default function Home() {
     messageElementRefs,
     setActiveChatId,
     setChats,
+    setIsNewChatDraft,
     setCopiedMessageId,
     setEditingMessageId,
     resetChatScrollState,
@@ -1954,17 +2027,17 @@ export default function Home() {
 
         <ChatComposer
           ref={chatComposerRef}
-          disabled={!activeChat}
+          disabled={!activeChat && !isNewChatDraft}
           isSending={isSending}
-          draftKey={activeChatId ?? ""}
+          draftKey={composerDraftKey}
           draft={activeComposerDraft}
           onDraftChange={updateActiveComposerDraft}
-          onSend={sendMessage}
+          onSend={handleComposerSend}
           onStop={stopGeneration}
           contextUsage={latestContextUsage}
           footerStart={
             <ComposerFooter
-              activeChatExists={Boolean(activeChat)}
+              activeChatExists={Boolean(activeChat) || isNewChatDraft}
               isSending={isSending}
               activeChatProvider={activeChatProvider}
               activeChatModel={activeChatModel}

@@ -83,7 +83,9 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
-  const [openChatOptionsChatId, setOpenChatOptionsChatId] = useState<string | null>(null);
+  const [openChatOptionsChatId, setOpenChatOptionsChatId] = useState<
+    string | null
+  >(null);
   const [visibleChatLimit, setVisibleChatLimit] =
     useState(CHAT_LIST_BATCH_SIZE);
   const normalizedChatSearchQuery = chatSearchQuery.trim().toLocaleLowerCase();
@@ -281,86 +283,87 @@ export const ChatSidebar = memo(function ChatSidebar({
                   <MoreHorizontal className="size-3.5" />
                 </Button>
               </DropdownMenuTrigger>
-            <DropdownMenuContent
-              side="right"
-              align="start"
-              sideOffset={0}
-              className="-translate-x-8 translate-y-8"
-              onCloseAutoFocus={(event) => event.preventDefault()}
-            >
-              <DropdownMenuItem
-                onClick={(event) => {
-                  event.stopPropagation();
-                  startRenamingChat(chat);
-                }}
+              <DropdownMenuContent
+                side="right"
+                align="start"
+                sideOffset={0}
+                className="-translate-x-8 translate-y-8"
+                onCloseAutoFocus={(event) => event.preventDefault()}
               >
-                <Edit3 className="size-4" />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={
-                  isChatGenerating ||
-                  isGeneratingTitle ||
-                  chat.messages.length === 0
-                }
-                onSelect={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  onGenerateChatTitle(chat.id);
-                }}
-              >
-                {isGeneratingTitle ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Sparkles className="size-4" />
-                )}
-                Generate title
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCreateChatWithSameSettings(chat.id);
-                }}
-              >
-                <Copy className="size-4" />
-                New with same settings
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onToggleChatPinned(chat.id);
-                }}
-              >
-                {chat.isPinned ? (
-                  <PinOff className="size-4" />
-                ) : (
-                  <Pin className="size-4" />
-                )}
-                {chat.isPinned ? "Unpin" : "Pin"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                disabled={
-                  chat.messages.length === 0 && !chat.activeSkillNames?.length
-                }
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onClearChat(chat.id);
-                }}
-              >
-                <Trash2 className="size-4" />
-                Clear chat
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onRemoveChat(chat.id);
-                }}
-              >
-                <Trash2 className="size-4" />
-                Delete
-              </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    startRenamingChat(chat);
+                  }}
+                >
+                  <Edit3 className="size-4" />
+                  Rename
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  disabled={
+                    isChatGenerating ||
+                    isGeneratingTitle ||
+                    chat.messages.length === 0
+                  }
+                  onSelect={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onGenerateChatTitle(chat.id);
+                  }}
+                >
+                  {isGeneratingTitle ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="size-4" />
+                  )}
+                  Generate title
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCreateChatWithSameSettings(chat.id);
+                  }}
+                >
+                  <Copy className="size-4" />
+                  New with same settings
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleChatPinned(chat.id);
+                  }}
+                >
+                  {chat.isPinned ? (
+                    <PinOff className="size-4" />
+                  ) : (
+                    <Pin className="size-4" />
+                  )}
+                  {chat.isPinned ? "Unpin" : "Pin"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  disabled={
+                    chat.messages.length === 0 && !chat.activeSkillNames?.length
+                  }
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onClearChat(chat.id);
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                  Clear chat
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRemoveChat(chat.id);
+                  }}
+                >
+                  <Trash2 className="size-4" />
+                  Delete
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
