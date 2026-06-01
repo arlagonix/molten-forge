@@ -1,3 +1,14 @@
+import {
+  FILE_READ_TOOL_NAME,
+  FILE_FIND_TOOL_NAME,
+  FILE_SEARCH_TEXT_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL_NAME,
+  FILE_CREATE_TOOL_NAME,
+  FILE_DELETE_TOOL_NAME,
+  FILE_TOOL_NAMES,
+  isFileToolName,
+  requiresFileToolApproval,
+} from "@/lib/ai-chat/file-tool-names";
 import type {
   AskUserQuestion,
   AskUserQuestionType,
@@ -68,22 +79,20 @@ export const TASK_TOOL_NAMES = [
 ] as const;
 export const LOAD_SKILL_TOOL_NAME = "load_skill";
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
-export const FILE_READ_TOOL_NAME = "file_read";
-export const FILE_FIND_TOOL_NAME = "file_find";
-export const FILE_SEARCH_TEXT_TOOL_NAME = "file_search_text";
-export const FILE_REPLACE_TEXT_TOOL_NAME = "file_replace_text";
-export const FILE_CREATE_TOOL_NAME = "file_create";
-export const FILE_DELETE_TOOL_NAME = "file_delete";
-export const FILE_TOOL_NAMES = [
+export const CALL_AGENT_TOOL_NAME = "call_agent";
+export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
+
+export {
   FILE_READ_TOOL_NAME,
   FILE_FIND_TOOL_NAME,
   FILE_SEARCH_TEXT_TOOL_NAME,
   FILE_REPLACE_TEXT_TOOL_NAME,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL_NAME,
-] as const;
-export const CALL_AGENT_TOOL_NAME = "call_agent";
-export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
+  FILE_TOOL_NAMES,
+  isFileToolName,
+  requiresFileToolApproval,
+};
 
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TOOL_MENTION_PATTERN = /(^|\s)@tool:([A-Za-z0-9_-]+)(?=$|\s)/g;
@@ -439,7 +448,7 @@ export const FILE_REPLACE_TEXT_TOOL: LoadedToolInfo = {
   name: FILE_REPLACE_TEXT_TOOL_NAME,
   enabled: true,
   description:
-    "Replace exact text in a UTF-8 text file inside the chat workspace. Requires user confirmation before writing. Use only after reading the target file or matching context.",
+    "Replace exact text in a UTF-8 text file inside the chat workspace. Requires user confirmation before writing. Use only after reading the target file or matching context. By default oldText must match exactly once; include enough surrounding context to make it unique. To replace several occurrences, set expectedReplacements to the exact match count.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -465,7 +474,7 @@ export const FILE_REPLACE_TEXT_TOOL: LoadedToolInfo = {
       expectedReplacements: {
         type: "number",
         description:
-          "Optional exact number of replacements expected. The tool fails if the count differs.",
+          "Exact number of replacements expected. Required when oldText appears more than once; the tool fails if the actual count differs. When omitted, oldText must match exactly once.",
       },
     },
     required: ["path", "oldText", "newText"],
@@ -649,18 +658,6 @@ export function isBuiltInToolName(toolName: string) {
     toolName === FILE_CREATE_TOOL_NAME ||
     toolName === FILE_DELETE_TOOL_NAME ||
     toolName === CALL_AGENT_TOOL_NAME
-  );
-}
-
-export function isFileToolName(toolName: string) {
-  return FILE_TOOL_NAMES.includes(toolName as (typeof FILE_TOOL_NAMES)[number]);
-}
-
-export function requiresFileToolApproval(toolName: string) {
-  return (
-    toolName === FILE_REPLACE_TEXT_TOOL_NAME ||
-    toolName === FILE_CREATE_TOOL_NAME ||
-    toolName === FILE_DELETE_TOOL_NAME
   );
 }
 

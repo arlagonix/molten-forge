@@ -577,13 +577,22 @@ function getMessageActivityDate(message: ChatMessage) {
 }
 
 export function getChatActivityDate(chat: ChatSession) {
+  let latestMessageActivity: string | undefined;
   for (let index = chat.messages.length - 1; index >= 0; index -= 1) {
     const value = getMessageActivityDate(chat.messages[index]);
-    if (getValidDateTime(value) !== undefined) return value;
+    if (getValidDateTime(value) !== undefined) {
+      latestMessageActivity = value;
+      break;
+    }
   }
 
-  if (getValidDateTime(chat.createdAt) !== undefined) return chat.createdAt;
-  return chat.updatedAt;
+  return (
+    getLatestDateValue([
+      latestMessageActivity,
+      chat.updatedAt,
+      chat.createdAt,
+    ]) ?? chat.updatedAt
+  );
 }
 
 export function sortChatsByUpdatedAt(chats: ChatSession[]) {

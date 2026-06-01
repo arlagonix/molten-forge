@@ -272,6 +272,11 @@ export default function Home() {
   const messageElementRefCallbacks = useRef(
     new Map<string, (element: HTMLDivElement | null) => void>(),
   );
+  // Published by the virtualized ChatMessageList; lets useChatAutoscroll resolve
+  // a saved scroll anchor to a scrollTop even when the message is windowed out.
+  const messageOffsetResolverRef = useRef<
+    ((messageId: string) => number | null) | null
+  >(null);
   const chatComposerRef = useRef<ChatComposerHandle | null>(null);
   const findInputRef = useRef<HTMLInputElement | null>(null);
   const didHydrateRef = useRef(false);
@@ -826,6 +831,7 @@ export default function Home() {
     messages,
     closeMessageContextMenu,
     setVisualStreamingMessageIds,
+    messageOffsetResolverRef,
   });
 
   useEffect(() => {
@@ -1864,6 +1870,8 @@ export default function Home() {
                 <ChatMessageList
                   messages={messages}
                   activeChatId={activeChat?.id ?? ""}
+                  scrollElementRef={chatScrollRef}
+                  offsetResolverRef={messageOffsetResolverRef}
                   isSending={isSending}
                   editingMessageId={editingMessageId}
                   copiedMessageId={copiedMessageId}

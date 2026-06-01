@@ -36,7 +36,6 @@ type MarkdownMessageProps = {
   content: string;
   className?: string;
   messageId?: string;
-  chatId?: string;
   skipSyntaxHighlight?: boolean;
 };
 
@@ -720,8 +719,7 @@ const VIRTUAL_MARKDOWN_BUILD_BUDGET_MS = 6;
 const VIRTUAL_MARKDOWN_OVERSCAN_PX = 900;
 const VIRTUAL_MARKDOWN_BLOCK_CACHE_PREFIX =
   "chat-forge-virtual-markdown-blocks-v1";
-const VIRTUAL_MARKDOWN_ANCHOR_PREFIX =
-  "chat-forge-virtual-markdown-anchor-v1";
+const VIRTUAL_MARKDOWN_BLOCK_CACHE_MAX_ENTRIES = 48;
 
 const VIRTUAL_MARKDOWN_FENCE_PATTERN = /^ {0,3}(```+|~~~+)\s*([^`~\s]*)?/;
 
@@ -740,14 +738,7 @@ type VirtualMarkdownBlock = {
 type PersistedVirtualMarkdownBlocks = {
   contentKey: string;
   blocks: VirtualMarkdownBlock[];
-};
-
-type VirtualMarkdownAnchor = {
-  messageId: string;
-  contentKey: string;
-  blockId: string;
-  offsetPx: number;
-  updatedAt: number;
+  updatedAt?: number;
 };
 
 function safeStorageKey(prefix: string, id: string) {
@@ -818,57 +809,60 @@ function readPersistedVirtualMarkdownBlocks(messageId: string) {
   }
 }
 
+function pruneVirtualMarkdownBlockCache(keepKey: string) {
+  const prefix = `${VIRTUAL_MARKDOWN_BLOCK_CACHE_PREFIX}:`;
+  const entries: { key: string; updatedAt: number }[] = [];
+
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (!key || !key.startsWith(prefix)) continue;
+
+    let updatedAt = 0;
+    try {
+      const parsed: unknown = JSON.parse(
+        window.localStorage.getItem(key) ?? "null",
+      );
+      if (parsed && typeof parsed === "object") {
+        const candidate = (parsed as Partial<PersistedVirtualMarkdownBlocks>)
+          .updatedAt;
+        if (typeof candidate === "number") updatedAt = candidate;
+      }
+    } catch {
+      // Treat unparseable entries as oldest so they get evicted first.
+    }
+
+    entries.push({ key, updatedAt });
+  }
+
+  if (entries.length <= VIRTUAL_MARKDOWN_BLOCK_CACHE_MAX_ENTRIES) return;
+
+  entries
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(VIRTUAL_MARKDOWN_BLOCK_CACHE_MAX_ENTRIES)
+    .forEach((entry) => {
+      if (entry.key === keepKey) return;
+      window.localStorage.removeItem(entry.key);
+    });
+}
+
 function persistVirtualMarkdownBlocks(
   messageId: string,
   contentKey: string,
   blocks: VirtualMarkdownBlock[],
 ) {
+  const storageKey = safeStorageKey(
+    VIRTUAL_MARKDOWN_BLOCK_CACHE_PREFIX,
+    messageId,
+  );
+
   try {
     window.localStorage.setItem(
-      safeStorageKey(VIRTUAL_MARKDOWN_BLOCK_CACHE_PREFIX, messageId),
-      JSON.stringify({ contentKey, blocks }),
+      storageKey,
+      JSON.stringify({ contentKey, blocks, updatedAt: Date.now() }),
     );
+    pruneVirtualMarkdownBlockCache(storageKey);
   } catch (error) {
     console.warn("Failed to save virtual Markdown block cache:", error);
-  }
-}
-
-function readVirtualMarkdownAnchor(chatId: string) {
-  try {
-    const stored = window.localStorage.getItem(
-      safeStorageKey(VIRTUAL_MARKDOWN_ANCHOR_PREFIX, chatId),
-    );
-    if (!stored) return null;
-
-    const parsed: unknown = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object") return null;
-
-    const anchor = parsed as Partial<VirtualMarkdownAnchor>;
-    if (
-      typeof anchor.messageId !== "string" ||
-      typeof anchor.contentKey !== "string" ||
-      typeof anchor.blockId !== "string" ||
-      typeof anchor.offsetPx !== "number" ||
-      typeof anchor.updatedAt !== "number"
-    ) {
-      return null;
-    }
-
-    return anchor as VirtualMarkdownAnchor;
-  } catch (error) {
-    console.warn("Failed to read virtual Markdown anchor:", error);
-    return null;
-  }
-}
-
-function persistVirtualMarkdownAnchor(chatId: string, anchor: VirtualMarkdownAnchor) {
-  try {
-    window.localStorage.setItem(
-      safeStorageKey(VIRTUAL_MARKDOWN_ANCHOR_PREFIX, chatId),
-      JSON.stringify(anchor),
-    );
-  } catch (error) {
-    console.warn("Failed to save virtual Markdown anchor:", error);
   }
 }
 
@@ -904,15 +898,6 @@ function getScrollTop(scrollParent: HTMLElement | Window) {
   return scrollParent instanceof Window
     ? window.scrollY
     : scrollParent.scrollTop;
-}
-
-function setScrollTop(scrollParent: HTMLElement | Window, value: number) {
-  if (scrollParent instanceof Window) {
-    window.scrollTo({ top: value });
-    return;
-  }
-
-  scrollParent.scrollTop = value;
 }
 
 function getScrollClientHeight(scrollParent: HTMLElement | Window) {
@@ -1188,20 +1173,16 @@ function VirtualizedMarkdownMessage({
   content,
   className,
   messageId,
-  chatId,
   skipSyntaxHighlight,
   onCopy,
 }: {
   content: string;
   className?: string;
   messageId: string;
-  chatId?: string;
   skipSyntaxHighlight: boolean;
   onCopy: (event: React.ClipboardEvent<HTMLDivElement>) => void;
 }) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
-  const restoreAttemptedRef = React.useRef(false);
-  const saveAnchorTimeoutRef = React.useRef<number | null>(null);
   const contentKey = React.useMemo(() => getCheapContentKey(content), [content]);
   const cachedBlocks = React.useMemo(() => {
     const cached = readPersistedVirtualMarkdownBlocks(messageId);
@@ -1217,7 +1198,6 @@ function VirtualizedMarkdownMessage({
   >({});
 
   React.useEffect(() => {
-    restoreAttemptedRef.current = false;
     setMeasuredHeights({});
 
     if (cachedBlocks) {
@@ -1337,78 +1317,6 @@ function VirtualizedMarkdownMessage({
     };
   }, [updateViewport]);
 
-  React.useEffect(() => {
-    if (!chatId || restoreAttemptedRef.current || blocks.length === 0) return;
-
-    const anchor = readVirtualMarkdownAnchor(chatId);
-    if (
-      !anchor ||
-      anchor.messageId !== messageId ||
-      anchor.contentKey !== contentKey
-    ) {
-      restoreAttemptedRef.current = true;
-      return;
-    }
-
-    const blockIndex = blocks.findIndex((block) => block.id === anchor.blockId);
-    if (blockIndex < 0) return;
-
-    restoreAttemptedRef.current = true;
-
-    window.requestAnimationFrame(() => {
-      const root = rootRef.current;
-      if (!root) return;
-
-      const scrollParent = findScrollParent(root);
-      const rootOffset = getElementOffsetInsideScrollParent(root, scrollParent);
-      setScrollTop(scrollParent, rootOffset + offsets[blockIndex] + anchor.offsetPx);
-      updateViewport();
-    });
-  }, [blocks, chatId, contentKey, messageId, offsets, updateViewport]);
-
-  React.useEffect(() => {
-    if (!chatId || blocks.length === 0) return;
-
-    const root = rootRef.current;
-    if (!root) return;
-
-    const scrollParent = findScrollParent(root);
-    const rootOffset = getElementOffsetInsideScrollParent(root, scrollParent);
-    const scrollTop = getScrollTop(scrollParent);
-    const clientHeight = getScrollClientHeight(scrollParent);
-
-    if (scrollTop + clientHeight < rootOffset || scrollTop > rootOffset + totalHeight) {
-      return;
-    }
-
-    const localTop = Math.max(0, scrollTop - rootOffset);
-    const blockIndex = findBlockIndexForOffset(offsets, localTop);
-    const block = blocks[blockIndex];
-    if (!block) return;
-
-    if (saveAnchorTimeoutRef.current !== null) {
-      window.clearTimeout(saveAnchorTimeoutRef.current);
-    }
-
-    saveAnchorTimeoutRef.current = window.setTimeout(() => {
-      saveAnchorTimeoutRef.current = null;
-      persistVirtualMarkdownAnchor(chatId, {
-        messageId,
-        contentKey,
-        blockId: block.id,
-        offsetPx: Math.max(0, localTop - offsets[blockIndex]),
-        updatedAt: Date.now(),
-      });
-    }, 200);
-
-    return () => {
-      if (saveAnchorTimeoutRef.current !== null) {
-        window.clearTimeout(saveAnchorTimeoutRef.current);
-        saveAnchorTimeoutRef.current = null;
-      }
-    };
-  }, [blocks, chatId, contentKey, messageId, offsets, totalHeight, viewport.top]);
-
   const startIndex = Math.max(0, findBlockIndexForOffset(offsets, viewport.top));
   const endIndex = Math.min(
     blocks.length - 1,
@@ -1481,7 +1389,6 @@ export const MarkdownMessage = React.memo(function MarkdownMessage({
   content,
   className,
   messageId,
-  chatId,
   skipSyntaxHighlight = false,
 }: MarkdownMessageProps) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
@@ -1535,7 +1442,6 @@ export const MarkdownMessage = React.memo(function MarkdownMessage({
         content={content}
         className={className}
         messageId={messageId}
-        chatId={chatId}
         skipSyntaxHighlight={skipSyntaxHighlight}
         onCopy={handleCopy}
       />

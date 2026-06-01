@@ -11,8 +11,20 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
-import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
-import { memo } from "react";
+import type {
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+  RefObject,
+} from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import { AgentCallBlock } from "@/components/ai-chat/agent-call-block";
 import { type ToolMentionOption } from "@/components/ai-chat/chat-composer";
@@ -124,6 +136,15 @@ type RenderToolExecutionBlockArgs = {
 type ChatMessageListProps = {
   messages: ChatMessage[];
   activeChatId: string;
+  // The scroll container that owns the message viewport. Shared with
+  // useChatAutoscroll so virtualization, sticky-scroll, and position
+  // restoration all operate on the same element.
+  scrollElementRef: RefObject<HTMLDivElement | null>;
+  // Populated by the list with a function that maps a message id to the
+  // scrollTop at which that message's top aligns with the viewport top, using
+  // the virtualizer's measurements. Lets the autoscroll hook restore a saved
+  // position even when the anchored message is not currently mounted.
+  offsetResolverRef?: RefObject<((messageId: string) => number | null) | null>;
   isSending: boolean;
   editingMessageId: string | null;
   copiedMessageId: string | null;
@@ -423,7 +444,10 @@ function areContextMenusEqualForMessage(
   );
 }
 
-type ChatMessageItemProps = Omit<ChatMessageListProps, "messages"> & {
+type ChatMessageItemProps = Omit<
+  ChatMessageListProps,
+  "messages" | "scrollElementRef" | "offsetResolverRef"
+> & {
   message: ChatMessage;
 };
 
@@ -566,7 +590,6 @@ const ChatMessageItem = memo(
                 <SmoothAssistantMessageContent
                   content={step.content}
                   messageId={`${message.id}:${step.id}`}
-                  chatId={activeChatId}
                   isApiStreaming={isAssistantBlockStreaming}
                   skipSyntaxHighlight={isAssistantBlockStreaming}
                   flushVersion={stepFlushVersion}
@@ -861,7 +884,6 @@ const ChatMessageItem = memo(
                     <SmoothAssistantMessageContent
                       content={content}
                       messageId={`${message.id}:content`}
-                      chatId={activeChatId}
                       isApiStreaming={status === "streaming"}
                       skipSyntaxHighlight={status === "streaming"}
                       flushVersion={visualFlushRequests[message.id] ?? 0}
@@ -1307,15 +1329,133 @@ const ChatMessageItem = memo(
   },
 );
 
+// Matches the previous flex `gap-5` between messages, now applied by the
+// virtualizer since the items are absolutely positioned.
+const MESSAGE_GAP_PX = 20;
+const VIRTUAL_MESSAGE_OVERSCAN = 6;
+
+function estimateMessageHeight(message: ChatMessage) {
+  const text =
+    message.role === "user"
+      ? message.content
+      : (getActiveVariant(message)?.content ?? "");
+  const lines = Math.max(1, Math.ceil(text.length / 80));
+  // A rough starting estimate only — the virtualizer measures the real height
+  // once each item mounts and corrects the layout.
+  return Math.min(4000, 120 + lines * 22);
+}
+
 export const ChatMessageList = memo(function ChatMessageList({
   messages,
+  scrollElementRef,
+  offsetResolverRef,
   ...itemProps
 }: ChatMessageListProps) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  // The scroll container is an ancestor; React attaches its ref only after this
+  // component's layout effects run, so on the first mount the virtualizer
+  // initializes against a null element and renders nothing. Once the element is
+  // available we force a single re-render — the virtualizer rebinds to the
+  // scroll element on every render — so the initial chat is no longer blank.
+  const [, setScrollElementReady] = useState(false);
+
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollElementRef.current,
+    estimateSize: (index) => estimateMessageHeight(messages[index]),
+    overscan: VIRTUAL_MESSAGE_OVERSCAN,
+    gap: MESSAGE_GAP_PX,
+    scrollMargin,
+    getItemKey: (index) => messages[index].id,
+  });
+
+  useEffect(() => {
+    if (scrollElementRef.current) {
+      setScrollElementReady(true);
+    }
+  }, [scrollElementRef]);
+
+  // The list does not begin at the very top of the scroll element (the content
+  // wrapper carries vertical padding), so the virtualizer needs that offset to
+  // translate scroll positions into item coordinates. It only changes when the
+  // layout resizes, so recompute on mount and on resize rather than per render.
+  useLayoutEffect(() => {
+    const scrollElement = scrollElementRef.current;
+    if (!scrollElement) return;
+
+    const measureScrollMargin = () => {
+      const list = listRef.current;
+      if (!list || !scrollElement) return;
+
+      const nextMargin =
+        list.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top +
+        scrollElement.scrollTop;
+
+      setScrollMargin((previous) =>
+        Math.abs(previous - nextMargin) < 1 ? previous : nextMargin,
+      );
+    };
+
+    measureScrollMargin();
+
+    const resizeObserver = new ResizeObserver(measureScrollMargin);
+    resizeObserver.observe(scrollElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [scrollElementRef]);
+
+  // Publish a measurement-based offset resolver so position restoration works
+  // even when the anchored message is currently virtualized out of the DOM.
+  const resolveMessageOffset = useCallback(
+    (messageId: string) => {
+      const index = messages.findIndex((message) => message.id === messageId);
+      if (index < 0) return null;
+
+      const offset = virtualizer.getOffsetForIndex(index, "start");
+      return offset ? offset[0] : null;
+    },
+    [messages, virtualizer],
+  );
+
+  useLayoutEffect(() => {
+    if (!offsetResolverRef) return;
+
+    offsetResolverRef.current = resolveMessageOffset;
+    return () => {
+      offsetResolverRef.current = null;
+    };
+  }, [offsetResolverRef, resolveMessageOffset]);
+
+  const virtualItems = virtualizer.getVirtualItems();
+
   return (
-    <>
-      {messages.map((message) => (
-        <ChatMessageItem key={message.id} message={message} {...itemProps} />
+    <div
+      ref={listRef}
+      className="relative w-full min-w-0"
+      style={{ height: virtualizer.getTotalSize() }}
+    >
+      {virtualItems.map((virtualItem) => (
+        <div
+          key={virtualItem.key}
+          data-index={virtualItem.index}
+          ref={virtualizer.measureElement}
+          // Position with `top` rather than `transform`: a transform would
+          // establish a containing block, which breaks `position: sticky`
+          // descendants (code-block headers) and re-anchors `position: fixed`
+          // popups (message context menu) to the item instead of the viewport.
+          className="absolute left-0 w-full min-w-0"
+          style={{ top: virtualItem.start - scrollMargin }}
+        >
+          <ChatMessageItem
+            message={messages[virtualItem.index]}
+            {...itemProps}
+          />
+        </div>
       ))}
-    </>
+    </div>
   );
 });

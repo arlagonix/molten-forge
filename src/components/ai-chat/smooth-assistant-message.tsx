@@ -19,13 +19,11 @@ const AssistantMessageContent = memo(function AssistantMessageContent({
   content,
   className,
   messageId,
-  chatId,
   skipSyntaxHighlight = false,
 }: {
   content: string;
   className?: string;
   messageId?: string;
-  chatId?: string;
   skipSyntaxHighlight?: boolean;
 }) {
   return (
@@ -33,7 +31,6 @@ const AssistantMessageContent = memo(function AssistantMessageContent({
       content={content}
       className={className}
       messageId={messageId}
-      chatId={chatId}
       skipSyntaxHighlight={skipSyntaxHighlight}
     />
   );
@@ -43,7 +40,6 @@ type SmoothAssistantMessageContentProps = {
   content: string;
   className?: string;
   messageId?: string;
-  chatId?: string;
   isApiStreaming: boolean;
   flushVersion: number;
   forceInstant?: boolean;
@@ -57,7 +53,6 @@ export const SmoothAssistantMessageContent = memo(
     content,
     className,
     messageId,
-    chatId,
     flushVersion,
     onVisualProgress,
     onVisualStreamingChange,
@@ -82,7 +77,6 @@ export const SmoothAssistantMessageContent = memo(
         content={content}
         className={className}
         messageId={messageId}
-        chatId={chatId}
         skipSyntaxHighlight={shouldSkipSyntaxHighlight}
       />
     );
@@ -91,7 +85,6 @@ export const SmoothAssistantMessageContent = memo(
     previous.content === next.content &&
     previous.className === next.className &&
     previous.messageId === next.messageId &&
-    previous.chatId === next.chatId &&
     previous.isApiStreaming === next.isApiStreaming &&
     previous.flushVersion === next.flushVersion &&
     previous.forceInstant === next.forceInstant &&

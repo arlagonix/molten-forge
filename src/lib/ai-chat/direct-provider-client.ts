@@ -275,13 +275,17 @@ function modelSupportsQwenSoftSwitch(model: string) {
 }
 
 function shouldSendReasoningControls(
-  _provider: ProviderConfig,
+  provider: ProviderConfig,
   settings: ProviderGenerationSettings,
 ) {
-  return (
-    settings.reasoningMode === "off" ||
-    settings.reasoningMode === "enabled"
-  );
+  if (
+    settings.reasoningMode !== "off" &&
+    settings.reasoningMode !== "enabled"
+  ) {
+    return false;
+  }
+
+  return modelLooksReasoningCapable(provider.model);
 }
 
 function buildReasoningPayload(

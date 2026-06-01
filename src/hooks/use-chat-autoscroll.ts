@@ -1,6 +1,7 @@
 import type {
   Dispatch,
   PointerEvent as ReactPointerEvent,
+  RefObject,
   SetStateAction,
   WheelEvent as ReactWheelEvent,
 } from "react";
@@ -23,6 +24,16 @@ const MAX_STORED_CHAT_SCROLL_SNAPSHOTS = 250;
 
 type ChatScrollSnapshot = {
   scrollTop: number;
+  // Anchor the saved position to a specific message rather than relying on the
+  // absolute scrollTop alone. The raw offset is fragile: when earlier messages
+  // render to a different height after a chat switch (async Markdown, syntax
+  // highlighting, images, virtualized blocks), the absolute offset points at
+  // the wrong place. The anchor lets restoration recompute the target from the
+  // live position of the message, which is robust to those height changes.
+  // scrollTop is retained as a fallback for snapshots without a resolvable
+  // anchor (e.g. legacy data, or messages no longer present).
+  anchorMessageId?: string;
+  anchorOffset?: number;
   isNearBottom: boolean;
   updatedAt: number;
 };
@@ -33,10 +44,17 @@ function isValidChatScrollSnapshot(
   if (!value || typeof value !== "object") return false;
 
   const snapshot = value as Partial<ChatScrollSnapshot>;
+  const hasValidAnchor =
+    (snapshot.anchorMessageId === undefined ||
+      typeof snapshot.anchorMessageId === "string") &&
+    (snapshot.anchorOffset === undefined ||
+      typeof snapshot.anchorOffset === "number");
+
   return (
     typeof snapshot.scrollTop === "number" &&
     typeof snapshot.isNearBottom === "boolean" &&
-    typeof snapshot.updatedAt === "number"
+    typeof snapshot.updatedAt === "number" &&
+    hasValidAnchor
   );
 }
 
@@ -72,18 +90,37 @@ function pruneChatScrollSnapshots(
   return Object.fromEntries(entries.slice(0, MAX_STORED_CHAT_SCROLL_SNAPSHOTS));
 }
 
+/**
+ * Owns chat scroll behaviour. Three intertwined concerns share state via refs:
+ *  1. Observation — track whether the viewport is near the bottom and whether
+ *     the chat is scrollable (drives the scroll-to-bottom button).
+ *  2. Persistence — snapshot each chat's position (anchored to a message) to
+ *     localStorage and restore it on switch.
+ *  3. Sticky-to-bottom — while the active chat is generating, keep the viewport
+ *     pinned to the latest content unless the user manually scrolls away.
+ * The effects below are grouped by concern; they communicate through the refs
+ * declared at the top rather than through React state to avoid re-render churn
+ * on every scroll frame.
+ */
 export function useChatAutoscroll({
   activeChatId,
   generatingChatIds,
   messages,
   closeMessageContextMenu,
   setVisualStreamingMessageIds,
+  messageOffsetResolverRef,
 }: {
   activeChatId?: string;
   generatingChatIds: string[];
   messages: unknown[];
   closeMessageContextMenu: () => void;
   setVisualStreamingMessageIds: Dispatch<SetStateAction<string[]>>;
+  // Optional resolver published by the virtualized message list: maps a
+  // message id to the scrollTop that aligns it with the viewport top, even for
+  // messages not currently in the DOM. Falls back to a live DOM query.
+  messageOffsetResolverRef?: RefObject<
+    ((messageId: string) => number | null) | null
+  >;
 }) {
   const [isNearChatBottom, setIsNearChatBottom] = useState(true);
   const isNearChatBottomRef = useRef(true);
@@ -129,6 +166,80 @@ export function useChatAutoscroll({
         scrollElement.scrollTop -
         scrollElement.clientHeight,
     );
+  }
+
+  // Returns the offset of an element's top relative to the scroll content
+  // (i.e. the scrollTop at which the element's top aligns with the viewport
+  // top), computed from live layout so it stays correct as content reflows.
+  function getMessageTopWithinScroll(messageElement: HTMLElement) {
+    const scrollElement = chatScrollRef.current;
+    if (!scrollElement) return 0;
+
+    const scrollRect = scrollElement.getBoundingClientRect();
+    const messageRect = messageElement.getBoundingClientRect();
+    return messageRect.top - scrollRect.top + scrollElement.scrollTop;
+  }
+
+  // Identify the topmost message currently at (or above) the viewport top, plus
+  // how far the viewport has scrolled into it. This is what gets persisted so
+  // restoration can re-derive the scroll position from the message's live
+  // location rather than a stale absolute offset.
+  function getCurrentChatScrollAnchor() {
+    const scrollElement = chatScrollRef.current;
+    if (!scrollElement) return null;
+
+    const messageElements = scrollElement.querySelectorAll<HTMLElement>(
+      "[data-message-id]",
+    );
+    if (messageElements.length === 0) return null;
+
+    const scrollTop = scrollElement.scrollTop;
+    let anchorElement: HTMLElement | null = null;
+
+    for (const element of messageElements) {
+      if (getMessageTopWithinScroll(element) <= scrollTop + 1) {
+        anchorElement = element;
+      } else {
+        break;
+      }
+    }
+
+    anchorElement = anchorElement ?? messageElements[0];
+    const messageId = anchorElement.getAttribute("data-message-id");
+    if (!messageId) return null;
+
+    return {
+      messageId,
+      offset: scrollTop - getMessageTopWithinScroll(anchorElement),
+    };
+  }
+
+  // Resolve a saved anchor back into an absolute scrollTop using the message's
+  // current position, or null when the anchored message is not in the DOM.
+  function getScrollTopForAnchor(
+    anchorMessageId?: string,
+    anchorOffset = 0,
+  ) {
+    if (!anchorMessageId) return null;
+
+    // Prefer the virtualizer's measurement resolver: it can locate the anchored
+    // message even when it has been windowed out of the DOM (essential for long
+    // chats). Fall back to a live DOM query when no resolver is present or the
+    // message has not been measured yet.
+    const resolvedTop = messageOffsetResolverRef?.current?.(anchorMessageId);
+    if (resolvedTop != null) {
+      return Math.max(0, resolvedTop + anchorOffset);
+    }
+
+    const scrollElement = chatScrollRef.current;
+    if (!scrollElement) return null;
+
+    const messageElement = scrollElement.querySelector<HTMLElement>(
+      `[data-message-id="${CSS.escape(anchorMessageId)}"]`,
+    );
+    if (!messageElement) return null;
+
+    return Math.max(0, getMessageTopWithinScroll(messageElement) + anchorOffset);
   }
 
   function canChatScroll() {
@@ -307,13 +418,18 @@ export function useChatAutoscroll({
     const scrollElement = chatScrollRef.current;
     if (!scrollElement) return;
 
-    chatScrollSnapshotsRef.current = {
-      ...chatScrollSnapshotsRef.current,
-      [chatId]: {
-        scrollTop: scrollElement.scrollTop,
-        isNearBottom: isNearChatBottomRef.current,
-        updatedAt: Date.now(),
-      },
+    const anchor = getCurrentChatScrollAnchor();
+
+    // Mutate the ref in place: this runs on every scroll frame, and the
+    // snapshot map is only read lazily (getChatScrollSnapshot) or cloned when
+    // persisted, so there is no need to allocate a fresh copy of up to
+    // MAX_STORED_CHAT_SCROLL_SNAPSHOTS entries here.
+    chatScrollSnapshotsRef.current[chatId] = {
+      scrollTop: scrollElement.scrollTop,
+      anchorMessageId: anchor?.messageId,
+      anchorOffset: anchor?.offset,
+      isNearBottom: isNearChatBottomRef.current,
+      updatedAt: Date.now(),
     };
     schedulePersistChatScrollSnapshots();
   }
@@ -328,9 +444,7 @@ export function useChatAutoscroll({
   function forgetChatScrollSnapshot(chatId: string) {
     if (!(chatId in chatScrollSnapshotsRef.current)) return;
 
-    const remainingSnapshots = { ...chatScrollSnapshotsRef.current };
-    delete remainingSnapshots[chatId];
-    chatScrollSnapshotsRef.current = remainingSnapshots;
+    delete chatScrollSnapshotsRef.current[chatId];
     schedulePersistChatScrollSnapshots();
   }
 
@@ -359,10 +473,14 @@ export function useChatAutoscroll({
   function restoreScrollTopForChat({
     chatId,
     scrollTop,
+    anchorMessageId,
+    anchorOffset,
     settleFrames = 2,
   }: {
     chatId: string;
     scrollTop: number;
+    anchorMessageId?: string;
+    anchorOffset?: number;
     settleFrames?: number;
   }) {
     cancelRestoreScrollPosition();
@@ -376,8 +494,14 @@ export function useChatAutoscroll({
       const scrollElement = chatScrollRef.current;
       if (!scrollElement) return;
 
+      // Recompute the anchored target every frame so it tracks the message's
+      // live position as content settles; fall back to the saved offset when
+      // the anchored message cannot be resolved.
+      const desiredScrollTop =
+        getScrollTopForAnchor(anchorMessageId, anchorOffset) ?? scrollTop;
+
       const nextScrollTop = Math.min(
-        Math.max(0, scrollTop),
+        Math.max(0, desiredScrollTop),
         Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight),
       );
 
@@ -424,6 +548,8 @@ export function useChatAutoscroll({
     restoreScrollTopForChat({
       chatId,
       scrollTop: snapshot.scrollTop,
+      anchorMessageId: snapshot.anchorMessageId,
+      anchorOffset: snapshot.anchorOffset,
       settleFrames: 6,
     });
   }
@@ -548,16 +674,12 @@ export function useChatAutoscroll({
     syncChatScrollState();
   }, [activeChatId, generatingChatIds]);
 
+  // --- Concern: restore persisted position when switching chats ---
   useLayoutEffect(() => {
     restoreActiveChatScrollSnapshot();
   }, [activeChatId]);
 
-  useEffect(() => {
-    if (!isActiveChatGenerating()) {
-      setChatAutoScrollEnabled(false);
-    }
-  }, [activeChatId, generatingChatIds]);
-
+  // --- Concern: react to message/content changes (sticky-to-bottom) ---
   useLayoutEffect(() => {
     syncChatScrollableState();
 
@@ -575,6 +697,7 @@ export function useChatAutoscroll({
     syncChatScrollState();
   }, [messages]);
 
+  // --- Concern: keep sticky/near-bottom state correct as layout resizes ---
   useLayoutEffect(() => {
     const scrollElement = chatScrollRef.current;
     const contentElement = chatContentRef.current;
@@ -604,13 +727,10 @@ export function useChatAutoscroll({
     };
   }, [activeChatId, messages.length]);
 
-  useEffect(() => {
-    if (!activeChatId) return;
-    if (!shouldStickToChatBottom()) return;
-
-    scheduleStickyScrollToBottom();
-  }, [activeChatId, generatingChatIds, messages]);
-
+  // --- Concern: reconcile sticky/auto-scroll on chat or generation changes ---
+  // Sticking to the bottom requires the active chat to be generating, so the
+  // default settle-frame count already resolves to STICKY_SCROLL_SETTLE_FRAMES
+  // here; the message dependency keeps us pinned as new content streams in.
   useEffect(() => {
     if (!activeChatId) return;
 
@@ -625,8 +745,9 @@ export function useChatAutoscroll({
       setChatAutoScrollEnabled(false);
     }
     syncChatScrollState();
-  }, [activeChatId, generatingChatIds]);
+  }, [activeChatId, generatingChatIds, messages]);
 
+  // --- Concern: manual scroll intent (keyboard) suppresses sticky scroll ---
   useEffect(() => {
     function handleDocumentKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented) return;
@@ -660,17 +781,27 @@ export function useChatAutoscroll({
     };
   }, []);
 
+  // --- Concern: flush the current position to storage on teardown/unload ---
   useEffect(() => {
-    function handleBeforeUnload() {
+    function flushScrollSnapshots() {
       saveCurrentChatScrollSnapshot();
       persistChatScrollSnapshots();
     }
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    // `visibilitychange` -> hidden is the reliable signal (beforeunload is not
+    // guaranteed to fire under bfcache/process suspension); keep beforeunload
+    // too as a belt-and-braces flush for environments that honour it.
+    function handleVisibilityChange() {
+      if (document.visibilityState === "hidden") flushScrollSnapshots();
+    }
+
+    window.addEventListener("beforeunload", flushScrollSnapshots);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      handleBeforeUnload();
+      window.removeEventListener("beforeunload", flushScrollSnapshots);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      flushScrollSnapshots();
     };
   }, []);
 
