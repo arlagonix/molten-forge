@@ -1,9 +1,9 @@
 import type {
   Dispatch,
   PointerEvent as ReactPointerEvent,
+  WheelEvent as ReactWheelEvent,
   RefObject,
   SetStateAction,
-  WheelEvent as ReactWheelEvent,
 } from "react";
 import {
   useCallback,
@@ -14,6 +14,26 @@ import {
 } from "react";
 
 const CHAT_BOTTOM_THRESHOLD_PX = 32;
+// Eased streaming sticky-scroll (gentle glide toward the live bottom).
+// Each frame closes EASE_FACTOR of the remaining gap (exponential ease-out),
+// but the per-frame movement is clamped between MIN_STEP and MAX_STEP below.
+const STICKY_SCROLL_EASE_FACTOR = 0.1;
+// Minimum px moved per frame so the tail converges instead of crawling.
+const STICKY_SCROLL_MIN_STEP_PX = 2;
+// Maximum px moved per frame. THIS IS THE GLIDE-SPEED / DURATION KNOB:
+// the view never travels faster than this many px per ~16ms frame, so a large
+// gap glides at a steady pace instead of lunging. LOWER = slower & longer
+// glide; HIGHER = faster & snappier. (14 px/frame ~= 840 px/sec at 60fps.)
+const STICKY_SCROLL_MAX_STEP_PX = 3;
+// Within this distance, snap to the exact bottom and stop the loop.
+const STICKY_SCROLL_SNAP_DISTANCE_PX = 2;
+// Gaps larger than this snap instantly (massive paste / huge media / first
+// catch-up) to avoid a long visible crawl. Normal streaming deltas and typical
+// code-block / image insertions stay well under this and will glide.
+const STICKY_SCROLL_MAX_EASE_DISTANCE_PX = 4000;
+// Keep the "programmatic scroll" flag alive across eased frames so the
+// onScroll handler does not mistake the glide for a manual scroll.
+const STICKY_SCROLL_PROGRAMMATIC_MS = 120;
 const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
 const STICKY_SCROLL_SETTLE_FRAMES = 5;
@@ -188,9 +208,8 @@ export function useChatAutoscroll({
     const scrollElement = chatScrollRef.current;
     if (!scrollElement) return null;
 
-    const messageElements = scrollElement.querySelectorAll<HTMLElement>(
-      "[data-message-id]",
-    );
+    const messageElements =
+      scrollElement.querySelectorAll<HTMLElement>("[data-message-id]");
     if (messageElements.length === 0) return null;
 
     const scrollTop = scrollElement.scrollTop;
@@ -216,10 +235,7 @@ export function useChatAutoscroll({
 
   // Resolve a saved anchor back into an absolute scrollTop using the message's
   // current position, or null when the anchored message is not in the DOM.
-  function getScrollTopForAnchor(
-    anchorMessageId?: string,
-    anchorOffset = 0,
-  ) {
+  function getScrollTopForAnchor(anchorMessageId?: string, anchorOffset = 0) {
     if (!anchorMessageId) return null;
 
     // Prefer the virtualizer's measurement resolver: it can locate the anchored
@@ -239,7 +255,10 @@ export function useChatAutoscroll({
     );
     if (!messageElement) return null;
 
-    return Math.max(0, getMessageTopWithinScroll(messageElement) + anchorOffset);
+    return Math.max(
+      0,
+      getMessageTopWithinScroll(messageElement) + anchorOffset,
+    );
   }
 
   function canChatScroll() {
@@ -371,6 +390,59 @@ export function useChatAutoscroll({
     scrollElement.scrollTop = finalScrollTop;
     lastChatScrollTopRef.current = finalScrollTop;
     saveCurrentChatScrollSnapshot();
+  }
+
+  // Move one eased step toward the live bottom. Returns true once it has
+  // converged (at the bottom) so the caller can stop the rAF loop. Only used
+  // for the non-forced streaming catch-up; forced snaps (scroll-to-bottom
+  // button, chat-switch restore, send/arm) still use scrollToBottomInstant().
+  function stepStickyScrollTowardBottom() {
+    const scrollElement = chatScrollRef.current;
+    if (!scrollElement) return true;
+
+    const commit = (nextScrollTop: number) => {
+      markProgrammaticChatScroll(STICKY_SCROLL_PROGRAMMATIC_MS);
+      scrollElement.scrollTop = nextScrollTop;
+      lastChatScrollTopRef.current = nextScrollTop;
+      saveCurrentChatScrollSnapshot();
+    };
+
+    const target = Math.max(
+      0,
+      scrollElement.scrollHeight - scrollElement.clientHeight,
+    );
+
+    // Honour reduced-motion: snap instead of gliding.
+    if (
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
+    ) {
+      commit(target);
+      return true;
+    }
+
+    const current = scrollElement.scrollTop;
+    const distance = target - current;
+
+    // Already at/above the bottom (or content shrank), or a huge jump: snap.
+    if (
+      distance <= STICKY_SCROLL_SNAP_DISTANCE_PX ||
+      distance > STICKY_SCROLL_MAX_EASE_DISTANCE_PX
+    ) {
+      commit(target);
+      return true;
+    }
+
+    // Exponential ease-out, clamped to a steady per-frame speed so large gaps
+    // glide instead of lunging, and a minimum step so the tail converges.
+    const step = Math.min(
+      STICKY_SCROLL_MAX_STEP_PX,
+      Math.max(distance * STICKY_SCROLL_EASE_FACTOR, STICKY_SCROLL_MIN_STEP_PX),
+    );
+    const next = Math.min(target, current + step);
+    commit(next);
+
+    return next >= target - STICKY_SCROLL_SNAP_DISTANCE_PX;
   }
 
   function syncChatScrollState() {
@@ -578,23 +650,48 @@ export function useChatAutoscroll({
         return;
       }
 
-      scrollToBottomInstant();
+      // Forced snap (scroll-to-bottom button, chat-switch restore, send/arm):
+      // keep the original instant, settle-frame behaviour.
+      if (shouldForce) {
+        scrollToBottomInstant();
+        syncChatScrollableState();
+        updateIsNearChatBottom(true);
+        setShowScrollToBottomButton(false);
+
+        stickyScrollSettleFramesRef.current = Math.max(
+          0,
+          stickyScrollSettleFramesRef.current - 1,
+        );
+
+        if (stickyScrollSettleFramesRef.current > 0) {
+          stickyScrollFrameRef.current =
+            window.requestAnimationFrame(runStickyScrollFrame);
+          return;
+        }
+
+        stickyScrollForceRef.current = false;
+        return;
+      }
+
+      // Streaming catch-up: glide one eased step toward the live bottom.
+      const reachedBottom = stepStickyScrollTowardBottom();
       syncChatScrollableState();
       updateIsNearChatBottom(true);
       setShowScrollToBottomButton(false);
 
-      stickyScrollSettleFramesRef.current = Math.max(
-        0,
-        stickyScrollSettleFramesRef.current - 1,
-      );
-
-      if (stickyScrollSettleFramesRef.current > 0) {
+      // Keep gliding while not yet at the bottom and the chat still wants to
+      // stick. The loop re-reads the live target each frame, so it naturally
+      // follows content that is still growing. Repeated schedules while we run
+      // are no-ops (guarded above), so the loop stays continuous.
+      if (!reachedBottom && shouldStickToChatBottom()) {
         stickyScrollFrameRef.current =
           window.requestAnimationFrame(runStickyScrollFrame);
         return;
       }
 
-      stickyScrollForceRef.current = false;
+      // Converged, or the user scrolled away / generation ended. Stop; the next
+      // content/resize event re-arms via scheduleStickyScrollToBottom().
+      stickyScrollSettleFramesRef.current = 0;
     };
 
     stickyScrollFrameRef.current =
