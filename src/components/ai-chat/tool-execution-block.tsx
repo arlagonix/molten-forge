@@ -1,11 +1,18 @@
-import { Check, ChevronDown, ChevronRight, Wrench, X } from "lucide-react";
+import { Check, Maximize2, Wrench, X } from "lucide-react";
+import { useState } from "react";
 
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import {
   ASK_USER_TOOL,
   CALL_AGENT_TOOL_NAME,
-  TASK_TOOLS,
   FILE_CREATE_TOOL,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL,
@@ -19,6 +26,7 @@ import {
   FILE_SEARCH_TEXT_TOOL,
   FILE_SEARCH_TEXT_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
+  TASK_TOOLS,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
   isTaskToolName,
@@ -37,7 +45,9 @@ const TOOL_INFO_CODE_BLOCK_CLASS_NAME =
 
 const BUILTIN_TOOL_DESCRIPTIONS: Record<string, string> = {
   [ASK_USER_TOOL.name]: ASK_USER_TOOL.description,
-  ...Object.fromEntries(TASK_TOOLS.map((tool) => [tool.name, tool.description])),
+  ...Object.fromEntries(
+    TASK_TOOLS.map((tool) => [tool.name, tool.description]),
+  ),
   [WEB_FETCH_TOOL.name]: WEB_FETCH_TOOL.description,
   [FILE_READ_TOOL.name]: FILE_READ_TOOL.description,
   [FILE_FIND_TOOL.name]: FILE_FIND_TOOL.description,
@@ -83,9 +93,7 @@ function renderCodeBlock(
   return (
     <MarkdownMessage
       className={className}
-      content={`~~~${language}
-${value}
-~~~`}
+      content={`~~~${language}\n${value}\n~~~`}
     />
   );
 }
@@ -323,8 +331,6 @@ export function ToolExecutionBlock({
   toolResult,
   status,
   loadedTools,
-  isCollapsed,
-  onToggleCollapsed,
 }: {
   id: string;
   toolCall: ChatToolCall;
@@ -334,6 +340,7 @@ export function ToolExecutionBlock({
   isCollapsed: boolean;
   onToggleCollapsed: (stepId: string, nextCollapsed: boolean) => void;
 }) {
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
   const effectiveStatus = getEffectiveToolStatus(status, toolResult);
   const executionPreview = buildToolExecutionPreviewForCall(
     toolCall,
@@ -356,13 +363,20 @@ export function ToolExecutionBlock({
     : getToolHeaderDetail(toolCall);
 
   return (
-    <article key={id} className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
-        <button
-          type="button"
-          className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          onClick={() => onToggleCollapsed(id, !isCollapsed)}
-          aria-expanded={!isCollapsed}
+    <>
+      <article key={id} className="flex min-w-0 max-w-full justify-start">
+        <div
+          role="button"
+          tabIndex={0}
+          className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          onClick={() => setIsDetailsOpen(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setIsDetailsOpen(true);
+            }
+          }}
+          title="Open tool call details"
         >
           <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
             <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
@@ -381,71 +395,105 @@ export function ToolExecutionBlock({
                 </>
               ) : null}
             </div>
-            {isCollapsed ? (
-              <ChevronRight className="size-3.5 shrink-0" />
-            ) : (
-              <ChevronDown className="size-3.5 shrink-0" />
-            )}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="h-7 w-7 shrink-0"
+              onClick={(event) => {
+                event.stopPropagation();
+                setIsDetailsOpen(true);
+              }}
+              title="Open tool call details"
+              aria-label="Open tool call details"
+            >
+              <Maximize2 className="size-3.5" />
+            </Button>
           </div>
-        </button>
+        </div>
+      </article>
 
-        {!isCollapsed && (
-          <div className="mt-3 grid gap-3">
-            {toolDescription ? (
-              <div className="text-sm leading-5 text-muted-foreground/85">
-                {toolDescription}
-              </div>
-            ) : null}
-            {!isTaskTool && renderToolExecutionPreview(executionPreview)}
-            {showToolInput && (
-              <div className="grid gap-1.5">
-                <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-                  Input
-                </div>
-                {renderJsonCodeBlock(toolCall.function.arguments || "{}")}
-              </div>
-            )}
-            {toolResult?.content.trim() && (
-              <div className="grid gap-1.5">
-                <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-                  Output
-                </div>
-                {renderJsonCodeBlock(
-                  isLoadSkillTool
-                    ? loadSkillDetails.compactOutput
-                    : toolResult.content,
-                )}
-              </div>
-            )}
-            {isLoadSkillTool && loadSkillDetails.instructions.trim() && (
-              <div className="grid gap-1.5">
-                <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-                  Instructions
-                </div>
-                {renderCodeBlock(loadSkillDetails.instructions, "markdown")}
-              </div>
-            )}
-            {isLoadSkillTool &&
-              loadSkillDetails.recommendedToolNames.length > 0 && (
+      <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
+        <DialogContent className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none max-w-[min(96vw,56rem)] flex-col overflow-hidden p-0 text-base leading-6">
+          <DialogHeader className="border-b px-5 py-4">
+            <DialogTitle className="flex min-w-0 items-center gap-2 pr-8 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+              <Wrench className="size-4 shrink-0" />
+              <span className="min-w-0 truncate shrink-0">
+                {toolCall.function.name}
+              </span>
+              <span className="text-muted-foreground/60">·</span>
+              {renderToolStatus(effectiveStatus)}
+              {toolHeaderDetail ? (
+                <>
+                  <span className="text-muted-foreground/60">·</span>
+                  <span className="min-w-0 truncate normal-case tracking-normal text-muted-foreground/85">
+                    {toolHeaderDetail}
+                  </span>
+                </>
+              ) : null}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <div className="grid gap-3 text-sm leading-5 text-muted-foreground">
+              {toolDescription ? (
                 <div className="grid gap-1.5">
                   <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-                    Recommended tools
+                    Description
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {loadSkillDetails.recommendedToolNames.map((toolName) => (
-                      <code
-                        key={toolName}
-                        className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground"
-                      >
-                        {toolName}
-                      </code>
-                    ))}
+                  <div>{toolDescription}</div>
+                </div>
+              ) : null}
+              {!isTaskTool && renderToolExecutionPreview(executionPreview)}
+              {showToolInput && (
+                <div className="grid gap-1.5">
+                  <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                    Input
                   </div>
+                  {renderJsonCodeBlock(toolCall.function.arguments || "{}")}
                 </div>
               )}
+              {toolResult?.content.trim() && (
+                <div className="grid gap-1.5">
+                  <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                    Output
+                  </div>
+                  {renderJsonCodeBlock(
+                    isLoadSkillTool
+                      ? loadSkillDetails.compactOutput
+                      : toolResult.content,
+                  )}
+                </div>
+              )}
+              {isLoadSkillTool && loadSkillDetails.instructions.trim() && (
+                <div className="grid gap-1.5">
+                  <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                    Instructions
+                  </div>
+                  {renderCodeBlock(loadSkillDetails.instructions, "markdown")}
+                </div>
+              )}
+              {isLoadSkillTool &&
+                loadSkillDetails.recommendedToolNames.length > 0 && (
+                  <div className="grid gap-1.5">
+                    <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                      Recommended tools
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {loadSkillDetails.recommendedToolNames.map((toolName) => (
+                        <code
+                          key={toolName}
+                          className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground"
+                        >
+                          {toolName}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
+                )}
+            </div>
           </div>
-        )}
-      </div>
-    </article>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

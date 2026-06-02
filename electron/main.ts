@@ -1,4 +1,5 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
+import Seven from "node-7z";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
@@ -7,7 +8,19 @@ import { createRequire } from "node:module";
 import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import pdfParse from "pdf-parse";
+import {
+  ATTACHMENT_LIMITS,
+  estimateAttachmentTokens,
+} from "../src/lib/ai-chat/attachment-limits";
 import { isFileToolName } from "../src/lib/ai-chat/file-tool-names";
+import type { AttachmentKind, ChatAttachment } from "../src/lib/ai-chat/types";
+import {
+  runChatCompletion,
+  streamChatCompletion,
+  type AdapterStreamEvent,
+} from "./ai-sdk-client";
+import { executeFileTool } from "./file-tools";
 import {
   getErrorMessage,
   isPlainObject,
@@ -17,16 +30,6 @@ import {
   type JsonRecord,
   type ToolExecutionContext,
 } from "./tool-utils";
-import { executeFileTool } from "./file-tools";
-import Seven from "node-7z";
-import pdfParse from "pdf-parse";
-import { ATTACHMENT_LIMITS, estimateAttachmentTokens } from "../src/lib/ai-chat/attachment-limits";
-import type { ChatAttachment, AttachmentKind } from "../src/lib/ai-chat/types";
-import {
-  runChatCompletion,
-  streamChatCompletion,
-  type AdapterStreamEvent,
-} from "./ai-sdk-client";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
@@ -1117,7 +1120,10 @@ function isAllowedWebFetchContentType(contentType: string) {
   return WEB_FETCH_ALLOWED_CONTENT_TYPES.has(contentType);
 }
 
-async function readResponseTextWithLimit(response: Response, signal?: AbortSignal) {
+async function readResponseTextWithLimit(
+  response: Response,
+  signal?: AbortSignal,
+) {
   const contentLength = Number(response.headers.get("content-length") ?? 0);
   if (
     Number.isFinite(contentLength) &&
@@ -1447,7 +1453,10 @@ function decodeUrlComponentSafely(value: string) {
   }
 }
 
-async function executeWebFetchTool(args: unknown, signal?: AbortSignal): Promise<ToolCommandResult> {
+async function executeWebFetchTool(
+  args: unknown,
+  signal?: AbortSignal,
+): Promise<ToolCommandResult> {
   throwIfAborted(signal);
   const { url: rawUrl } = parseWebFetchArgs(args);
   const requestedUrl = parseWebFetchUrl(rawUrl);
@@ -1698,12 +1707,17 @@ function getStoragePaths() {
   };
 }
 
-
 type AttachmentInput =
   | { name: string; path: string; mimeType?: string }
-  | { name: string; bytes: Uint8Array | number[] | ArrayBuffer; mimeType?: string };
+  | {
+      name: string;
+      bytes: Uint8Array | number[] | ArrayBuffer;
+      mimeType?: string;
+    };
 
-type AttachmentProcessRequest = AttachmentInput[] | { inputs: AttachmentInput[] };
+type AttachmentProcessRequest =
+  | AttachmentInput[]
+  | { inputs: AttachmentInput[] };
 
 type AttachmentProcessState = {
   warnings: string[];
@@ -1718,9 +1732,10 @@ function getPathTo7za() {
 }
 
 function normalizeAttachmentInputs(request: unknown): AttachmentInput[] {
-  const value = isPlainObject(request) && Array.isArray(request.inputs)
-    ? request.inputs
-    : request;
+  const value =
+    isPlainObject(request) && Array.isArray(request.inputs)
+      ? request.inputs
+      : request;
   if (!Array.isArray(value)) return [];
   return value.filter((input): input is AttachmentInput => {
     if (!isPlainObject(input)) return false;
@@ -1756,7 +1771,10 @@ function getFileExtension(fileName: string) {
   return path.extname(lowerName);
 }
 
-function inferMimeType(fileName: string, fallback = "application/octet-stream") {
+function inferMimeType(
+  fileName: string,
+  fallback = "application/octet-stream",
+) {
   const extension = getFileExtension(fileName);
   const mapping: Record<string, string> = {
     ".png": "image/png",
@@ -1799,7 +1817,10 @@ function inferMimeType(fileName: string, fallback = "application/octet-stream") 
   return mapping[extension] ?? fallback;
 }
 
-function classifyAttachment(name: string, mimeType?: string): AttachmentKind | "binary" {
+function classifyAttachment(
+  name: string,
+  mimeType?: string,
+): AttachmentKind | "binary" {
   const extension = getFileExtension(name);
   const normalizedMimeType = mimeType?.toLowerCase() ?? "";
 
@@ -2044,7 +2065,9 @@ async function processPdfAttachment({
     storagePath: stored.storagePath,
     extractedText: capped.text,
     truncated: capped.truncated,
-    ...(extracted.trim() ? {} : { error: "No extractable text (PDF may be scanned)" }),
+    ...(extracted.trim()
+      ? {}
+      : { error: "No extractable text (PDF may be scanned)" }),
   };
   attachment.tokenEstimate = estimateAttachmentTokens(attachment);
   return attachment;
@@ -2125,7 +2148,8 @@ async function processArchiveAttachment({
   }
 
   const tmpDir = path.join(app.getPath("temp"), `chatforge-${randomUUID()}`);
-  const archivePath = sourcePath ?? path.join(tmpDir, sanitizeFileNamePart(name));
+  const archivePath =
+    sourcePath ?? path.join(tmpDir, sanitizeFileNamePart(name));
 
   try {
     await fs.mkdir(tmpDir, { recursive: true });
@@ -2141,7 +2165,10 @@ async function processArchiveAttachment({
       );
     }
 
-    for (const filePath of extractedFiles.slice(0, ATTACHMENT_LIMITS.maxEntriesPerArchive)) {
+    for (const filePath of extractedFiles.slice(
+      0,
+      ATTACHMENT_LIMITS.maxEntriesPerArchive,
+    )) {
       if (state.totalEntries >= ATTACHMENT_LIMITS.maxEntriesTotal) {
         archiveAttachment.truncated = true;
         pushWarning(
@@ -2152,7 +2179,8 @@ async function processArchiveAttachment({
       }
 
       const resolvedFilePath = path.resolve(filePath);
-      if (!sourcePath && resolvedFilePath === path.resolve(archivePath)) continue;
+      if (!sourcePath && resolvedFilePath === path.resolve(archivePath))
+        continue;
       const resolvedTmpDir = path.resolve(tmpDir);
       const relative = path.relative(resolvedTmpDir, resolvedFilePath);
       if (relative.startsWith("..") || path.isAbsolute(relative)) {
@@ -2168,7 +2196,9 @@ async function processArchiveAttachment({
 
       const childBuffer = await fs.readFile(resolvedFilePath);
       state.totalExtractedBytes += childBuffer.byteLength;
-      if (state.totalExtractedBytes > ATTACHMENT_LIMITS.maxExtractedBytesTotal) {
+      if (
+        state.totalExtractedBytes > ATTACHMENT_LIMITS.maxExtractedBytesTotal
+      ) {
         archiveAttachment.truncated = true;
         pushWarning(
           state,
@@ -2230,8 +2260,12 @@ async function processAttachmentBuffer({
   return processTextAttachment({ name, buffer, mimeType, state });
 }
 
-async function processAttachmentInput(input: AttachmentInput, state: AttachmentProcessState) {
-  const { name, sourcePath, buffer, mimeType } = await readAttachmentInput(input);
+async function processAttachmentInput(
+  input: AttachmentInput,
+  state: AttachmentProcessState,
+) {
+  const { name, sourcePath, buffer, mimeType } =
+    await readAttachmentInput(input);
   return processAttachmentBuffer({
     name,
     buffer,
@@ -2242,8 +2276,10 @@ async function processAttachmentInput(input: AttachmentInput, state: AttachmentP
   });
 }
 
-
-function collectAttachmentStoragePaths(value: unknown, paths = new Set<string>()) {
+function collectAttachmentStoragePaths(
+  value: unknown,
+  paths = new Set<string>(),
+) {
   if (Array.isArray(value)) {
     for (const item of value) collectAttachmentStoragePaths(item, paths);
     return paths;
@@ -2335,7 +2371,9 @@ async function deleteAttachmentStoragePath(storagePath: string) {
   }
 }
 
-async function cleanupUnreferencedAttachmentStoragePaths(candidates: Iterable<string>) {
+async function cleanupUnreferencedAttachmentStoragePaths(
+  candidates: Iterable<string>,
+) {
   const normalizedCandidates = new Set<string>();
   for (const candidate of candidates) {
     const normalized = normalizeAttachmentStoragePath(candidate);
@@ -2355,7 +2393,9 @@ async function cleanupUnreferencedAttachmentStoragePaths(candidates: Iterable<st
   return { deleted };
 }
 
-async function deleteTemporaryAttachmentStoragePaths(candidates: Iterable<string>) {
+async function deleteTemporaryAttachmentStoragePaths(
+  candidates: Iterable<string>,
+) {
   const normalizedCandidates = new Set<string>();
   for (const candidate of candidates) {
     const normalized = normalizeAttachmentStoragePath(candidate);
@@ -2393,7 +2433,9 @@ async function cleanupOrphanedAttachmentDirectories() {
 
       let childEntries: import("node:fs").Dirent[] = [];
       try {
-        childEntries = await fs.readdir(currentDirectory, { withFileTypes: true });
+        childEntries = await fs.readdir(currentDirectory, {
+          withFileTypes: true,
+        });
       } catch {
         continue;
       }
@@ -2402,7 +2444,10 @@ async function cleanupOrphanedAttachmentDirectories() {
         const childPath = path.join(currentDirectory, childEntry.name);
         if (childEntry.isDirectory()) {
           stack.push(childPath);
-        } else if (childEntry.isFile() && referenced.has(path.resolve(childPath))) {
+        } else if (
+          childEntry.isFile() &&
+          referenced.has(path.resolve(childPath))
+        ) {
           hasReferencedFile = true;
           break;
         }
@@ -2420,9 +2465,11 @@ async function cleanupOrphanedAttachmentDirectories() {
 
 function collectAttachmentDeleteCandidates(request: unknown) {
   if (isPlainObject(request)) {
-    const values = [request.attachments, request.storagePaths, request.storagePath].filter(
-      (value) => value !== undefined,
-    );
+    const values = [
+      request.attachments,
+      request.storagePaths,
+      request.storagePath,
+    ].filter((value) => value !== undefined);
     if (values.length) return collectAttachmentStoragePaths(values);
   }
 
@@ -2725,7 +2772,8 @@ async function saveJsonChat(chat: unknown) {
     const cleanupCandidates = new Set<string>();
 
     for (const storagePath of previousAttachmentPaths) {
-      if (!nextAttachmentPaths.has(storagePath)) cleanupCandidates.add(storagePath);
+      if (!nextAttachmentPaths.has(storagePath))
+        cleanupCandidates.add(storagePath);
     }
 
     await writeJsonAtomic(chatFilePath(chatId), chat);
@@ -4025,12 +4073,15 @@ ipcMain.handle("find-in-page:stop", (event, action: unknown) => {
   event.sender.stopFindInPage(normalizeStopFindInPageAction(action));
 });
 
-
 ipcMain.handle("attachments:pick", async () => {
-  const window = BrowserWindow.getFocusedWindow() ?? undefined;
-  const result = await dialog.showOpenDialog(window, {
+  const browserWindow =
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const options: OpenDialogOptions = {
     properties: ["openFile", "multiSelections"],
-  });
+  };
+  const result = browserWindow
+    ? await dialog.showOpenDialog(browserWindow, options)
+    : await dialog.showOpenDialog(options);
 
   if (result.canceled) return [];
 
@@ -4079,37 +4130,46 @@ ipcMain.handle("attachments:process", async (_event, request: unknown) => {
   };
 });
 
-ipcMain.handle("attachments:read-data-url", async (_event, request: unknown) => {
-  if (!isPlainObject(request) || typeof request.storagePath !== "string") {
-    throw new Error("Attachment storage path is required.");
-  }
+ipcMain.handle(
+  "attachments:read-data-url",
+  async (_event, request: unknown) => {
+    if (!isPlainObject(request) || typeof request.storagePath !== "string") {
+      throw new Error("Attachment storage path is required.");
+    }
 
-  const storageRoot = path.resolve(getStoragePaths().attachmentsDir);
-  const resolvedStoragePath = path.resolve(request.storagePath);
-  const relative = path.relative(storageRoot, resolvedStoragePath);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error("Attachment path is outside the attachments directory.");
-  }
+    const storageRoot = path.resolve(getStoragePaths().attachmentsDir);
+    const resolvedStoragePath = path.resolve(request.storagePath);
+    const relative = path.relative(storageRoot, resolvedStoragePath);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new Error("Attachment path is outside the attachments directory.");
+    }
 
-  const buffer = await fs.readFile(resolvedStoragePath);
-  const mimeType =
-    typeof request.mimeType === "string"
-      ? request.mimeType
-      : inferMimeType(resolvedStoragePath);
-  return `data:${mimeType};base64,${buffer.toString("base64")}`;
-});
+    const buffer = await fs.readFile(resolvedStoragePath);
+    const mimeType =
+      typeof request.mimeType === "string"
+        ? request.mimeType
+        : inferMimeType(resolvedStoragePath);
+    return `data:${mimeType};base64,${buffer.toString("base64")}`;
+  },
+);
 
-ipcMain.handle("attachments:delete-unused", async (_event, request: unknown) => {
-  await ensureStorageDirectories();
-  const candidates = collectAttachmentDeleteCandidates(request);
-  return cleanupUnreferencedAttachmentStoragePaths(candidates);
-});
+ipcMain.handle(
+  "attachments:delete-unused",
+  async (_event, request: unknown) => {
+    await ensureStorageDirectories();
+    const candidates = collectAttachmentDeleteCandidates(request);
+    return cleanupUnreferencedAttachmentStoragePaths(candidates);
+  },
+);
 
-ipcMain.handle("attachments:delete-temporary", async (_event, request: unknown) => {
-  await ensureStorageDirectories();
-  const candidates = collectAttachmentDeleteCandidates(request);
-  return deleteTemporaryAttachmentStoragePaths(candidates);
-});
+ipcMain.handle(
+  "attachments:delete-temporary",
+  async (_event, request: unknown) => {
+    await ensureStorageDirectories();
+    const candidates = collectAttachmentDeleteCandidates(request);
+    return deleteTemporaryAttachmentStoragePaths(candidates);
+  },
+);
 
 ipcMain.handle("storage:is-initialized", async () =>
   isJsonStorageInitialized(),

@@ -136,11 +136,13 @@ export function getGlobalEnabledTools({
 export function getEnabledToolsForChat({
   chat,
   oneShotToolNames = [],
+  skillRecommendedToolNames = [],
   globalEnabledTools,
   availableToolsByName,
 }: {
   chat: ChatSession;
   oneShotToolNames?: string[];
+  skillRecommendedToolNames?: string[];
   globalEnabledTools: LoadedToolInfo[];
   availableToolsByName: Map<string, LoadedToolInfo>;
 }) {
@@ -160,6 +162,15 @@ export function getEnabledToolsForChat({
   }
 
   for (const toolName of oneShotToolNames) {
+    if (chatDisabledToolNames.has(toolName)) continue;
+
+    const tool = availableToolsByName.get(toolName);
+    if (tool && !byName.has(tool.name)) byName.set(tool.name, tool);
+  }
+
+  for (const toolName of skillRecommendedToolNames) {
+    if (chatDisabledToolNames.has(toolName)) continue;
+
     const tool = availableToolsByName.get(toolName);
     if (tool && !byName.has(tool.name)) byName.set(tool.name, tool);
   }

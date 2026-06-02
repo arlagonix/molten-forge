@@ -94,7 +94,7 @@ type VisibleAssistantProcessStep = ChatAssistantProcessStep & {
   sourceStepIds: string[];
 };
 
-type VisibleAssistantProcessStepGroup =
+type VisibleAssistantProcessStepBaseGroup =
   | { kind: "single"; step: VisibleAssistantProcessStep }
   | {
       kind: "tool_batch";
@@ -102,14 +102,34 @@ type VisibleAssistantProcessStepGroup =
       steps: VisibleAssistantProcessStep[];
     };
 
+type VisibleAssistantProcessStepGroup =
+  | VisibleAssistantProcessStepBaseGroup
+  | {
+      kind: "thinking_tool_group";
+      thinkingStep: VisibleAssistantProcessStep;
+      toolGroups: VisibleAssistantProcessStepBaseGroup[];
+    };
+
 function getVisibleStepToolBatchId(step: VisibleAssistantProcessStep) {
   return "toolBatchId" in step ? step.toolBatchId : undefined;
 }
 
-function groupVisibleAssistantProcessSteps(
+function isToolRelatedVisibleStep(step: VisibleAssistantProcessStep) {
+  return (
+    step.type === "tool_building" ||
+    step.type === "tool_execution" ||
+    step.type === "agent_call" ||
+    step.type === "user_input" ||
+    step.type === "approval" ||
+    step.type === "file_approval" ||
+    step.type === "tasks"
+  );
+}
+
+function groupToolRelatedVisibleSteps(
   steps: VisibleAssistantProcessStep[],
-): VisibleAssistantProcessStepGroup[] {
-  const groups: VisibleAssistantProcessStepGroup[] = [];
+): VisibleAssistantProcessStepBaseGroup[] {
+  const groups: VisibleAssistantProcessStepBaseGroup[] = [];
   let index = 0;
 
   while (index < steps.length) {
@@ -136,6 +156,79 @@ function groupVisibleAssistantProcessSteps(
     } else {
       groups.push({ kind: "single", step: batchSteps[0] });
     }
+  }
+
+  return groups;
+}
+
+function isAssistantTextVisibleStep(step: VisibleAssistantProcessStep) {
+  return step.type === "assistant_message" && step.content.trim().length > 0;
+}
+
+function isThinkingToolGroupBoundary(step: VisibleAssistantProcessStep) {
+  return step.type === "thinking" || isAssistantTextVisibleStep(step);
+}
+
+function groupVisibleAssistantProcessSteps(
+  steps: VisibleAssistantProcessStep[],
+): VisibleAssistantProcessStepGroup[] {
+  const groups: VisibleAssistantProcessStepGroup[] = [];
+  let index = 0;
+
+  while (index < steps.length) {
+    const step = steps[index];
+
+    if (step.type === "thinking") {
+      const toolSteps: VisibleAssistantProcessStep[] = [];
+      let lookaheadIndex = index + 1;
+
+      while (lookaheadIndex < steps.length) {
+        const lookaheadStep = steps[lookaheadIndex];
+
+        if (isThinkingToolGroupBoundary(lookaheadStep)) break;
+
+        if (isToolRelatedVisibleStep(lookaheadStep)) {
+          toolSteps.push(lookaheadStep);
+        }
+
+        lookaheadIndex += 1;
+      }
+
+      if (toolSteps.length > 0) {
+        groups.push({
+          kind: "thinking_tool_group",
+          thinkingStep: step,
+          toolGroups: groupToolRelatedVisibleSteps(toolSteps),
+        });
+        index = lookaheadIndex;
+        continue;
+      }
+    }
+
+    if (isToolRelatedVisibleStep(step)) {
+      const toolBatchId = getVisibleStepToolBatchId(step);
+
+      if (toolBatchId) {
+        const batchSteps: VisibleAssistantProcessStep[] = [];
+        while (
+          index < steps.length &&
+          getVisibleStepToolBatchId(steps[index]) === toolBatchId
+        ) {
+          batchSteps.push(steps[index]);
+          index += 1;
+        }
+
+        if (batchSteps.length > 1) {
+          groups.push({ kind: "tool_batch", toolBatchId, steps: batchSteps });
+        } else {
+          groups.push({ kind: "single", step: batchSteps[0] });
+        }
+        continue;
+      }
+    }
+
+    groups.push({ kind: "single", step });
+    index += 1;
   }
 
   return groups;
@@ -842,6 +935,54 @@ const ChatMessageItem = memo(
       return null;
     };
 
+    const renderProcessStepGroup = (
+      group: VisibleAssistantProcessStepGroup,
+      options?: { insideThinkingToolGroup?: boolean },
+    ): ReactNode => {
+      if (group.kind === "tool_batch") {
+        const insideThinkingToolGroup = Boolean(options?.insideThinkingToolGroup);
+
+        return (
+          <div
+            key={group.toolBatchId}
+            className={cn(
+              "grid gap-2 bg-transparent",
+              insideThinkingToolGroup
+                ? ""
+                : "border border-dashed px-2 py-2 shadow-xs",
+            )}
+          >
+            <div className={cn(
+              "text-xs font-medium uppercase tracking-wide text-muted-foreground/80",
+              !insideThinkingToolGroup && "px-1",
+            )}>
+              Parallel tool calls
+            </div>
+            <div className="grid gap-2">{group.steps.map(renderProcessStep)}</div>
+          </div>
+        );
+      }
+
+      if (group.kind === "thinking_tool_group") {
+        const key = `${group.thinkingStep.id}:tool-group`;
+        return (
+          <div
+            key={key}
+            className="grid gap-2 border border-dashed bg-muted/10 px-2 py-2 shadow-xs"
+          >
+            {renderProcessStep(group.thinkingStep)}
+            {group.toolGroups.map((toolGroup) =>
+              renderProcessStepGroup(toolGroup, {
+                insideThinkingToolGroup: true,
+              }),
+            )}
+          </div>
+        );
+      }
+
+      return renderProcessStep(group.step);
+    };
+
     return (
       <div
         ref={registerMessageElement(message.id)}
@@ -850,25 +991,7 @@ const ChatMessageItem = memo(
       >
         {message.role === "assistant" && hasVisibleProcessSteps && (
           <div className="grid gap-2">
-            {processStepGroups.map((group) => {
-              if (group.kind === "tool_batch") {
-                return (
-                  <div
-                    key={group.toolBatchId}
-                    className="grid gap-2 border border-dashed bg-transparent px-2 py-2 shadow-xs"
-                  >
-                    <div className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/80">
-                      Parallel tool calls
-                    </div>
-                    <div className="grid gap-2">
-                      {group.steps.map(renderProcessStep)}
-                    </div>
-                  </div>
-                );
-              }
-
-              return renderProcessStep(group.step);
-            })}
+            {processStepGroups.map(renderProcessStepGroup)}
           </div>
         )}
 

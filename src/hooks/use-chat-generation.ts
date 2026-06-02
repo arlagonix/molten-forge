@@ -1106,9 +1106,14 @@ export function useChatGeneration({
     oneShotToolNames: string[] = [],
     activeSkillNames: string[] = chat.activeSkillNames ?? [],
   ) {
+    const skillRecommendedToolNames = activeSkillNames.flatMap(
+      (skillName) =>
+        availableSkillsByName.get(skillName)?.recommendedToolNames ?? [],
+    );
     const tools = getEnabledToolsForChat({
       chat,
       oneShotToolNames,
+      skillRecommendedToolNames,
       globalEnabledTools,
       availableToolsByName,
     });
