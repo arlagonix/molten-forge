@@ -86,6 +86,7 @@ import type {
   ChatFileToolAutoApproval,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
+  ChatAttachment,
   ChatReasoningMetadata,
   ChatTitleGenerationMode,
   ChatMessage,
@@ -1482,6 +1483,7 @@ export function useChatGeneration({
     signal,
     contextMessages,
     userMessage,
+    userAttachments,
     inheritedToolsForRun,
     inheritedActiveSkillNames,
   }: {
@@ -1499,6 +1501,7 @@ export function useChatGeneration({
     signal: AbortSignal;
     contextMessages: ChatMessage[];
     userMessage: string;
+    userAttachments?: ChatAttachment[];
     inheritedToolsForRun: LoadedToolInfo[];
     inheritedActiveSkillNames: string[];
   }): Promise<{ agentCall: ChatAgentCall; toolResult: ChatToolResult }> {
@@ -1653,6 +1656,7 @@ export function useChatGeneration({
               role: "user" as const,
               content: userMessage,
               createdAt: new Date().toISOString(),
+              ...(userAttachments?.length ? { attachments: userAttachments } : {}),
             },
           ]
         : [];
@@ -1667,6 +1671,7 @@ export function useChatGeneration({
         role: "user",
         content: delegatedTaskMessage,
         createdAt: new Date().toISOString(),
+        ...(userAttachments?.length ? { attachments: userAttachments } : {}),
       },
     ];
     let currentMessages = agentContextMessages;
@@ -1679,6 +1684,10 @@ export function useChatGeneration({
           systemPrompt: createAgentSystemPrompt(agent, currentAgentActiveSkillNames),
           messages: currentMessages,
           userMessage: currentUserMessage,
+          userAttachments:
+            round === 0 && agent.contextMode !== "full_chat"
+              ? userAttachments
+              : undefined,
           signal,
           tools: getAgentTools({
             agent,
@@ -1762,6 +1771,7 @@ export function useChatGeneration({
                   signal,
                   contextMessages,
                   userMessage,
+                  userAttachments,
                   inheritedToolsForRun,
                   inheritedActiveSkillNames: currentAgentActiveSkillNames,
                 });
@@ -2095,6 +2105,7 @@ export function useChatGeneration({
     chatId,
     contextMessages,
     userMessage,
+    userAttachments,
     assistantMessageId,
     variantId,
     responseStartedAtMs,
@@ -2106,6 +2117,7 @@ export function useChatGeneration({
     chatId: string;
     contextMessages: ChatMessage[];
     userMessage: string;
+    userAttachments?: ChatAttachment[];
     assistantMessageId: string;
     variantId: string;
     responseStartedAtMs: number;
@@ -2139,7 +2151,7 @@ export function useChatGeneration({
     let currentActiveSkillNames = [...new Set(activeSkillNamesForRun)];
     const forcedAgentRequests = oneShotAgentNames.map((agentName) => ({
       agentName,
-      task: userMessage,
+      task: userMessage || "Please analyze the attached files.",
     }));
     let forcedAgentResultPrompt = "";
 
@@ -2389,6 +2401,7 @@ export function useChatGeneration({
         role: "user",
         content: userMessage,
         createdAt: new Date().toISOString(),
+        ...(userAttachments?.length ? { attachments: userAttachments } : {}),
       },
       ...buildForcedAgentContextMessages(),
       createContinuationAssistantMessage({
@@ -2423,6 +2436,7 @@ export function useChatGeneration({
           signal: controller.signal,
           contextMessages,
           userMessage,
+          userAttachments,
           inheritedToolsForRun: toolsForRun,
           inheritedActiveSkillNames: activeSkillNamesForRun,
         });
@@ -2479,6 +2493,7 @@ export function useChatGeneration({
               role: "user" as const,
               content: userMessage,
               createdAt: new Date().toISOString(),
+              ...(userAttachments?.length ? { attachments: userAttachments } : {}),
             },
             ...buildForcedAgentContextMessages(),
           ]
@@ -2512,6 +2527,10 @@ export function useChatGeneration({
           systemPrompt: composeSystemPrompt(currentActiveSkillNames),
           messages: currentMessages,
           userMessage: currentUserMessage,
+          userAttachments:
+            toolRound === 0 && !forcedAgentRequests.length
+              ? userAttachments
+              : undefined,
           signal: controller.signal,
           tools: forcedAgentRequests.length
             ? toolsForRun.filter((tool) => tool.name !== CALL_AGENT_TOOL_NAME)
@@ -2663,6 +2682,7 @@ export function useChatGeneration({
                       signal: controller.signal,
                       contextMessages,
                       userMessage,
+                      userAttachments,
                       inheritedToolsForRun: toolsForRun,
                       inheritedActiveSkillNames: currentActiveSkillNames,
                     });
@@ -2802,7 +2822,7 @@ export function useChatGeneration({
     }
   }
 
-  async function sendMessage(content: string) {
+  async function sendMessage(content: string, attachments: ChatAttachment[] = []) {
     const userMessage = content.trim();
 
     if (!activeChat) return false;
@@ -2811,7 +2831,7 @@ export function useChatGeneration({
     const providerForRun = resolveProviderForActiveChat(activeChat);
     if (!validateProviderForRun(providerForRun)) return false;
 
-    if (!userMessage) {
+    if (!userMessage && attachments.length === 0) {
       showError("Message is required.");
       return false;
     }
@@ -2840,6 +2860,7 @@ export function useChatGeneration({
       role: "user",
       content: userMessage,
       createdAt: new Date().toISOString(),
+      ...(attachments.length ? { attachments } : {}),
     };
 
     const assistantMessageId = createId();
@@ -2864,7 +2885,7 @@ export function useChatGeneration({
       ...chat,
       title:
         chat.messages.length === 0 && isAutoTitledChat(chat)
-          ? titleFromMessage(userMessage)
+          ? titleFromMessage(userMessage || attachments[0]?.name || "Attached files")
           : chat.title,
       titleMode:
         chat.messages.length === 0 && isAutoTitledChat(chat)
@@ -2879,6 +2900,7 @@ export function useChatGeneration({
       chatId: activeChat.id,
       contextMessages,
       userMessage,
+      userAttachments: attachments,
       assistantMessageId,
       variantId,
       responseStartedAtMs,
@@ -2919,6 +2941,7 @@ export function useChatGeneration({
     }
 
     const userMessage = userMessageSource.content;
+    const userAttachments = userMessageSource.attachments ?? [];
     const oneShotToolNames = validateToolMentions(userMessage);
     if (!oneShotToolNames) return;
 
@@ -2974,6 +2997,7 @@ export function useChatGeneration({
       chatId: activeChat.id,
       contextMessages,
       userMessage,
+      userAttachments,
       assistantMessageId,
       variantId,
       responseStartedAtMs,
@@ -3064,6 +3088,7 @@ export function useChatGeneration({
   async function submitEditedUserMessage(
     messageId: string,
     editedContent: string,
+    editedAttachments?: ChatAttachment[],
   ) {
     if (!activeChat) return;
     if (isChatGenerating(activeChat.id)) return;
@@ -3072,10 +3097,6 @@ export function useChatGeneration({
     if (!validateProviderForRun(providerForRun)) return;
 
     const userMessage = editedContent.trim();
-    if (!userMessage) {
-      showError("Message is required.");
-      return;
-    }
 
     const oneShotToolNames = validateToolMentions(userMessage);
     if (!oneShotToolNames) return;
@@ -3093,6 +3114,12 @@ export function useChatGeneration({
 
     if (userIndex < 0 || !currentMessage || currentMessage.role !== "user") {
       showError("Could not find the message to edit.");
+      return;
+    }
+
+    const finalAttachments = editedAttachments ?? currentMessage.attachments ?? [];
+    if (!userMessage && finalAttachments.length === 0) {
+      showError("Message is required.");
       return;
     }
 
@@ -3116,6 +3143,7 @@ export function useChatGeneration({
     const editedUserMessage: ChatMessage = {
       ...currentMessage,
       content: userMessage,
+      ...(finalAttachments.length ? { attachments: finalAttachments } : { attachments: undefined }),
     };
     const assistantMessage = createStreamingAssistantMessage({
       assistantMessageId,
@@ -3135,7 +3163,7 @@ export function useChatGeneration({
       ...chat,
       title:
         userIndex === 0 && isAutoTitledChat(chat)
-          ? titleFromMessage(userMessage)
+          ? titleFromMessage(userMessage || finalAttachments[0]?.name || "Attached files")
           : chat.title,
       titleMode:
         userIndex === 0 && isAutoTitledChat(chat) ? "auto" : chat.titleMode,
@@ -3148,6 +3176,7 @@ export function useChatGeneration({
       chatId: activeChat.id,
       contextMessages,
       userMessage,
+      userAttachments: finalAttachments,
       assistantMessageId,
       variantId,
       responseStartedAtMs,

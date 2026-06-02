@@ -2,6 +2,7 @@ import {
   BookOpen,
   Bot,
   Lock,
+  Paperclip,
   Save as SaveIcon,
   Send,
   Wrench,
@@ -16,11 +17,23 @@ import {
   useState,
 } from "react";
 
+import { AttachmentChips } from "@/components/ai-chat/attachment-chips";
 import type { ToolMentionOption } from "@/components/ai-chat/chat-composer";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  cleanupUnusedAttachments,
+  deleteTemporaryAttachments,
+  findAttachmentById,
+} from "@/lib/ai-chat/attachment-cleanup";
+import type { ChatAttachment } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 import { TooltipIconButton } from "./tooltip-icon-button";
+
+type AttachmentInput =
+  | { name: string; path: string; mimeType?: string }
+  | { name: string; bytes: Uint8Array | number[] | ArrayBuffer; mimeType?: string };
 
 type ActiveMention = {
   type: "tool" | "skill" | "agent";
@@ -164,6 +177,7 @@ function getTextareaCaretMenuPosition(
 
 export const UserMessageEditor = memo(function UserMessageEditor({
   initialContent,
+  initialAttachments = [],
   disabled,
   toolMentionOptions = [],
   skillMentionOptions = [],
@@ -173,13 +187,14 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   onSubmit,
 }: {
   initialContent: string;
+  initialAttachments?: ChatAttachment[];
   disabled: boolean;
   toolMentionOptions?: ToolMentionOption[];
   skillMentionOptions?: ToolMentionOption[];
   agentMentionOptions?: ToolMentionOption[];
   onCancel: () => void;
-  onSave: (content: string) => void | Promise<void>;
-  onSubmit: (content: string) => void | Promise<void>;
+  onSave: (content: string, attachments: ChatAttachment[]) => void | Promise<void>;
+  onSubmit: (content: string, attachments: ChatAttachment[]) => void | Promise<void>;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mentionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -191,7 +206,12 @@ export const UserMessageEditor = memo(function UserMessageEditor({
     useState<CaretMenuPosition | null>(null);
   const [selectedMentionSuggestionIndex, setSelectedMentionSuggestionIndex] =
     useState(0);
+  const [attachments, setAttachments] = useState(initialAttachments);
+  const [isProcessingAttachments, setIsProcessingAttachments] = useState(false);
   const trimmedContent = content.trim();
+  const canSaveOrSubmit =
+    !disabled && !isProcessingAttachments &&
+    (trimmedContent.length > 0 || attachments.length > 0);
 
   const mentionSuggestions = useMemo<ToolMentionOption[]>(() => {
     if (!activeMention || disabled) return [];
@@ -251,10 +271,11 @@ export const UserMessageEditor = memo(function UserMessageEditor({
 
   useEffect(() => {
     setContent(initialContent);
+    setAttachments(initialAttachments);
     setActiveMention(null);
     setMentionMenuPosition(null);
     setSelectedMentionSuggestionIndex(0);
-  }, [initialContent]);
+  }, [initialAttachments, initialContent]);
 
   useEffect(() => {
     setSelectedMentionSuggestionIndex(0);
@@ -273,16 +294,71 @@ export const UserMessageEditor = memo(function UserMessageEditor({
     mentionSuggestions.length,
   ]);
 
-  function handleSave() {
-    if (disabled || !trimmedContent) return;
+  async function addFiles(inputs: AttachmentInput[]) {
+    if (!inputs.length) return;
+    if (!window.codeForgeAI?.processAttachments) {
+      toast.error("Attachment processing is not available.");
+      return;
+    }
 
-    void onSave(content);
+    setIsProcessingAttachments(true);
+    try {
+      const result = await window.codeForgeAI.processAttachments(inputs);
+      setAttachments((current) => [...current, ...result.attachments]);
+      for (const warning of result.warnings ?? []) toast.warning(warning);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to process attachments.",
+      );
+    } finally {
+      setIsProcessingAttachments(false);
+    }
+  }
+
+  async function handlePickAttachments() {
+    if (!window.codeForgeAI?.pickAttachments) {
+      toast.error("File picker is not available.");
+      return;
+    }
+
+    await addFiles(await window.codeForgeAI.pickAttachments());
+  }
+
+  function handleRemoveAttachment(attachmentId: string) {
+    setAttachments((current) => {
+      const removedAttachment = findAttachmentById(current, attachmentId);
+      if (removedAttachment) {
+        const isInitialAttachment = initialAttachments.some(
+          (attachment) => attachment.id === removedAttachment.id,
+        );
+        if (isInitialAttachment) cleanupUnusedAttachments([removedAttachment]);
+        else deleteTemporaryAttachments([removedAttachment]);
+      }
+      return current.filter((attachment) => attachment.id !== attachmentId);
+    });
+  }
+
+  function handleSave() {
+    if (!canSaveOrSubmit) return;
+
+    void onSave(content, attachments);
   }
 
   function handleSubmit() {
-    if (disabled || !trimmedContent) return;
+    if (!canSaveOrSubmit) return;
 
-    void onSubmit(content);
+    void onSubmit(content, attachments);
+  }
+
+  function handleCancel() {
+    const initialAttachmentIds = new Set(
+      initialAttachments.map((attachment) => attachment.id),
+    );
+    const addedAttachments = attachments.filter(
+      (attachment) => !initialAttachmentIds.has(attachment.id),
+    );
+    deleteTemporaryAttachments(addedAttachments);
+    onCancel();
   }
 
   return (
@@ -346,6 +422,12 @@ export const UserMessageEditor = memo(function UserMessageEditor({
               })}
             </div>
           )}
+          <AttachmentChips
+            attachments={attachments}
+            isProcessing={isProcessingAttachments}
+            onRemove={handleRemoveAttachment}
+            className="mb-3 text-primary-foreground"
+          />
           <Textarea
             ref={textareaRef}
             value={content}
@@ -427,7 +509,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
 
               if (event.key === "Escape") {
                 event.preventDefault();
-                onCancel();
+                handleCancel();
               }
 
               if ((event.ctrlKey || event.metaKey) && event.key === "s") {
@@ -452,9 +534,19 @@ export const UserMessageEditor = memo(function UserMessageEditor({
           type="button"
           variant="ghost"
           size="icon-sm"
+          label="Attach files"
+          onClick={handlePickAttachments}
+          disabled={disabled || isProcessingAttachments}
+        >
+          <Paperclip className="size-3" />
+        </TooltipIconButton>
+        <TooltipIconButton
+          type="button"
+          variant="ghost"
+          size="icon-sm"
           label="Save edit"
           onClick={handleSave}
-          disabled={disabled || !trimmedContent}
+          disabled={!canSaveOrSubmit}
         >
           <SaveIcon className="size-3" />
         </TooltipIconButton>
@@ -464,7 +556,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
           size="icon-sm"
           label="Submit edit and regenerate"
           onClick={handleSubmit}
-          disabled={disabled || !trimmedContent}
+          disabled={!canSaveOrSubmit}
         >
           <Send className="size-3" />
         </TooltipIconButton>
@@ -473,7 +565,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
           variant="ghost"
           size="icon-sm"
           label="Cancel edit"
-          onClick={onCancel}
+          onClick={handleCancel}
           disabled={disabled}
         >
           <X className="size-3" />

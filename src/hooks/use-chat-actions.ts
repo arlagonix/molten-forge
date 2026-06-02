@@ -15,6 +15,7 @@ import {
   titleFromMessage,
 } from "@/lib/ai-chat/chat-utils";
 import type {
+  ChatAttachment,
   ChatFileToolAutoApproval,
   ChatMessage,
   ChatSession,
@@ -157,15 +158,12 @@ export function useChatActions({
   async function saveEditedUserMessage(
     messageId: string,
     editedContent: string,
+    editedAttachments?: ChatAttachment[],
   ) {
     if (!activeChat) return;
     if (isChatGenerating(activeChat.id)) return;
 
     const userMessage = editedContent.trim();
-    if (!userMessage) {
-      showError("Message is required.");
-      return;
-    }
 
     const userIndex = activeChat.messages.findIndex(
       (message) => message.id === messageId && message.role === "user",
@@ -177,17 +175,29 @@ export function useChatActions({
       return;
     }
 
+    const finalAttachments = editedAttachments ?? currentMessage.attachments ?? [];
+    if (!userMessage && finalAttachments.length === 0) {
+      showError("Message is required.");
+      return;
+    }
+
     updateChat(activeChat.id, (chat) => ({
       ...chat,
       title:
         userIndex === 0 && isAutoTitledChat(chat)
-          ? titleFromMessage(userMessage)
+          ? titleFromMessage(userMessage || finalAttachments[0]?.name || "Attached files")
           : chat.title,
       titleMode:
         userIndex === 0 && isAutoTitledChat(chat) ? "auto" : chat.titleMode,
       messages: chat.messages.map((message) =>
         message.id === messageId && message.role === "user"
-          ? { ...message, content: userMessage }
+          ? {
+              ...message,
+              content: userMessage,
+              ...(finalAttachments.length
+                ? { attachments: finalAttachments }
+                : { attachments: undefined }),
+            }
           : message,
       ),
     }));

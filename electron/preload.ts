@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { IpcRendererEvent } from "electron";
 
 function createId() {
@@ -12,6 +12,30 @@ contextBridge.exposeInMainWorld("codeForgeAI", {
 
   sendChat(request: unknown) {
     return ipcRenderer.invoke("ai:send-chat", request);
+  },
+
+  pickAttachments() {
+    return ipcRenderer.invoke("attachments:pick");
+  },
+
+  processAttachments(request: unknown) {
+    return ipcRenderer.invoke("attachments:process", request);
+  },
+
+  readAttachmentDataUrl(request: unknown) {
+    return ipcRenderer.invoke("attachments:read-data-url", request);
+  },
+
+  deleteUnusedAttachments(request: unknown) {
+    return ipcRenderer.invoke("attachments:delete-unused", request);
+  },
+
+  deleteTemporaryAttachments(request: unknown) {
+    return ipcRenderer.invoke("attachments:delete-temporary", request);
+  },
+
+  getPathForFile(file: File) {
+    return webUtils.getPathForFile(file);
   },
 
   streamChat(request: unknown) {

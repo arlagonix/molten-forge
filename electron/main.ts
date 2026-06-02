@@ -1,7 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { existsSync, promises as fs } from "node:fs";
+import { createRequire } from "node:module";
 import { isIP } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,12 +18,17 @@ import {
   type ToolExecutionContext,
 } from "./tool-utils";
 import { executeFileTool } from "./file-tools";
+import Seven from "node-7z";
+import pdfParse from "pdf-parse";
+import { ATTACHMENT_LIMITS, estimateAttachmentTokens } from "../src/lib/ai-chat/attachment-limits";
+import type { ChatAttachment, AttachmentKind } from "../src/lib/ai-chat/types";
 import {
   runChatCompletion,
   streamChatCompletion,
   type AdapterStreamEvent,
 } from "./ai-sdk-client";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 
 const APP_ROOT = path.join(__dirname, "..");
 process.env.APP_ROOT = APP_ROOT;
@@ -1691,6 +1698,737 @@ function getStoragePaths() {
   };
 }
 
+
+type AttachmentInput =
+  | { name: string; path: string; mimeType?: string }
+  | { name: string; bytes: Uint8Array | number[] | ArrayBuffer; mimeType?: string };
+
+type AttachmentProcessRequest = AttachmentInput[] | { inputs: AttachmentInput[] };
+
+type AttachmentProcessState = {
+  warnings: string[];
+  totalExtractedChars: number;
+  totalEntries: number;
+  totalExtractedBytes: number;
+};
+
+function getPathTo7za() {
+  const sevenBin = require("7zip-bin") as { path7za: string };
+  return sevenBin.path7za.replace("app.asar", "app.asar.unpacked");
+}
+
+function normalizeAttachmentInputs(request: unknown): AttachmentInput[] {
+  const value = isPlainObject(request) && Array.isArray(request.inputs)
+    ? request.inputs
+    : request;
+  if (!Array.isArray(value)) return [];
+  return value.filter((input): input is AttachmentInput => {
+    if (!isPlainObject(input)) return false;
+    if (typeof input.name !== "string") return false;
+    if (typeof input.path === "string") return true;
+    return input.bytes !== undefined;
+  });
+}
+
+function bufferFromUnknownBytes(value: unknown): Buffer {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof ArrayBuffer) return Buffer.from(value);
+  if (ArrayBuffer.isView(value)) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (Array.isArray(value)) return Buffer.from(value);
+  if (isPlainObject(value) && Array.isArray(value.data)) {
+    return Buffer.from(value.data);
+  }
+  return Buffer.alloc(0);
+}
+
+function hasArchiveExtension(fileName: string) {
+  const lowerName = fileName.toLowerCase();
+  return ATTACHMENT_LIMITS.archiveExtensions.some((extension) =>
+    lowerName.endsWith(extension),
+  );
+}
+
+function getFileExtension(fileName: string) {
+  const lowerName = fileName.toLowerCase();
+  if (lowerName.endsWith(".tar.gz")) return ".tar.gz";
+  return path.extname(lowerName);
+}
+
+function inferMimeType(fileName: string, fallback = "application/octet-stream") {
+  const extension = getFileExtension(fileName);
+  const mapping: Record<string, string> = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".pdf": "application/pdf",
+    ".zip": "application/zip",
+    ".tar": "application/x-tar",
+    ".tar.gz": "application/gzip",
+    ".tgz": "application/gzip",
+    ".gz": "application/gzip",
+    ".rar": "application/vnd.rar",
+    ".7z": "application/x-7z-compressed",
+    ".js": "text/javascript",
+    ".jsx": "text/javascript",
+    ".ts": "text/typescript",
+    ".tsx": "text/typescript",
+    ".json": "application/json",
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+    ".csv": "text/csv",
+    ".html": "text/html",
+    ".css": "text/css",
+    ".py": "text/x-python",
+    ".java": "text/x-java-source",
+    ".kt": "text/x-kotlin",
+    ".scala": "text/x-scala",
+    ".rs": "text/rust",
+    ".go": "text/x-go",
+    ".c": "text/x-c",
+    ".cpp": "text/x-c++",
+    ".h": "text/x-c",
+    ".hpp": "text/x-c++",
+    ".xml": "application/xml",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+  };
+  return mapping[extension] ?? fallback;
+}
+
+function classifyAttachment(name: string, mimeType?: string): AttachmentKind | "binary" {
+  const extension = getFileExtension(name);
+  const normalizedMimeType = mimeType?.toLowerCase() ?? "";
+
+  if (
+    ATTACHMENT_LIMITS.imageExtensions.includes(
+      extension as (typeof ATTACHMENT_LIMITS.imageExtensions)[number],
+    ) ||
+    normalizedMimeType.startsWith("image/")
+  ) {
+    return "image";
+  }
+  if (extension === ".pdf" || normalizedMimeType === "application/pdf") {
+    return "pdf";
+  }
+  if (hasArchiveExtension(name)) return "archive";
+  return "text";
+}
+
+function isLikelyBinary(buffer: Buffer) {
+  const sample = buffer.subarray(0, Math.min(buffer.length, 8192));
+  if (sample.includes(0)) return true;
+  if (sample.length === 0) return false;
+
+  let nonPrintable = 0;
+  for (const byte of sample) {
+    const isPrintable =
+      byte === 9 ||
+      byte === 10 ||
+      byte === 13 ||
+      (byte >= 32 && byte <= 126) ||
+      byte >= 128;
+    if (!isPrintable) nonPrintable += 1;
+  }
+
+  return nonPrintable / sample.length > 0.3;
+}
+
+async function storeAttachmentBuffer(buffer: Buffer, originalName: string) {
+  const id = randomUUID();
+  const safeName = sanitizeFileNamePart(path.basename(originalName));
+  const directory = path.join(getStoragePaths().attachmentsDir, id);
+  const storagePath = path.join(directory, safeName);
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(storagePath, buffer);
+  return { id, storagePath };
+}
+
+async function readAttachmentInput(input: AttachmentInput) {
+  if ("path" in input && typeof input.path === "string") {
+    const buffer = await fs.readFile(input.path);
+    return {
+      name: input.name || path.basename(input.path),
+      sourcePath: input.path,
+      buffer,
+      mimeType: input.mimeType,
+    };
+  }
+
+  if ("bytes" in input) {
+    return {
+      name: input.name,
+      sourcePath: undefined,
+      buffer: bufferFromUnknownBytes(input.bytes),
+      mimeType: input.mimeType,
+    };
+  }
+
+  return {
+    name: input.name,
+    sourcePath: undefined,
+    buffer: Buffer.alloc(0),
+    mimeType: input.mimeType,
+  };
+}
+
+function makeAttachmentError({
+  name,
+  kind = "text",
+  mimeType,
+  sizeBytes,
+  error,
+}: {
+  name: string;
+  kind?: AttachmentKind;
+  mimeType?: string;
+  sizeBytes: number;
+  error: string;
+}): ChatAttachment {
+  const attachment: ChatAttachment = {
+    id: randomUUID(),
+    name,
+    kind,
+    mimeType: mimeType ?? inferMimeType(name),
+    sizeBytes,
+    error,
+    tokenEstimate: 0,
+  };
+  return attachment;
+}
+
+function pushWarning(state: AttachmentProcessState, warning: string) {
+  if (!state.warnings.includes(warning)) state.warnings.push(warning);
+}
+
+function applyTextCaps(text: string, state: AttachmentProcessState) {
+  let nextText = text;
+  let truncated = false;
+
+  if (nextText.length > ATTACHMENT_LIMITS.maxTextBytesPerFile) {
+    nextText = nextText.slice(0, ATTACHMENT_LIMITS.maxTextBytesPerFile);
+    truncated = true;
+  }
+
+  const remainingChars = Math.max(
+    0,
+    ATTACHMENT_LIMITS.maxTotalExtractedChars - state.totalExtractedChars,
+  );
+  if (nextText.length > remainingChars) {
+    nextText = nextText.slice(0, remainingChars);
+    truncated = true;
+  }
+
+  state.totalExtractedChars += nextText.length;
+  return { text: nextText, truncated };
+}
+
+async function processImageAttachment({
+  name,
+  buffer,
+  mimeType,
+}: {
+  name: string;
+  buffer: Buffer;
+  mimeType?: string;
+}): Promise<ChatAttachment> {
+  if (buffer.byteLength > ATTACHMENT_LIMITS.maxImageBytes) {
+    return makeAttachmentError({
+      name,
+      kind: "image",
+      mimeType: mimeType ?? inferMimeType(name),
+      sizeBytes: buffer.byteLength,
+      error: `Image exceeds ${Math.round(ATTACHMENT_LIMITS.maxImageBytes / 1024 / 1024)} MB limit`,
+    });
+  }
+
+  const stored = await storeAttachmentBuffer(buffer, name);
+  const resolvedMimeType = mimeType ?? inferMimeType(name, "image/*");
+  const thumbnailDataUrl =
+    buffer.byteLength <= 512 * 1024
+      ? `data:${resolvedMimeType};base64,${buffer.toString("base64")}`
+      : undefined;
+
+  const attachment: ChatAttachment = {
+    id: stored.id,
+    name,
+    kind: "image",
+    mimeType: resolvedMimeType,
+    sizeBytes: buffer.byteLength,
+    storagePath: stored.storagePath,
+    thumbnailDataUrl,
+  };
+  attachment.tokenEstimate = estimateAttachmentTokens(attachment);
+  return attachment;
+}
+
+async function processTextAttachment({
+  name,
+  buffer,
+  mimeType,
+  state,
+}: {
+  name: string;
+  buffer: Buffer;
+  mimeType?: string;
+  state: AttachmentProcessState;
+}): Promise<ChatAttachment> {
+  if (buffer.byteLength > ATTACHMENT_LIMITS.maxFileBytes) {
+    return makeAttachmentError({
+      name,
+      kind: "text",
+      mimeType: mimeType ?? inferMimeType(name),
+      sizeBytes: buffer.byteLength,
+      error: `File exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB limit`,
+    });
+  }
+
+  if (isLikelyBinary(buffer)) {
+    return makeAttachmentError({
+      name,
+      kind: "text",
+      mimeType: mimeType ?? inferMimeType(name),
+      sizeBytes: buffer.byteLength,
+      error: "Binary file skipped",
+    });
+  }
+
+  const stored = await storeAttachmentBuffer(buffer, name);
+  const capped = applyTextCaps(buffer.toString("utf8"), state);
+  const attachment: ChatAttachment = {
+    id: stored.id,
+    name,
+    kind: "text",
+    mimeType: mimeType ?? inferMimeType(name, "text/plain"),
+    sizeBytes: buffer.byteLength,
+    storagePath: stored.storagePath,
+    extractedText: capped.text,
+    truncated: capped.truncated,
+  };
+  attachment.tokenEstimate = estimateAttachmentTokens(attachment);
+  return attachment;
+}
+
+async function processPdfAttachment({
+  name,
+  buffer,
+  state,
+}: {
+  name: string;
+  buffer: Buffer;
+  state: AttachmentProcessState;
+}): Promise<ChatAttachment> {
+  if (buffer.byteLength > ATTACHMENT_LIMITS.maxFileBytes) {
+    return makeAttachmentError({
+      name,
+      kind: "pdf",
+      mimeType: "application/pdf",
+      sizeBytes: buffer.byteLength,
+      error: `PDF exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB limit`,
+    });
+  }
+
+  const stored = await storeAttachmentBuffer(buffer, name);
+  const data = await pdfParse(buffer);
+  const extracted = data.text ?? "";
+  const capped = applyTextCaps(extracted, state);
+  const attachment: ChatAttachment = {
+    id: stored.id,
+    name,
+    kind: "pdf",
+    mimeType: "application/pdf",
+    sizeBytes: buffer.byteLength,
+    storagePath: stored.storagePath,
+    extractedText: capped.text,
+    truncated: capped.truncated,
+    ...(extracted.trim() ? {} : { error: "No extractable text (PDF may be scanned)" }),
+  };
+  attachment.tokenEstimate = estimateAttachmentTokens(attachment);
+  return attachment;
+}
+
+async function walkFiles(directory: string) {
+  const files: string[] = [];
+  const stack = [directory];
+
+  while (stack.length) {
+    const currentDirectory = stack.pop();
+    if (!currentDirectory) continue;
+    const entries = await fs.readdir(currentDirectory, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(currentDirectory, entry.name);
+      const relative = path.relative(directory, entryPath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (entry.isFile()) {
+        files.push(entryPath);
+      }
+    }
+  }
+
+  return files;
+}
+
+async function extractArchiveToDirectory(archivePath: string, tmpDir: string) {
+  await new Promise<void>((resolve, reject) => {
+    const stream = Seven.extractFull(archivePath, tmpDir, {
+      $bin: getPathTo7za(),
+      recursive: true,
+    });
+    stream.on("end", () => resolve());
+    stream.on("error", reject);
+  });
+}
+
+async function processArchiveAttachment({
+  name,
+  buffer,
+  sourcePath,
+  state,
+  depth,
+}: {
+  name: string;
+  buffer: Buffer;
+  sourcePath?: string;
+  state: AttachmentProcessState;
+  depth: number;
+}): Promise<ChatAttachment> {
+  if (buffer.byteLength > ATTACHMENT_LIMITS.maxArchiveBytes) {
+    return makeAttachmentError({
+      name,
+      kind: "archive",
+      mimeType: inferMimeType(name),
+      sizeBytes: buffer.byteLength,
+      error: `Archive exceeds ${Math.round(ATTACHMENT_LIMITS.maxArchiveBytes / 1024 / 1024)} MB limit`,
+    });
+  }
+
+  const stored = await storeAttachmentBuffer(buffer, name);
+  const archiveAttachment: ChatAttachment = {
+    id: stored.id,
+    name,
+    kind: "archive",
+    mimeType: inferMimeType(name),
+    sizeBytes: buffer.byteLength,
+    storagePath: stored.storagePath,
+    children: [],
+  };
+
+  if (depth >= ATTACHMENT_LIMITS.maxArchiveDepth) {
+    archiveAttachment.error = `Nested archive depth limit reached (${ATTACHMENT_LIMITS.maxArchiveDepth})`;
+    archiveAttachment.tokenEstimate = 0;
+    return archiveAttachment;
+  }
+
+  const tmpDir = path.join(app.getPath("temp"), `chatforge-${randomUUID()}`);
+  const archivePath = sourcePath ?? path.join(tmpDir, sanitizeFileNamePart(name));
+
+  try {
+    await fs.mkdir(tmpDir, { recursive: true });
+    if (!sourcePath) await fs.writeFile(archivePath, buffer);
+    await extractArchiveToDirectory(archivePath, tmpDir);
+
+    const extractedFiles = await walkFiles(tmpDir);
+    if (extractedFiles.length > ATTACHMENT_LIMITS.maxEntriesPerArchive) {
+      archiveAttachment.truncated = true;
+      pushWarning(
+        state,
+        `${name}: archive contains more than ${ATTACHMENT_LIMITS.maxEntriesPerArchive} files; remaining files were skipped.`,
+      );
+    }
+
+    for (const filePath of extractedFiles.slice(0, ATTACHMENT_LIMITS.maxEntriesPerArchive)) {
+      if (state.totalEntries >= ATTACHMENT_LIMITS.maxEntriesTotal) {
+        archiveAttachment.truncated = true;
+        pushWarning(
+          state,
+          `Attachment extraction reached the ${ATTACHMENT_LIMITS.maxEntriesTotal} file limit.`,
+        );
+        break;
+      }
+
+      const resolvedFilePath = path.resolve(filePath);
+      if (!sourcePath && resolvedFilePath === path.resolve(archivePath)) continue;
+      const resolvedTmpDir = path.resolve(tmpDir);
+      const relative = path.relative(resolvedTmpDir, resolvedFilePath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        archiveAttachment.children?.push(
+          makeAttachmentError({
+            name: path.basename(filePath),
+            sizeBytes: 0,
+            error: "Unsafe archive path skipped",
+          }),
+        );
+        continue;
+      }
+
+      const childBuffer = await fs.readFile(resolvedFilePath);
+      state.totalExtractedBytes += childBuffer.byteLength;
+      if (state.totalExtractedBytes > ATTACHMENT_LIMITS.maxExtractedBytesTotal) {
+        archiveAttachment.truncated = true;
+        pushWarning(
+          state,
+          `Attachment extraction reached the ${Math.round(ATTACHMENT_LIMITS.maxExtractedBytesTotal / 1024 / 1024)} MB extracted-size limit.`,
+        );
+        break;
+      }
+      state.totalEntries += 1;
+
+      archiveAttachment.children?.push(
+        await processAttachmentBuffer({
+          name: relative.split(path.sep).join("/"),
+          buffer: childBuffer,
+          sourcePath: resolvedFilePath,
+          state,
+          depth: depth + 1,
+        }),
+      );
+    }
+  } catch (error) {
+    archiveAttachment.error = getErrorMessage(error);
+  } finally {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  }
+
+  archiveAttachment.tokenEstimate = estimateAttachmentTokens(archiveAttachment);
+  return archiveAttachment;
+}
+
+async function processAttachmentBuffer({
+  name,
+  buffer,
+  sourcePath,
+  mimeType,
+  state,
+  depth,
+}: {
+  name: string;
+  buffer: Buffer;
+  sourcePath?: string;
+  mimeType?: string;
+  state: AttachmentProcessState;
+  depth: number;
+}): Promise<ChatAttachment> {
+  const kind = classifyAttachment(name, mimeType);
+
+  if (kind === "image") {
+    return processImageAttachment({ name, buffer, mimeType });
+  }
+
+  if (kind === "pdf") {
+    return processPdfAttachment({ name, buffer, state });
+  }
+
+  if (kind === "archive") {
+    return processArchiveAttachment({ name, buffer, sourcePath, state, depth });
+  }
+
+  return processTextAttachment({ name, buffer, mimeType, state });
+}
+
+async function processAttachmentInput(input: AttachmentInput, state: AttachmentProcessState) {
+  const { name, sourcePath, buffer, mimeType } = await readAttachmentInput(input);
+  return processAttachmentBuffer({
+    name,
+    buffer,
+    sourcePath,
+    mimeType,
+    state,
+    depth: 0,
+  });
+}
+
+
+function collectAttachmentStoragePaths(value: unknown, paths = new Set<string>()) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectAttachmentStoragePaths(item, paths);
+    return paths;
+  }
+
+  if (!isPlainObject(value)) return paths;
+
+  if (typeof value.storagePath === "string" && value.storagePath.trim()) {
+    paths.add(value.storagePath);
+  }
+
+  if (Array.isArray(value.attachments)) {
+    collectAttachmentStoragePaths(value.attachments, paths);
+  }
+
+  if (Array.isArray(value.children)) {
+    collectAttachmentStoragePaths(value.children, paths);
+  }
+
+  if (Array.isArray(value.messages)) {
+    collectAttachmentStoragePaths(value.messages, paths);
+  }
+
+  return paths;
+}
+
+function normalizeAttachmentStoragePath(storagePath: string) {
+  const storageRoot = path.resolve(getStoragePaths().attachmentsDir);
+  const resolvedStoragePath = path.resolve(storagePath);
+  const relative = path.relative(storageRoot, resolvedStoragePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
+  return resolvedStoragePath;
+}
+
+function collectNormalizedAttachmentStoragePaths(value: unknown) {
+  const paths = new Set<string>();
+  for (const storagePath of collectAttachmentStoragePaths(value)) {
+    const normalized = normalizeAttachmentStoragePath(storagePath);
+    if (normalized) paths.add(normalized);
+  }
+  return paths;
+}
+
+async function collectReferencedAttachmentStoragePaths() {
+  const paths = getStoragePaths();
+  const referenced = new Set<string>();
+
+  await fs.mkdir(paths.chatsDir, { recursive: true });
+  const entries = await fs.readdir(paths.chatsDir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (
+      !entry.isFile() ||
+      !entry.name.endsWith(".json") ||
+      entry.name === "index.json"
+    ) {
+      continue;
+    }
+
+    const chat = await readJsonFile<unknown>(
+      path.join(paths.chatsDir, entry.name),
+      undefined,
+    );
+    for (const storagePath of collectNormalizedAttachmentStoragePaths(chat)) {
+      referenced.add(storagePath);
+    }
+  }
+
+  return referenced;
+}
+
+async function deleteAttachmentStoragePath(storagePath: string) {
+  const normalized = normalizeAttachmentStoragePath(storagePath);
+  if (!normalized) return false;
+
+  const storageRoot = path.resolve(getStoragePaths().attachmentsDir);
+  const parentDirectory = path.dirname(normalized);
+  const relativeParent = path.relative(storageRoot, parentDirectory);
+  if (relativeParent.startsWith("..") || path.isAbsolute(relativeParent)) {
+    return false;
+  }
+
+  try {
+    await fs.rm(parentDirectory, { recursive: true, force: true });
+    return true;
+  } catch (error) {
+    console.error("Failed to delete attachment storage path:", error);
+    return false;
+  }
+}
+
+async function cleanupUnreferencedAttachmentStoragePaths(candidates: Iterable<string>) {
+  const normalizedCandidates = new Set<string>();
+  for (const candidate of candidates) {
+    const normalized = normalizeAttachmentStoragePath(candidate);
+    if (normalized) normalizedCandidates.add(normalized);
+  }
+
+  if (!normalizedCandidates.size) return { deleted: 0 };
+
+  const referenced = await collectReferencedAttachmentStoragePaths();
+  let deleted = 0;
+
+  for (const storagePath of normalizedCandidates) {
+    if (referenced.has(storagePath)) continue;
+    if (await deleteAttachmentStoragePath(storagePath)) deleted += 1;
+  }
+
+  return { deleted };
+}
+
+async function deleteTemporaryAttachmentStoragePaths(candidates: Iterable<string>) {
+  const normalizedCandidates = new Set<string>();
+  for (const candidate of candidates) {
+    const normalized = normalizeAttachmentStoragePath(candidate);
+    if (normalized) normalizedCandidates.add(normalized);
+  }
+
+  if (!normalizedCandidates.size) return { deleted: 0 };
+
+  let deleted = 0;
+  for (const storagePath of normalizedCandidates) {
+    if (await deleteAttachmentStoragePath(storagePath)) deleted += 1;
+  }
+
+  return { deleted };
+}
+
+async function cleanupOrphanedAttachmentDirectories() {
+  const attachmentsDir = getStoragePaths().attachmentsDir;
+  await fs.mkdir(attachmentsDir, { recursive: true });
+
+  const referenced = await collectReferencedAttachmentStoragePaths();
+  const entries = await fs.readdir(attachmentsDir, { withFileTypes: true });
+  let deleted = 0;
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+
+    const directory = path.join(attachmentsDir, entry.name);
+    const stack = [directory];
+    let hasReferencedFile = false;
+
+    while (stack.length && !hasReferencedFile) {
+      const currentDirectory = stack.pop();
+      if (!currentDirectory) continue;
+
+      let childEntries: import("node:fs").Dirent[] = [];
+      try {
+        childEntries = await fs.readdir(currentDirectory, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+
+      for (const childEntry of childEntries) {
+        const childPath = path.join(currentDirectory, childEntry.name);
+        if (childEntry.isDirectory()) {
+          stack.push(childPath);
+        } else if (childEntry.isFile() && referenced.has(path.resolve(childPath))) {
+          hasReferencedFile = true;
+          break;
+        }
+      }
+    }
+
+    if (!hasReferencedFile) {
+      await fs.rm(directory, { recursive: true, force: true });
+      deleted += 1;
+    }
+  }
+
+  return { deleted };
+}
+
+function collectAttachmentDeleteCandidates(request: unknown) {
+  if (isPlainObject(request)) {
+    const values = [request.attachments, request.storagePaths, request.storagePath].filter(
+      (value) => value !== undefined,
+    );
+    if (values.length) return collectAttachmentStoragePaths(values);
+  }
+
+  return collectAttachmentStoragePaths(request);
+}
+
 function safeOptionalString(value: unknown) {
   return typeof value === "string" ? value : undefined;
 }
@@ -1948,6 +2686,11 @@ async function writeChatIndexFromChats(chats: unknown[]) {
 
 async function loadJsonChats() {
   await initializeJsonStorageIfNeeded();
+  try {
+    await cleanupOrphanedAttachmentDirectories();
+  } catch (error) {
+    console.error("Failed to clean up orphaned attachment directories:", error);
+  }
   const summaries = await readChatIndex();
   const chats: JsonRecord[] = [];
 
@@ -1972,6 +2715,19 @@ async function saveJsonChat(chat: unknown) {
 
   await queueStorageWrite(async () => {
     await initializeJsonStorageIfNeeded();
+    const previousChat = await readJsonFile<unknown>(
+      chatFilePath(chatId),
+      undefined,
+    );
+    const previousAttachmentPaths =
+      collectNormalizedAttachmentStoragePaths(previousChat);
+    const nextAttachmentPaths = collectNormalizedAttachmentStoragePaths(chat);
+    const cleanupCandidates = new Set<string>();
+
+    for (const storagePath of previousAttachmentPaths) {
+      if (!nextAttachmentPaths.has(storagePath)) cleanupCandidates.add(storagePath);
+    }
+
     await writeJsonAtomic(chatFilePath(chatId), chat);
 
     const existing = await readChatIndex();
@@ -1981,6 +2737,7 @@ async function saveJsonChat(chat: unknown) {
     if (summary) next.unshift(summary);
 
     await writeChatIndexFromChats(next);
+    await cleanupUnreferencedAttachmentStoragePaths(cleanupCandidates);
   });
 }
 
@@ -1990,6 +2747,9 @@ async function deleteJsonChat(chatId: unknown) {
 
   await queueStorageWrite(async () => {
     await initializeJsonStorageIfNeeded();
+    const chat = await readJsonFile<unknown>(chatFilePath(id), undefined);
+    const cleanupCandidates = collectNormalizedAttachmentStoragePaths(chat);
+
     try {
       await fs.unlink(chatFilePath(id));
     } catch (error) {
@@ -2002,6 +2762,7 @@ async function deleteJsonChat(chatId: unknown) {
 
     const existing = await readChatIndex();
     await writeChatIndexFromChats(existing.filter((item) => item.id !== id));
+    await cleanupUnreferencedAttachmentStoragePaths(cleanupCandidates);
   });
 }
 
@@ -2022,6 +2783,8 @@ async function deleteAllJsonChats() {
     }
 
     await writeJsonAtomic(paths.chatsIndex, { chats: [] });
+    await fs.rm(paths.attachmentsDir, { recursive: true, force: true });
+    await fs.mkdir(paths.attachmentsDir, { recursive: true });
   });
 }
 
@@ -3260,6 +4023,92 @@ ipcMain.handle("find-in-page:start", (event, request: unknown) => {
 
 ipcMain.handle("find-in-page:stop", (event, action: unknown) => {
   event.sender.stopFindInPage(normalizeStopFindInPageAction(action));
+});
+
+
+ipcMain.handle("attachments:pick", async () => {
+  const window = BrowserWindow.getFocusedWindow() ?? undefined;
+  const result = await dialog.showOpenDialog(window, {
+    properties: ["openFile", "multiSelections"],
+  });
+
+  if (result.canceled) return [];
+
+  return result.filePaths.map((filePath) => ({
+    name: path.basename(filePath),
+    path: filePath,
+  }));
+});
+
+ipcMain.handle("attachments:process", async (_event, request: unknown) => {
+  await ensureStorageDirectories();
+  const inputs = normalizeAttachmentInputs(request);
+  const state: AttachmentProcessState = {
+    warnings: [],
+    totalExtractedChars: 0,
+    totalEntries: 0,
+    totalExtractedBytes: 0,
+  };
+
+  if (inputs.length > ATTACHMENT_LIMITS.maxFilesPerMessage) {
+    pushWarning(
+      state,
+      `Only the first ${ATTACHMENT_LIMITS.maxFilesPerMessage} files were processed.`,
+    );
+  }
+
+  const attachments: ChatAttachment[] = [];
+  for (const input of inputs.slice(0, ATTACHMENT_LIMITS.maxFilesPerMessage)) {
+    try {
+      attachments.push(await processAttachmentInput(input, state));
+    } catch (error) {
+      attachments.push(
+        makeAttachmentError({
+          name: input.name,
+          sizeBytes: 0,
+          error: getErrorMessage(error),
+        }),
+      );
+    }
+  }
+
+  return {
+    attachments,
+    totalExtractedChars: state.totalExtractedChars,
+    warnings: state.warnings,
+  };
+});
+
+ipcMain.handle("attachments:read-data-url", async (_event, request: unknown) => {
+  if (!isPlainObject(request) || typeof request.storagePath !== "string") {
+    throw new Error("Attachment storage path is required.");
+  }
+
+  const storageRoot = path.resolve(getStoragePaths().attachmentsDir);
+  const resolvedStoragePath = path.resolve(request.storagePath);
+  const relative = path.relative(storageRoot, resolvedStoragePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("Attachment path is outside the attachments directory.");
+  }
+
+  const buffer = await fs.readFile(resolvedStoragePath);
+  const mimeType =
+    typeof request.mimeType === "string"
+      ? request.mimeType
+      : inferMimeType(resolvedStoragePath);
+  return `data:${mimeType};base64,${buffer.toString("base64")}`;
+});
+
+ipcMain.handle("attachments:delete-unused", async (_event, request: unknown) => {
+  await ensureStorageDirectories();
+  const candidates = collectAttachmentDeleteCandidates(request);
+  return cleanupUnreferencedAttachmentStoragePaths(candidates);
+});
+
+ipcMain.handle("attachments:delete-temporary", async (_event, request: unknown) => {
+  await ensureStorageDirectories();
+  const candidates = collectAttachmentDeleteCandidates(request);
+  return deleteTemporaryAttachmentStoragePaths(candidates);
 });
 
 ipcMain.handle("storage:is-initialized", async () =>

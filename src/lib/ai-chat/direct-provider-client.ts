@@ -1,5 +1,7 @@
 import type {
   ApiChatMessage,
+  ApiContentPart,
+  ChatAttachment,
   ChatMessage,
   ChatReasoningMetadata,
   ChatTokenUsage,
@@ -135,19 +137,133 @@ function getActiveAssistantVariant(message: ChatMessage) {
   return message.variants[message.activeVariantIndex];
 }
 
-function buildApiMessages({
+
+function inferFence(name: string) {
+  const extension = name.toLowerCase().split(".").pop() ?? "";
+  const mapping: Record<string, string> = {
+    js: "js",
+    jsx: "jsx",
+    ts: "ts",
+    tsx: "tsx",
+    json: "json",
+    py: "python",
+    java: "java",
+    kt: "kotlin",
+    scala: "scala",
+    rs: "rust",
+    go: "go",
+    c: "c",
+    h: "c",
+    cpp: "cpp",
+    hpp: "cpp",
+    cs: "csharp",
+    html: "html",
+    css: "css",
+    md: "md",
+    xml: "xml",
+    yaml: "yaml",
+    yml: "yaml",
+    sh: "bash",
+    ps1: "powershell",
+    sql: "sql",
+  };
+  return mapping[extension] ?? "";
+}
+
+function getAttachmentDisplayText(attachment: ChatAttachment) {
+  const notices = [
+    attachment.error ? `[attachment note: ${attachment.error}]` : "",
+    attachment.truncated ? "[truncated]" : "",
+  ].filter(Boolean);
+  return notices.length ? `\n${notices.join("\n")}` : "";
+}
+
+async function buildUserApiContent(
+  text: string,
+  attachments: ChatAttachment[] | undefined,
+): Promise<string | ApiContentPart[]> {
+  if (!attachments?.length) return text;
+
+  const imageParts: ApiContentPart[] = [];
+  const textBlocks: string[] = [];
+
+  const visit = async (attachment: ChatAttachment): Promise<void> => {
+    if (attachment.kind === "archive") {
+      if (attachment.error) {
+        textBlocks.push(
+          `\n\n----- Attached archive: ${attachment.name} -----${getAttachmentDisplayText(attachment)}`,
+        );
+      }
+      for (const child of attachment.children ?? []) {
+        await visit(child);
+      }
+      return;
+    }
+
+    if (attachment.kind === "image") {
+      try {
+        if (attachment.storagePath) {
+          const dataUrl = await assertElectronBridge().readAttachmentDataUrl({
+            storagePath: attachment.storagePath,
+            mimeType: attachment.mimeType,
+          });
+          imageParts.push({ type: "image_url", image_url: { url: dataUrl } });
+        } else if (attachment.thumbnailDataUrl) {
+          imageParts.push({
+            type: "image_url",
+            image_url: { url: attachment.thumbnailDataUrl },
+          });
+        } else {
+          textBlocks.push(
+            `\n\n----- Attached image: ${attachment.name} -----\n[attachment missing: image data is unavailable]`,
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "image file is unavailable";
+        textBlocks.push(
+          `\n\n----- Attached image: ${attachment.name} -----\n[attachment missing: ${message}]`,
+        );
+      }
+      if (attachment.error) {
+        textBlocks.push(
+          `\n\n----- Attached image: ${attachment.name} -----${getAttachmentDisplayText(attachment)}`,
+        );
+      }
+      return;
+    }
+
+    if (attachment.extractedText || attachment.error || attachment.truncated) {
+      const fence = attachment.kind === "pdf" ? "" : inferFence(attachment.name);
+      const body = attachment.extractedText
+        ? `\n\n----- Attached file: ${attachment.name} -----\n\`\`\`${fence}\n${attachment.extractedText}\n\`\`\`${getAttachmentDisplayText(attachment)}`
+        : `\n\n----- Attached file: ${attachment.name} -----${getAttachmentDisplayText(attachment)}`;
+      textBlocks.push(body);
+    }
+  };
+
+  for (const attachment of attachments) {
+    await visit(attachment);
+  }
+
+  const combinedText = [text, ...textBlocks].filter(Boolean).join("");
+  return [{ type: "text", text: combinedText || "Please analyze the attached files." }, ...imageParts];
+}
+
+async function buildApiMessages({
   provider,
   systemPrompt,
   messages,
   userMessage,
+  userAttachments,
   settings,
 }: {
   provider: ProviderConfig;
   systemPrompt: string;
   messages: ChatMessage[];
   userMessage?: string;
+  userAttachments?: ChatAttachment[];
   settings: ProviderGenerationSettings;
-}): ApiChatMessage[] {
+}): Promise<ApiChatMessage[]> {
   const apiMessages: ApiChatMessage[] = [
     ...(systemPrompt.trim()
       ? [{ role: "system" as const, content: systemPrompt.trim() }]
@@ -156,7 +272,10 @@ function buildApiMessages({
 
   for (const message of messages) {
     if (message.role === "user") {
-      apiMessages.push({ role: "user", content: message.content });
+      apiMessages.push({
+        role: "user",
+        content: await buildUserApiContent(message.content, message.attachments),
+      });
       continue;
     }
 
@@ -198,10 +317,10 @@ function buildApiMessages({
     settings,
   );
 
-  if (finalUserMessage) {
+  if (finalUserMessage || userAttachments?.length) {
     apiMessages.push({
       role: "user",
-      content: finalUserMessage,
+      content: await buildUserApiContent(finalUserMessage, userAttachments),
     });
   }
 
@@ -343,11 +462,12 @@ function appendThinkingControlPrompt(
   return content;
 }
 
-function buildPayload({
+async function buildPayload({
   provider,
   systemPrompt,
   messages,
   userMessage,
+  userAttachments,
   stream,
   tools,
   settingsOverride,
@@ -356,6 +476,7 @@ function buildPayload({
   systemPrompt: string;
   messages: ChatMessage[];
   userMessage?: string;
+  userAttachments?: ChatAttachment[];
   stream: boolean;
   tools?: LoadedToolInfo[];
   settingsOverride?: ProviderGenerationSettings;
@@ -370,11 +491,12 @@ function buildPayload({
 
   return {
     model: provider.model,
-    messages: buildApiMessages({
+    messages: await buildApiMessages({
       provider,
       systemPrompt,
       messages,
       userMessage,
+      userAttachments,
       settings,
     }),
     stream,
@@ -614,12 +736,14 @@ export async function sendProviderChat({
   systemPrompt,
   messages,
   userMessage,
+  userAttachments,
   settingsOverride,
 }: {
   provider: ProviderConfig;
   systemPrompt: string;
   messages: ChatMessage[];
   userMessage: string;
+  userAttachments?: ChatAttachment[];
   settingsOverride?: ProviderGenerationSettings;
 }): Promise<string> {
   if (!provider.baseUrl.trim()) {
@@ -630,7 +754,7 @@ export async function sendProviderChat({
     throw new Error("Model name is required.");
   }
 
-  if (!userMessage?.trim() && messages.length === 0) {
+  if (!userMessage?.trim() && !userAttachments?.length && messages.length === 0) {
     throw new Error("Message is required.");
   }
 
@@ -638,7 +762,7 @@ export async function sendProviderChat({
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     headers: provider.headers,
-    payload: buildPayload({ provider, systemPrompt, messages, userMessage, stream: false, settingsOverride }),
+    payload: await buildPayload({ provider, systemPrompt, messages, userMessage, userAttachments, stream: false, settingsOverride }),
   });
 
   const content = data?.choices?.[0]?.message?.content;
@@ -664,6 +788,7 @@ export async function streamProviderChat({
   systemPrompt,
   messages,
   userMessage,
+  userAttachments,
   signal,
   tools,
   settingsOverride,
@@ -675,6 +800,7 @@ export async function streamProviderChat({
   systemPrompt: string;
   messages: ChatMessage[];
   userMessage?: string;
+  userAttachments?: ChatAttachment[];
   signal?: AbortSignal;
   tools?: LoadedToolInfo[];
   settingsOverride?: ProviderGenerationSettings;
@@ -690,7 +816,7 @@ export async function streamProviderChat({
     throw new Error("Model name is required.");
   }
 
-  if (!userMessage?.trim() && messages.length === 0) {
+  if (!userMessage?.trim() && !userAttachments?.length && messages.length === 0) {
     throw new Error("Message is required.");
   }
 
@@ -718,7 +844,7 @@ export async function streamProviderChat({
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     headers: provider.headers,
-    payload: buildPayload({ provider, systemPrompt, messages, userMessage, stream: true, tools, settingsOverride }),
+    payload: await buildPayload({ provider, systemPrompt, messages, userMessage, userAttachments, stream: true, tools, settingsOverride }),
   });
 
   const abortHandler = () => {

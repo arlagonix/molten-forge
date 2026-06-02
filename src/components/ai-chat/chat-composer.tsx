@@ -1,5 +1,14 @@
-import { BookOpen, Bot, Lock, Send, Square, Wrench } from "lucide-react";
-import type { FormEvent, ReactNode } from "react";
+import {
+  AlertTriangle,
+  BookOpen,
+  Bot,
+  Lock,
+  Paperclip,
+  Send,
+  Square,
+  Wrench,
+} from "lucide-react";
+import type { ClipboardEvent, DragEvent, FormEvent, ReactNode } from "react";
 import {
   forwardRef,
   memo,
@@ -12,19 +21,34 @@ import {
   useState,
 } from "react";
 
+import { AttachmentChips } from "@/components/ai-chat/attachment-chips";
 import {
   ContextUsageIndicator,
   type ContextUsageInfo,
 } from "@/components/ai-chat/context-usage-indicator";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  deleteTemporaryAttachments,
+  findAttachmentById,
+} from "@/lib/ai-chat/attachment-cleanup";
+import type { ChatAttachment } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export type ToolMentionOption = {
   name: string;
   description?: string;
   isBuiltin?: boolean;
 };
+
+type AttachmentInput =
+  | { name: string; path: string; mimeType?: string }
+  | {
+      name: string;
+      bytes: Uint8Array | number[] | ArrayBuffer;
+      mimeType?: string;
+    };
 
 type ActiveMention = {
   type: "tool" | "skill" | "agent";
@@ -180,10 +204,16 @@ export const ChatComposer = memo(
       draftKey: string;
       draft: string;
       onDraftChange: (draft: string) => void;
-      onSend: (content: string) => Promise<boolean> | boolean;
+      attachments: ChatAttachment[];
+      onAttachmentsChange: (attachments: ChatAttachment[]) => void;
+      onSend: (
+        content: string,
+        attachments: ChatAttachment[],
+      ) => Promise<boolean> | boolean;
       onStop: () => void;
       footerStart?: ReactNode;
       contextUsage?: ContextUsageInfo;
+      supportsVision?: boolean;
       toolMentionOptions?: ToolMentionOption[];
       skillMentionOptions?: ToolMentionOption[];
       agentMentionOptions?: ToolMentionOption[];
@@ -195,10 +225,13 @@ export const ChatComposer = memo(
       draftKey,
       draft,
       onDraftChange,
+      attachments,
+      onAttachmentsChange,
       onSend,
       onStop,
       footerStart,
       contextUsage,
+      supportsVision = false,
       toolMentionOptions = [],
       skillMentionOptions = [],
       agentMentionOptions = [],
@@ -215,8 +248,20 @@ export const ChatComposer = memo(
       useState<CaretMenuPosition | null>(null);
     const [selectedMentionSuggestionIndex, setSelectedMentionSuggestionIndex] =
       useState(0);
+    const [isProcessingAttachments, setIsProcessingAttachments] =
+      useState(false);
+    const [isDraggingAttachments, setIsDraggingAttachments] = useState(false);
     const trimmedDraft = localDraft.trim();
-    const canSend = !disabled && !isSending && trimmedDraft.length > 0;
+    const canSend =
+      !disabled &&
+      !isSending &&
+      !isProcessingAttachments &&
+      (trimmedDraft.length > 0 || attachments.length > 0);
+    const hasImageAttachments = attachments.some(
+      (attachment) =>
+        attachment.kind === "image" ||
+        attachment.children?.some((child) => child.kind === "image"),
+    );
 
     const mentionSuggestions = useMemo<ToolMentionOption[]>(() => {
       if (!activeMention || disabled || isSending) return [];
@@ -317,13 +362,14 @@ export const ChatComposer = memo(
         clear: () => {
           setLocalDraft("");
           onDraftChange("");
+          onAttachmentsChange([]);
           setActiveMention(null);
           setMentionMenuPosition(null);
           setSelectedMentionSuggestionIndex(0);
         },
         focus: focusTextarea,
       }),
-      [focusTextarea, onDraftChange],
+      [focusTextarea, onAttachmentsChange, onDraftChange],
     );
 
     useEffect(() => {
@@ -368,14 +414,133 @@ export const ChatComposer = memo(
         textarea.scrollHeight > maxHeight ? "auto" : "hidden";
     }, [localDraft]);
 
+    async function addFiles(inputs: AttachmentInput[]) {
+      if (!inputs.length) return;
+      if (!window.codeForgeAI?.processAttachments) {
+        toast.error("Attachment processing is not available.");
+        return;
+      }
+
+      setIsProcessingAttachments(true);
+      try {
+        const result = await window.codeForgeAI.processAttachments(inputs);
+        onAttachmentsChange([...attachments, ...result.attachments]);
+        for (const warning of result.warnings ?? []) {
+          toast.warning(warning);
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Failed to process attachments.",
+        );
+      } finally {
+        setIsProcessingAttachments(false);
+      }
+    }
+
+    async function handlePickAttachments() {
+      if (!window.codeForgeAI?.pickAttachments) {
+        toast.error("File picker is not available.");
+        return;
+      }
+      const picked = await window.codeForgeAI.pickAttachments();
+      await addFiles(picked);
+    }
+
+    function handleRemoveAttachment(attachmentId: string) {
+      const removedAttachment = findAttachmentById(attachments, attachmentId);
+      if (removedAttachment) deleteTemporaryAttachments([removedAttachment]);
+      onAttachmentsChange(
+        attachments.filter((attachment) => attachment.id !== attachmentId),
+      );
+    }
+
+    function getFileSystemPath(file: File) {
+      return (
+        window.codeForgeAI?.getPathForFile?.(file) ||
+        (file as File & { path?: string }).path ||
+        ""
+      );
+    }
+
+    async function fileToAttachmentInput(
+      file: File,
+      fallbackPrefix: string,
+    ): Promise<AttachmentInput> {
+      const filePath = getFileSystemPath(file);
+      const name = file.name || `${fallbackPrefix}-${Date.now()}`;
+      if (filePath) {
+        return { name, path: filePath, mimeType: file.type };
+      }
+
+      const buffer = await file.arrayBuffer();
+      return {
+        name,
+        bytes: new Uint8Array(buffer),
+        mimeType: file.type,
+      };
+    }
+
+    function getUniqueClipboardFiles(
+      event: ClipboardEvent<HTMLTextAreaElement>,
+    ) {
+      const items = Array.from(event.clipboardData.items).filter(
+        (item) => item.kind === "file",
+      );
+      const rawFiles = items.length
+        ? items.map((item) => item.getAsFile())
+        : Array.from(event.clipboardData.files);
+      const files: File[] = [];
+      const seen = new Set<string>();
+
+      for (const file of rawFiles) {
+        if (!file) continue;
+        const key = `${file.name}:${file.size}:${file.type}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        files.push(file);
+      }
+
+      return files;
+    }
+
+    async function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+      const files = getUniqueClipboardFiles(event);
+      if (!files.length) return;
+
+      event.preventDefault();
+      const inputs = await Promise.all(
+        files.map((file) => fileToAttachmentInput(file, "pasted")),
+      );
+      void addFiles(inputs);
+    }
+
+    async function getDroppedFileInputs(event: DragEvent<HTMLElement>) {
+      const files = Array.from(event.dataTransfer.files);
+      if (!files.length) {
+        for (const item of Array.from(event.dataTransfer.items)) {
+          if (item.kind === "file") {
+            const file = item.getAsFile();
+            if (file) files.push(file);
+          }
+        }
+      }
+
+      return Promise.all(
+        files.map((file) => fileToAttachmentInput(file, "dropped")),
+      );
+    }
+
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
       event.preventDefault();
       if (!canSend) return;
 
-      const wasSent = await onSend(localDraft);
+      const wasSent = await onSend(localDraft, attachments);
       if (wasSent) {
         setLocalDraft("");
         onDraftChange("");
+        onAttachmentsChange([]);
         setActiveMention(null);
         setMentionMenuPosition(null);
         setSelectedMentionSuggestionIndex(0);
@@ -385,11 +550,50 @@ export const ChatComposer = memo(
     return (
       <form
         onSubmit={handleSubmit}
+        onDragEnter={(event) => {
+          event.preventDefault();
+          setIsDraggingAttachments(true);
+        }}
+        onDragOver={(event) => {
+          event.preventDefault();
+          setIsDraggingAttachments(true);
+        }}
+        onDragLeave={(event) => {
+          if (
+            !event.currentTarget.contains(event.relatedTarget as Node | null)
+          ) {
+            setIsDraggingAttachments(false);
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          setIsDraggingAttachments(false);
+          void getDroppedFileInputs(event).then(addFiles);
+        }}
         className="bg-background py-3 md:py-4"
         data-draft-input
       >
-        <div className="mx-auto w-full max-w-4xl border  bg-card p-3 pt-0 shadow-sm">
+        <div
+          className={cn(
+            "mx-auto w-full max-w-4xl border bg-card p-3 pt-0 shadow-sm",
+            isDraggingAttachments && "border-primary bg-primary/5",
+          )}
+        >
           <div className="mx-auto grid w-full gap-2">
+            <AttachmentChips
+              attachments={attachments}
+              isProcessing={isProcessingAttachments}
+              onRemove={handleRemoveAttachment}
+              className="pt-3"
+            />
+            {hasImageAttachments && !supportsVision && (
+              <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="size-3.5" />
+                This model is not marked as vision-capable. The request will
+                still be sent.
+              </div>
+            )}
             <div className="relative">
               {isMentionMenuOpen && mentionMenuPosition && (
                 <div
@@ -461,6 +665,7 @@ export const ChatComposer = memo(
                   onDraftChange(nextDraft);
                   updateActiveMention(nextDraft, event.target.selectionStart);
                 }}
+                onPaste={handlePaste}
                 onClick={(event) => {
                   updateActiveMention(
                     event.currentTarget.value,
@@ -546,6 +751,16 @@ export const ChatComposer = memo(
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0 flex-1">{footerStart}</div>
               <ContextUsageIndicator usage={contextUsage ?? {}} />
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handlePickAttachments}
+                disabled={disabled || isSending || isProcessingAttachments}
+                className="shrink-0"
+                title="Attach files"
+              >
+                <Paperclip className="size-4" />
+              </Button>
               {isSending ? (
                 <Button
                   type="button"

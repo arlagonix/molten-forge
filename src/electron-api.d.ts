@@ -9,6 +9,7 @@ import type {
   LoadedSkillInfo,
   LoadedToolInfo,
   ChatWorkspaceRoot,
+  ChatAttachment,
   ToolCommandResult,
   SkillExportResult,
   SkillImportResult,
@@ -17,6 +18,17 @@ import type {
   SkillsSettings,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
+
+
+type AttachmentInput =
+  | { name: string; path: string; mimeType?: string }
+  | { name: string; bytes: Uint8Array | number[] | ArrayBuffer; mimeType?: string };
+
+type AttachmentProcessResult = {
+  attachments: ChatAttachment[];
+  totalExtractedChars: number;
+  warnings: string[];
+};
 
 type AiProviderRequest = {
   baseUrl: string;
@@ -66,6 +78,12 @@ declare global {
     codeForgeAI?: {
       loadModels: (request: AiProviderRequest) => Promise<unknown>;
       sendChat: (request: AiProviderRequest) => Promise<any>;
+      pickAttachments: () => Promise<AttachmentInput[]>;
+      processAttachments: (request: AttachmentInput[] | { inputs: AttachmentInput[] }) => Promise<AttachmentProcessResult>;
+      readAttachmentDataUrl: (request: { storagePath: string; mimeType?: string }) => Promise<string>;
+      deleteUnusedAttachments: (request: ChatAttachment[] | { attachments?: ChatAttachment[]; storagePaths?: string[]; storagePath?: string }) => Promise<{ deleted: number }>;
+      deleteTemporaryAttachments: (request: ChatAttachment[] | { attachments?: ChatAttachment[]; storagePaths?: string[]; storagePath?: string }) => Promise<{ deleted: number }>;
+      getPathForFile: (file: File) => string;
       streamChat: (request: AiProviderRequest) => AiStreamHandle;
     };
   }

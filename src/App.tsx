@@ -66,12 +66,14 @@ import {
   getEffectiveModelContext,
   getEnabledProviderModels,
   getProviderFallbackModel,
+  modelSupportsVision,
   groupChatsByPinnedAndActivityDate,
   labelForError,
   normalizeProviderForState,
   providerDisplayName,
   sortChatsByUpdatedAt,
 } from "@/lib/ai-chat/chat-utils";
+import { estimateAttachmentsTokens } from "@/lib/ai-chat/attachment-limits";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
   resolveProviderForChat,
@@ -103,6 +105,7 @@ import { generateTitleFromChatContext } from "@/lib/ai-chat/title-generation";
 import type {
   AgentsSettings,
   AppSettings,
+  ChatAttachment,
   ChatMessage,
   ChatSession,
   ChatToolCall,
@@ -217,6 +220,7 @@ export default function Home() {
   const pendingDraftSendRef = useRef<{
     chatId: string;
     content: string;
+    attachments: ChatAttachment[];
   } | null>(null);
   const [chatSwitchLoadingChatId, setChatSwitchLoadingChatId] = useState<
     string | null
@@ -227,6 +231,9 @@ export default function Home() {
   const composerDraftsRef = useRef<Record<string, string>>(
     initialComposerDrafts,
   );
+  const [composerAttachmentsByKey, setComposerAttachmentsByKey] = useState<
+    Record<string, ChatAttachment[]>
+  >({});
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
   const [completedGenerationChatIds, setCompletedGenerationChatIds] = useState<
@@ -492,6 +499,9 @@ export default function Home() {
   const activeComposerDraft = composerDraftKey
     ? (composerDraftsRef.current[composerDraftKey] ?? "")
     : "";
+  const activeComposerAttachments = composerDraftKey
+    ? (composerAttachmentsByKey[composerDraftKey] ?? [])
+    : [];
 
   const providers = providersState.providers.length
     ? providersState.providers
@@ -512,6 +522,7 @@ export default function Home() {
       activeChatProvider,
       activeChatModel,
     );
+    const attachmentTokens = estimateAttachmentsTokens(activeComposerAttachments);
     const assistantMessages = [...messages]
       .reverse()
       .filter((message) => message.role === "assistant");
@@ -523,7 +534,7 @@ export default function Home() {
       const usedTokens = usage?.promptTokens ?? usage?.totalTokens;
       if (usedTokens !== undefined && Number.isFinite(usedTokens)) {
         return {
-          usedTokens,
+          usedTokens: usedTokens + attachmentTokens,
           limitTokens: context.length,
           limitSource: context.source,
         };
@@ -531,11 +542,11 @@ export default function Home() {
     }
 
     return {
-      usedTokens: undefined,
+      usedTokens: attachmentTokens || undefined,
       limitTokens: context.length,
       limitSource: context.source,
     };
-  }, [activeChatModel, activeChatProvider, messages]);
+  }, [activeChatModel, activeChatProvider, activeComposerAttachments, messages]);
   const visibleProviderGroups = useMemo(() => {
     const search = sidebarModelSearchValue.trim().toLowerCase();
 
@@ -1300,6 +1311,21 @@ export default function Home() {
     [isNewChatDraft, activeChatId],
   );
 
+  const updateActiveComposerAttachments = useCallback(
+    (attachments: ChatAttachment[]) => {
+      const key = isNewChatDraft ? NEW_CHAT_DRAFT_KEY : activeChatId;
+      if (!key) return;
+
+      setComposerAttachmentsByKey((current) => {
+        const next = { ...current };
+        if (attachments.length === 0) delete next[key];
+        else next[key] = attachments;
+        return next;
+      });
+    },
+    [isNewChatDraft, activeChatId],
+  );
+
   const {
     sendMessage,
     regenerateAssistantMessage,
@@ -1409,17 +1435,17 @@ export default function Home() {
     if (activeChat?.id !== pending.chatId) return;
 
     pendingDraftSendRef.current = null;
-    void sendMessage(pending.content);
+    void sendMessage(pending.content, pending.attachments);
   }, [activeChat, sendMessage]);
 
   const handleComposerSend = useCallback(
-    async (content: string) => {
+    async (content: string, attachments: ChatAttachment[]) => {
       if (!isNewChatDraft) {
-        return sendMessage(content);
+        return sendMessage(content, attachments);
       }
 
       const trimmed = content.trim();
-      if (!trimmed) {
+      if (!trimmed && attachments.length === 0) {
         showError("Message is required.");
         return false;
       }
@@ -1444,8 +1470,17 @@ export default function Home() {
       delete nextDrafts[NEW_CHAT_DRAFT_KEY];
       composerDraftsRef.current = nextDrafts;
       saveComposerDrafts(nextDrafts);
+      setComposerAttachmentsByKey((current) => {
+        const next = { ...current };
+        delete next[NEW_CHAT_DRAFT_KEY];
+        return next;
+      });
 
-      pendingDraftSendRef.current = { chatId: chat.id, content: trimmed };
+      pendingDraftSendRef.current = {
+        chatId: chat.id,
+        content: trimmed,
+        attachments,
+      };
 
       try {
         await saveChat(chat);
@@ -2032,9 +2067,12 @@ export default function Home() {
           draftKey={composerDraftKey}
           draft={activeComposerDraft}
           onDraftChange={updateActiveComposerDraft}
+          attachments={activeComposerAttachments}
+          onAttachmentsChange={updateActiveComposerAttachments}
           onSend={handleComposerSend}
           onStop={stopGeneration}
           contextUsage={latestContextUsage}
+          supportsVision={modelSupportsVision(activeChatProvider, activeChatModel)}
           footerStart={
             <ComposerFooter
               activeChatExists={Boolean(activeChat) || isNewChatDraft}

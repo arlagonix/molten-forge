@@ -151,6 +151,10 @@ export function getModelConfig(
   return normalizedModel ? provider.modelConfigs?.[normalizedModel] : undefined;
 }
 
+export function modelSupportsVision(provider: ProviderConfig, model = provider.model) {
+  return getModelConfig(provider, model)?.supportsVision === true;
+}
+
 export function getEffectiveModelContext(
   provider: ProviderConfig,
   model = provider.model,
@@ -234,6 +238,10 @@ export function normalizeProviderForState(
       }),
       enabled,
       showInMenu,
+      supportsVision:
+        typeof existing.supportsVision === "boolean"
+          ? existing.supportsVision
+          : undefined,
       context: {
         ...(existing.context ?? {}),
         manualContextLength: normalizePositiveOptionalNumber(

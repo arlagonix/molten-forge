@@ -23,6 +23,7 @@ export type ProviderModelContext = {
 export type ProviderModelConfig = ProviderGenerationSettings & {
   enabled?: boolean;
   showInMenu?: boolean;
+  supportsVision?: boolean;
   context?: ProviderModelContext;
 };
 
@@ -305,11 +306,29 @@ export type ChatAssistantVariant = {
   processSteps?: ChatAssistantProcessStep[];
 };
 
+export type AttachmentKind = "image" | "text" | "pdf" | "archive";
+
+export type ChatAttachment = {
+  id: string;
+  name: string;
+  kind: AttachmentKind;
+  mimeType: string;
+  sizeBytes: number;
+  storagePath?: string;
+  thumbnailDataUrl?: string;
+  extractedText?: string;
+  children?: ChatAttachment[];
+  truncated?: boolean;
+  error?: string;
+  tokenEstimate?: number;
+};
+
 export type ChatUserMessage = {
   id: string;
   role: "user";
   content: string;
   createdAt: string;
+  attachments?: ChatAttachment[];
 };
 
 export type ChatAssistantMessage = {
@@ -372,10 +391,18 @@ export type ChatSession = {
 
 export type ApiToolCall = ChatToolCall;
 
+export type ApiContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export type ApiChatMessage =
   | {
-      role: "system" | "user";
+      role: "system";
       content: string;
+    }
+  | {
+      role: "user";
+      content: string | ApiContentPart[];
     }
   | {
       role: "assistant";

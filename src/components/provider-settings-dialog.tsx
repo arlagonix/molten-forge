@@ -1088,6 +1088,24 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
 
                 <Separator />
 
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label htmlFor="model-supports-vision">Vision input</Label>
+                    <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                      Mark this model as able to receive image attachments.
+                    </p>
+                  </div>
+                  <Switch
+                    id="model-supports-vision"
+                    checked={selectedModelConfig?.supportsVision === true}
+                    onCheckedChange={(checked) =>
+                      updateSelectedModelConfig({ supportsVision: checked })
+                    }
+                  />
+                </div>
+
+                <Separator />
+
                 <div className="grid gap-3">
                   <div>
                     <Label>Context size</Label>

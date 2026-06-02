@@ -28,6 +28,7 @@ import {
 import { createPortal } from "react-dom";
 
 import { AgentCallBlock } from "@/components/ai-chat/agent-call-block";
+import { AttachmentChips } from "@/components/ai-chat/attachment-chips";
 import { type ToolMentionOption } from "@/components/ai-chat/chat-composer";
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { SmoothAssistantMessageContent } from "@/components/ai-chat/smooth-assistant-message";
@@ -57,6 +58,7 @@ import type {
   AskUserResponse,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
+  ChatAttachment,
   ChatMessage,
   ChatToolCall,
   ChatToolResult,
@@ -205,10 +207,12 @@ type ChatMessageListProps = {
   onSaveEditedUserMessage: (
     messageId: string,
     nextContent: string,
+    attachments?: ChatAttachment[],
   ) => void | Promise<void>;
   onSubmitEditedUserMessage: (
     messageId: string,
     nextContent: string,
+    attachments?: ChatAttachment[],
   ) => void | Promise<void>;
   onSelectAssistantVariant: (messageId: string, variantIndex: number) => void;
   onToggleToolExecutionCollapsed: (
@@ -932,16 +936,17 @@ const ChatMessageItem = memo(
         {message.role === "user" && editingMessageId === message.id ? (
           <UserMessageEditor
             initialContent={message.content}
+            initialAttachments={message.attachments ?? []}
             disabled={isSending}
             toolMentionOptions={toolMentionOptions}
             skillMentionOptions={skillMentionOptions}
             agentMentionOptions={agentMentionOptions}
             onCancel={onCancelEditingUserMessage}
-            onSave={(nextContent) =>
-              onSaveEditedUserMessage(message.id, nextContent)
+            onSave={(nextContent, attachments) =>
+              onSaveEditedUserMessage(message.id, nextContent, attachments)
             }
-            onSubmit={(nextContent) =>
-              onSubmitEditedUserMessage(message.id, nextContent)
+            onSubmit={(nextContent, attachments) =>
+              onSubmitEditedUserMessage(message.id, nextContent, attachments)
             }
           />
         ) : (
@@ -969,6 +974,13 @@ const ChatMessageItem = memo(
                   )}
                   data-message-view-mode={isSourceView ? "source" : "rendered"}
                 >
+                  {message.role === "user" && message.attachments?.length ? (
+                    <AttachmentChips
+                      attachments={message.attachments}
+                      readOnly
+                      className={cn(content && "mb-3")}
+                    />
+                  ) : null}
                   {isSourceView ? (
                     <SourceMarkdownContent content={content} />
                   ) : message.role === "assistant" ? (
