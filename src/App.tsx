@@ -214,9 +214,10 @@ export default function Home() {
   // real chat is created on first send. The composer draft lives under
   // NEW_CHAT_DRAFT_KEY so it survives switching to another chat and back.
   const [isNewChatDraft, setIsNewChatDraft] = useState(false);
-  const pendingDraftSendRef = useRef<{ chatId: string; content: string } | null>(
-    null,
-  );
+  const pendingDraftSendRef = useRef<{
+    chatId: string;
+    content: string;
+  } | null>(null);
   const [chatSwitchLoadingChatId, setChatSwitchLoadingChatId] = useState<
     string | null
   >(null);
@@ -1427,9 +1428,8 @@ export default function Home() {
       // the new chat becomes the active chat (see the effect above).
       const chat: ChatSession = {
         ...createEmptyChat(),
-        fileToolAutoApproval: buildFileToolAutoApprovalFromToolsSettings(
-          toolsSettings,
-        ),
+        fileToolAutoApproval:
+          buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
       };
 
       saveCurrentChatScrollSnapshot();
@@ -1910,7 +1910,7 @@ export default function Home() {
         >
           {showChatSwitchLoading && (
             <div
-              className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center bg-background/45 text-foreground backdrop-blur-lg"
+              className="pointer-events-auto absolute inset-0 z-30 flex items-center justify-center text-foreground backdrop-blur-lg"
               aria-label="Loading chat"
               aria-live="polite"
             >

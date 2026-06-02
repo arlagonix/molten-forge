@@ -14,6 +14,7 @@
     "release:diff": "git diff v1.0.0..v1.1.0 -- . \":(exclude)package-lock.json\" > release-full.diff"
   },
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.48",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
@@ -30,6 +31,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@radix-ui/themes": "^3.3.0",
     "@tanstack/react-virtual": "^3.13.26",
+    "ai": "^6.0.193",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "1.1.1",

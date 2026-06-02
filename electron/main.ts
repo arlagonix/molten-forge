@@ -16,6 +16,11 @@ import {
   type ToolExecutionContext,
 } from "./tool-utils";
 import { executeFileTool } from "./file-tools";
+import {
+  runChatCompletion,
+  streamChatCompletion,
+  type AdapterStreamEvent,
+} from "./ai-sdk-client";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const APP_ROOT = path.join(__dirname, "..");
@@ -414,6 +419,19 @@ function buildUpstreamHeaders({
   return headers;
 }
 
+function buildUpstreamHeaderRecord(options: {
+  apiKey?: string;
+  customHeaders?: string;
+  headers?: Record<string, unknown>;
+}): Record<string, string> {
+  const headers = buildUpstreamHeaders(options);
+  const record: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    record[key] = value;
+  });
+  return record;
+}
+
 async function readUpstreamJson(response: Response) {
   const text = await response.text();
 
@@ -426,157 +444,6 @@ async function readUpstreamJson(response: Response) {
   } catch {
     throw new Error("Provider returned a non-JSON response.");
   }
-}
-
-function getDeltaText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => {
-        if (typeof item === "string") return item;
-        if (
-          item &&
-          typeof item === "object" &&
-          "text" in item &&
-          typeof item.text === "string"
-        ) {
-          return item.text;
-        }
-        if (
-          item &&
-          typeof item === "object" &&
-          "content" in item &&
-          typeof item.content === "string"
-        ) {
-          return item.content;
-        }
-        return "";
-      })
-      .join("");
-  }
-  return "";
-}
-
-function getReasoningDetails(value: unknown): unknown[] | undefined {
-  if (value === undefined || value === null) return undefined;
-  return Array.isArray(value) ? value : [value];
-}
-
-function mergeReasoningMetadata(
-  current?: ChatReasoningMetadata,
-  delta?: ChatReasoningMetadata,
-): ChatReasoningMetadata | undefined {
-  if (!delta?.reasoningContent && !delta?.reasoningDetails?.length) {
-    return current;
-  }
-
-  const reasoningContent = `${current?.reasoningContent ?? ""}${
-    delta.reasoningContent ?? ""
-  }`;
-  const reasoningDetails = [
-    ...(current?.reasoningDetails ?? []),
-    ...(delta.reasoningDetails ?? []),
-  ];
-
-  if (!reasoningContent && reasoningDetails.length === 0) return undefined;
-
-  return {
-    ...(reasoningContent ? { reasoningContent } : {}),
-    ...(reasoningDetails.length ? { reasoningDetails } : {}),
-  };
-}
-
-function readReasoningMetadataDelta(
-  data: unknown,
-): ChatReasoningMetadata | undefined {
-  if (!data || typeof data !== "object") return undefined;
-  const choices = "choices" in data ? data.choices : undefined;
-  if (!Array.isArray(choices)) return undefined;
-  const delta = choices[0]?.delta;
-  if (!delta || typeof delta !== "object") return undefined;
-
-  const reasoningContent =
-    getDeltaText(
-      "reasoning_content" in delta ? delta.reasoning_content : undefined,
-    ) || getDeltaText("reasoning" in delta ? delta.reasoning : undefined);
-  const reasoningDetails = getReasoningDetails(
-    "reasoning_details" in delta ? delta.reasoning_details : undefined,
-  );
-
-  if (!reasoningContent && !reasoningDetails?.length) return undefined;
-
-  return {
-    ...(reasoningContent ? { reasoningContent } : {}),
-    ...(reasoningDetails?.length ? { reasoningDetails } : {}),
-  };
-}
-
-function readContentDelta(data: unknown): string {
-  if (!data || typeof data !== "object") return "";
-  const choices = "choices" in data ? data.choices : undefined;
-  if (!Array.isArray(choices)) return "";
-  const delta = choices[0]?.delta;
-  if (!delta || typeof delta !== "object") return "";
-  return getDeltaText("content" in delta ? delta.content : undefined);
-}
-
-function readReasoningDelta(data: unknown): string {
-  if (!data || typeof data !== "object") return "";
-  const choices = "choices" in data ? data.choices : undefined;
-  if (!Array.isArray(choices)) return "";
-  const delta = choices[0]?.delta;
-  if (!delta || typeof delta !== "object") return "";
-  return (
-    getDeltaText(
-      "reasoning_content" in delta ? delta.reasoning_content : undefined,
-    ) ||
-    getDeltaText("reasoning" in delta ? delta.reasoning : undefined) ||
-    getDeltaText("thinking" in delta ? delta.thinking : undefined) ||
-    getDeltaText(
-      "reasoning_details" in delta ? delta.reasoning_details : undefined,
-    )
-  );
-}
-
-function readNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? value
-    : undefined;
-}
-
-function readUsage(data: unknown): ChatTokenUsage | undefined {
-  if (!data || typeof data !== "object" || !("usage" in data)) return undefined;
-
-  const usage = data.usage;
-  if (!usage || typeof usage !== "object") return undefined;
-
-  const promptTokens = readNumber(
-    "prompt_tokens" in usage ? usage.prompt_tokens : undefined,
-  );
-  const completionTokens = readNumber(
-    "completion_tokens" in usage ? usage.completion_tokens : undefined,
-  );
-  const totalTokens = readNumber(
-    "total_tokens" in usage ? usage.total_tokens : undefined,
-  );
-
-  if (
-    promptTokens === undefined &&
-    completionTokens === undefined &&
-    totalTokens === undefined
-  ) {
-    return undefined;
-  }
-
-  return { promptTokens, completionTokens, totalTokens };
-}
-
-function readFinishReason(data: unknown): string | undefined {
-  if (!data || typeof data !== "object") return undefined;
-  const choices = "choices" in data ? data.choices : undefined;
-  if (!Array.isArray(choices)) return undefined;
-  const finishReason = choices[0]?.finish_reason;
-  return typeof finishReason === "string" ? finishReason : undefined;
 }
 
 function normalizeToolsSettings(value: unknown): ToolsSettings {
@@ -1687,100 +1554,6 @@ async function executeToolManifest(
     isError: result.timedOut || result.exitCode !== 0,
     ...result,
   };
-}
-
-function copyObjectFields(
-  source: Record<string, unknown>,
-  ignoredKeys: string[] = [],
-): Record<string, unknown> {
-  const ignored = new Set(ignoredKeys);
-  return Object.fromEntries(
-    Object.entries(source).filter(([key]) => !ignored.has(key)),
-  );
-}
-
-function normalizeToolCallFromChoice(value: unknown): ToolCall[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((item): ToolCall | undefined => {
-      if (!isPlainObject(item)) return undefined;
-      const fn = isPlainObject(item.function) ? item.function : undefined;
-      const id = typeof item.id === "string" ? item.id : "";
-      const name = typeof fn?.name === "string" ? fn.name : "";
-      const args = typeof fn?.arguments === "string" ? fn.arguments : "";
-      if (!id || !name) return undefined;
-
-      return {
-        ...copyObjectFields(item, ["function", "index"]),
-        id,
-        type: "function",
-        function: {
-          ...copyObjectFields(fn ?? {}, ["name", "arguments"]),
-          name,
-          arguments: args,
-        },
-      };
-    })
-    .filter((item): item is ToolCall => Boolean(item));
-}
-
-function readFinalToolCalls(data: unknown): ToolCall[] {
-  if (!data || typeof data !== "object") return [];
-  const choices = "choices" in data ? data.choices : undefined;
-  if (!Array.isArray(choices)) return [];
-  const message = choices[0]?.message;
-  if (!message || typeof message !== "object") return [];
-  return normalizeToolCallFromChoice(
-    "tool_calls" in message ? message.tool_calls : undefined,
-  );
-}
-
-function mergeToolCallDelta(
-  current: Map<number, ToolCall>,
-  data: unknown,
-): ToolCall[] {
-  if (!data || typeof data !== "object") return [];
-  const choices = "choices" in data ? data.choices : undefined;
-  if (!Array.isArray(choices)) return [];
-  const delta = choices[0]?.delta;
-  if (!delta || typeof delta !== "object") return [];
-  const toolCalls = "tool_calls" in delta ? delta.tool_calls : undefined;
-  if (!Array.isArray(toolCalls)) return [];
-
-  let changed = false;
-
-  for (const rawCall of toolCalls) {
-    if (!isPlainObject(rawCall)) continue;
-    const index =
-      typeof rawCall.index === "number" ? rawCall.index : current.size;
-    const existing = current.get(index) ?? {
-      id: "",
-      type: "function" as const,
-      function: { name: "", arguments: "" },
-    };
-    const fn = isPlainObject(rawCall.function) ? rawCall.function : undefined;
-
-    current.set(index, {
-      ...existing,
-      ...copyObjectFields(rawCall, ["function", "index"]),
-      id:
-        typeof rawCall.id === "string" && rawCall.id ? rawCall.id : existing.id,
-      type: "function",
-      function: {
-        ...existing.function,
-        ...copyObjectFields(fn ?? {}, ["name", "arguments"]),
-        name:
-          typeof fn?.name === "string" && fn.name
-            ? fn.name
-            : existing.function.name,
-        arguments: `${existing.function.arguments}${typeof fn?.arguments === "string" ? fn.arguments : ""}`,
-      },
-    });
-    changed = true;
-  }
-
-  return changed ? [...current.values()] : [];
 }
 
 function isSafeExternalUrl(url: string) {
@@ -3798,23 +3571,16 @@ ipcMain.handle("ai:load-models", async (_event, request: AiProviderRequest) => {
 ipcMain.handle("ai:send-chat", async (_event, request: AiProviderRequest) => {
   const { baseUrl, apiKey, customHeaders, headers, payload } =
     assertProviderRequest(request);
-  const response = await fetch(
-    `${normalizeBaseUrl(baseUrl)}/chat/completions`,
-    {
-      method: "POST",
-      headers: buildUpstreamHeaders({
-        apiKey,
-        customHeaders,
-        headers,
-        contentType: "application/json",
-        accept: "application/json",
-      }),
-      body: JSON.stringify(payload),
-      cache: "no-store",
-    },
-  );
 
-  return readUpstreamJson(response);
+  if (!isPlainObject(payload)) {
+    throw new Error("Provider request payload is required.");
+  }
+
+  return runChatCompletion({
+    baseURL: normalizeBaseUrl(baseUrl),
+    headers: buildUpstreamHeaderRecord({ apiKey, customHeaders, headers }),
+    payload,
+  });
 });
 
 ipcMain.handle("ai:cancel-stream", (_event, streamId: string) => {
@@ -3831,159 +3597,32 @@ ipcMain.handle(
   ): Promise<StreamResult> => {
     const { baseUrl, apiKey, customHeaders, headers, payload } =
       assertProviderRequest(request);
+
+    if (!isPlainObject(payload)) {
+      throw new Error("Provider request payload is required.");
+    }
+
     const controller = new AbortController();
     activeStreamControllers.set(streamId, controller);
 
-    let usage: ChatTokenUsage | undefined;
-    let finishReason: string | undefined;
-    let finalReasoningMetadata: ChatReasoningMetadata | undefined;
-    const streamedToolCalls = new Map<number, ToolCall>();
+    const forwardEvent = (streamEvent: AdapterStreamEvent) => {
+      event.sender.send(`ai:stream-delta:${streamId}`, streamEvent);
+    };
 
     try {
-      const response = await fetch(
-        `${normalizeBaseUrl(baseUrl)}/chat/completions`,
-        {
-          method: "POST",
-          headers: buildUpstreamHeaders({
-            apiKey,
-            customHeaders,
-            headers,
-            contentType: "application/json",
-            accept: "text/event-stream",
-          }),
-          body: JSON.stringify(payload),
-          cache: "no-store",
-          signal: controller.signal,
-        },
-      );
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Provider returned ${response.status}`);
-      }
-
-      if (!response.body) {
-        throw new Error("Provider response did not include a readable stream.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let finalContent = "";
-      let finalReasoning = "";
-
-      function sendRawData(data: unknown) {
-        const eventUsage = readUsage(data);
-        if (eventUsage) usage = eventUsage;
-
-        const eventFinishReason = readFinishReason(data);
-        if (eventFinishReason) finishReason = eventFinishReason;
-
-        const toolCallDelta = mergeToolCallDelta(streamedToolCalls, data);
-        if (toolCallDelta.length > 0) {
-          event.sender.send(`ai:stream-delta:${streamId}`, {
-            type: "tool_call_delta",
-            toolCalls: toolCallDelta,
-          });
-        }
-
-        const reasoningMetadataDelta = readReasoningMetadataDelta(data);
-        if (reasoningMetadataDelta) {
-          finalReasoningMetadata = mergeReasoningMetadata(
-            finalReasoningMetadata,
-            reasoningMetadataDelta,
-          );
-
-          event.sender.send(`ai:stream-delta:${streamId}`, {
-            type: "reasoning_metadata",
-            delta: reasoningMetadataDelta,
-          });
-        }
-
-        const reasoningDelta = readReasoningDelta(data);
-        if (reasoningDelta) {
-          finalReasoning += reasoningDelta;
-
-          event.sender.send(`ai:stream-delta:${streamId}`, {
-            type: "reasoning",
-            delta: reasoningDelta,
-          });
-        }
-
-        const contentDelta = readContentDelta(data);
-        if (contentDelta) {
-          finalContent += contentDelta;
-
-          event.sender.send(`ai:stream-delta:${streamId}`, {
-            type: "content",
-            delta: contentDelta,
-          });
-        }
-      }
-
-      function processDataLine(dataLine: string) {
-        const trimmed = dataLine.trim();
-        if (!trimmed || trimmed === "[DONE]") return;
-
-        try {
-          sendRawData(JSON.parse(trimmed));
-        } catch {
-          // Ignore malformed provider stream lines.
-        }
-      }
-
-      function processLine(rawLine: string) {
-        const line = rawLine.trimEnd();
-        const trimmedLine = line.trimStart();
-
-        if (!trimmedLine || trimmedLine.startsWith(":")) return;
-
-        if (trimmedLine.startsWith("data:")) {
-          processDataLine(trimmedLine.slice(5).trimStart());
-          return;
-        }
-
-        if (trimmedLine.startsWith("{")) {
-          processDataLine(trimmedLine);
-        }
-      }
-
-      while (true) {
-        const { value, done } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
-
-        const lines = buffer.split(/\r?\n/);
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          processLine(line);
-        }
-
-        if (done) break;
-      }
-
-      if (buffer.trim()) {
-        processLine(buffer);
-      }
-
-      return {
-        usage,
-        finishReason,
-        content: finalContent,
-        reasoning: finalReasoning,
-        reasoningMetadata: finalReasoningMetadata,
-        toolCalls: [...streamedToolCalls.values()].filter(
-          (toolCall) => toolCall.id && toolCall.function.name,
-        ),
-      };
+      return await streamChatCompletion({
+        baseURL: normalizeBaseUrl(baseUrl),
+        headers: buildUpstreamHeaderRecord({ apiKey, customHeaders, headers }),
+        payload,
+        signal: controller.signal,
+        onEvent: forwardEvent,
+      });
     } catch (error) {
       if (controller.signal.aborted) {
         return {
-          usage,
-          finishReason: finishReason ?? "cancelled",
+          finishReason: "cancelled",
           content: "",
           reasoning: "",
-          reasoningMetadata: finalReasoningMetadata,
           toolCalls: [],
         };
       }
