@@ -153,7 +153,7 @@ export function getSkillWorkspaceRoots({
         Boolean(skill?.directoryPath?.trim()),
     )
     .map((skill) => ({
-      id: `skill:${skill.id || skill.name}`,
+      id: `skill:${skill.name}`,
       name: `Skill: ${skill.name}`,
       path: skill.directoryPath.trim(),
       createdAt: new Date(0).toISOString(),
@@ -459,7 +459,7 @@ export function buildSystemPromptWithActiveSkills({
       : "";
 
     const skillFiles = skill.directoryPath
-      ? `\n\nThis skill's bundled files are in: ${skill.directoryPath}\nThis folder is automatically available to file tools as workspace rootId "skill:${skill.id || skill.name}" while the skill is active. When the instructions above reference a file (for example one under references/), use file_find or file_read with paths relative to that folder.`
+      ? `\n\nThis skill's bundled files are in: ${skill.directoryPath}\nThis folder is automatically available to file tools as workspace rootId "skill:${skill.name}" while the skill is active. When the instructions above reference a file (for example one under references/), use file_find or file_read with paths relative to that folder.`
       : "";
 
     return `<skill name="${skill.name}">\n${skill.instructions.trim()}${recommendedTools}${skillFiles}\n</skill>`;

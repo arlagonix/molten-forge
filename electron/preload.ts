@@ -191,12 +191,12 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
     return ipcRenderer.invoke("storage:skills:load");
   },
 
-  saveSkill(skill: unknown) {
-    return ipcRenderer.invoke("storage:skill:save", skill);
+  saveSkill(skill: unknown, previousName?: unknown) {
+    return ipcRenderer.invoke("storage:skill:save", skill, previousName);
   },
 
-  deleteSkill(skillId: unknown) {
-    return ipcRenderer.invoke("storage:skill:delete", skillId);
+  deleteSkill(skillName: unknown) {
+    return ipcRenderer.invoke("storage:skill:delete", skillName);
   },
 
   importSkills() {

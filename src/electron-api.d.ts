@@ -138,8 +138,8 @@ declare global {
       exportTools: (tools: LoadedToolInfo[]) => Promise<ToolExportResult>;
       openToolsFolder: () => Promise<void>;
       loadSkills: () => Promise<LoadedSkillInfo[]>;
-      saveSkill: (skill: LoadedSkillInfo) => Promise<LoadedSkillInfo>;
-      deleteSkill: (skillId: string) => Promise<void>;
+      saveSkill: (skill: LoadedSkillInfo, previousName?: string) => Promise<LoadedSkillInfo>;
+      deleteSkill: (skillName: string) => Promise<void>;
       importSkills: () => Promise<SkillImportResult>;
       exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
       exportSkills: (skills: LoadedSkillInfo[]) => Promise<SkillExportResult>;

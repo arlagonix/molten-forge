@@ -59,12 +59,13 @@ import type {
 import { cn } from "@/lib/utils";
 
 type SkillDraft = {
-  id: string;
+  originalName?: string;
   name: string;
   enabled: boolean;
   description: string;
   instructions: string;
   recommendedToolNames: string[];
+  directoryPath?: string;
 };
 
 type SkillsDialogProps = {
@@ -81,7 +82,6 @@ type SkillsDialogProps = {
 
 function createBlankSkillDraft(): SkillDraft {
   return {
-    id: createId(),
     name: "",
     enabled: true,
     description: "",
@@ -92,18 +92,18 @@ function createBlankSkillDraft(): SkillDraft {
 
 function skillToDraft(skill: LoadedSkillInfo): SkillDraft {
   return {
-    id: skill.id,
+    originalName: skill.name,
     name: skill.name,
     enabled: skill.enabled,
     description: skill.description,
     instructions: skill.instructions,
     recommendedToolNames: skill.recommendedToolNames ?? [],
+    directoryPath: skill.directoryPath,
   };
 }
 
 function draftToSkill(draft: SkillDraft): LoadedSkillInfo {
   return {
-    id: draft.id,
     name: draft.name.trim(),
     enabled: draft.enabled,
     description: draft.description.trim(),
@@ -113,6 +113,7 @@ function draftToSkill(draft: SkillDraft): LoadedSkillInfo {
         draft.recommendedToolNames.map((name) => name.trim()).filter(Boolean),
       ),
     ],
+    directoryPath: draft.directoryPath,
   };
 }
 
@@ -134,7 +135,6 @@ function validateSkillDraft(skill: LoadedSkillInfo) {
 
 function areSkillDraftsEqual(left: SkillDraft, right: SkillDraft) {
   return (
-    left.id === right.id &&
     left.name === right.name &&
     left.enabled === right.enabled &&
     left.description === right.description &&
@@ -204,9 +204,7 @@ export const SkillsDialog = memo(function SkillsDialog({
 
   useEffect(() => {
     const isEditingUnsavedSkill =
-      skillDraft &&
-      !selectedSkillName &&
-      !loadedSkills.some((skill) => skill.id === skillDraft.id);
+      skillDraft && !selectedSkillName && !skillDraft.originalName;
 
     if (isEditingUnsavedSkill) return;
 
@@ -237,7 +235,7 @@ export const SkillsDialog = memo(function SkillsDialog({
     if (!skillDraft) return false;
     const originalDraft = selectedSkill
       ? skillToDraft(selectedSkill)
-      : { ...createBlankSkillDraft(), id: skillDraft.id };
+      : createBlankSkillDraft();
     return !areSkillDraftsEqual(skillDraft, originalDraft);
   }, [selectedSkill, skillDraft]);
 
@@ -248,9 +246,11 @@ export const SkillsDialog = memo(function SkillsDialog({
     try {
       const skill = draftToSkill(skillDraft);
       validateSkillDraft(skill);
-      const savedSkill = await saveSkill(skill);
+      const savedSkill = await saveSkill(skill, skillDraft.originalName);
       onLoadedSkillsChange((current) => {
-        const next = current.filter((item) => item.id !== savedSkill.id);
+        const next = current.filter(
+          (item) => item.name !== (skillDraft.originalName ?? savedSkill.name) && item.name !== savedSkill.name,
+        );
         next.push(savedSkill);
         return next.sort((left, right) => left.name.localeCompare(right.name));
       });
@@ -268,9 +268,10 @@ export const SkillsDialog = memo(function SkillsDialog({
     if (!skillDraft) return;
 
     try {
-      await deleteStoredSkill(skillDraft.id);
+      const skillName = skillDraft.originalName ?? skillDraft.name;
+      await deleteStoredSkill(skillName);
       onLoadedSkillsChange((current) =>
-        current.filter((skill) => skill.id !== skillDraft.id),
+        current.filter((skill) => skill.name !== skillName),
       );
       setSkillDraft(null);
       setSelectedSkillName(null);
@@ -340,14 +341,14 @@ export const SkillsDialog = memo(function SkillsDialog({
     try {
       const clonedDraft = {
         ...skillDraft,
-        id: createId(),
+        originalName: undefined,
         name: createUniqueSkillCloneName(skillDraft.name, loadedSkills),
       };
       const clonedSkill = draftToSkill(clonedDraft);
       validateSkillDraft(clonedSkill);
       const savedSkill = await saveSkill(clonedSkill);
       onLoadedSkillsChange((current) => {
-        const next = current.filter((item) => item.id !== savedSkill.id);
+        const next = current.filter((item) => item.name !== savedSkill.name);
         next.push(savedSkill);
         return next.sort((left, right) => left.name.localeCompare(right.name));
       });
@@ -504,12 +505,12 @@ export const SkillsDialog = memo(function SkillsDialog({
               <div className="grid gap-1.5">
                 {loadedSkills.map((skill) => (
                   <div
-                    key={skill.id}
+                    key={skill.name}
                     role="button"
                     tabIndex={0}
                     className={cn(
                       "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                      selectedSkill?.id === skill.id
+                      selectedSkill?.name === skill.name
                         ? "border-primary/30 bg-accent text-accent-foreground"
                         : "border-transparent hover:border-border hover:bg-muted/60",
                     )}
@@ -533,13 +534,13 @@ export const SkillsDialog = memo(function SkillsDialog({
                       onCheckedChange={async (checked) => {
                         const updated = { ...skill, enabled: checked };
                         try {
-                          const saved = await saveSkill(updated);
+                          const saved = await saveSkill(updated, skill.name);
                           onLoadedSkillsChange((current) =>
                             current.map((item) =>
-                              item.id === saved.id ? saved : item,
+                              item.name === skill.name ? saved : item,
                             ),
                           );
-                          if (skillDraft?.id === saved.id)
+                          if (skillDraft?.originalName === skill.name)
                             setSkillDraft(skillToDraft(saved));
                         } catch (error) {
                           showError(

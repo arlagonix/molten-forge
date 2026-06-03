@@ -157,7 +157,6 @@ function throwIfAborted(signal?: AbortSignal) {
 type PublicToolDefinition = ToolDefinition;
 
 type SkillDefinition = {
-  id: string;
   name: string;
   enabled: boolean;
   description: string;
@@ -660,15 +659,12 @@ function toPublicTool(tool: ToolDefinition): PublicToolDefinition {
 
 function normalizeSkillDefinition(candidate: unknown): SkillDefinition {
   const source = isPlainObject(candidate) ? candidate : {};
-  const id =
-    safeString(source.id).trim() ||
-    `skill-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const name = safeString(source.name).trim();
+  const legacyId = safeString(source.id).trim();
+  const name = safeString(source.name).trim() || legacyId;
   const description = safeString(source.description).trim();
   const instructions = safeString(source.instructions).trim();
 
   return {
-    id,
     name,
     enabled: typeof source.enabled === "boolean" ? source.enabled : true,
     description,
@@ -3289,10 +3285,9 @@ async function openJsonToolsFolder() {
 //
 // On disk each skill is a folder:  skills/<readable-name>/SKILL.md  (+ optional
 // scripts/ references/ templates/ assets/). SKILL.md carries YAML frontmatter
-// (name, description, allowed-tools) plus two app extensions that standard
-// parsers ignore: `id` (stable identity across renames) and `enabled`.
-// The in-memory SkillDefinition shape is unchanged, so the renderer, the
-// load_skill tool and the request builder need no changes:
+// (name, description, allowed-tools) plus one app extension that standard
+// parsers ignore: `enabled`. Skill names are unique and act as skill identity.
+// Legacy `id` frontmatter is ignored and is not written back on save/export.
 //   instructions      <-> SKILL.md markdown body
 //   recommendedToolNames <-> frontmatter `allowed-tools`
 // ---------------------------------------------------------------------------
@@ -3307,7 +3302,6 @@ type SkillFolderRecord = {
 };
 
 type SkillFrontmatter = {
-  id?: string;
   name?: string;
   description?: string;
   enabled?: boolean;
@@ -3365,7 +3359,8 @@ function parseSkillManifest(content: string): {
     collectingTools = false;
 
     if (key === "id") {
-      frontmatter.id = unquoteYamlString(value);
+      // Legacy skill ids are ignored. Skill names are the unique identifier.
+      continue;
     } else if (key === "name") {
       frontmatter.name = unquoteYamlString(value);
     } else if (key === "description") {
@@ -3401,7 +3396,6 @@ function serializeSkillManifest(skill: SkillDefinition): string {
     }
   }
   if (!skill.enabled) lines.push("enabled: false");
-  if (skill.id) lines.push(`id: ${quoteYamlString(skill.id)}`);
 
   lines.push("---", "", skill.instructions.trim(), "");
   return lines.join("\n");
@@ -3413,7 +3407,6 @@ function buildSkillFromManifest(
 ): SkillDefinition {
   const { frontmatter, body } = parseSkillManifest(content);
   return normalizeSkillDefinition({
-    id: frontmatter.id || folderName,
     name: frontmatter.name || folderName,
     description: frontmatter.description ?? "",
     instructions: body,
@@ -3539,10 +3532,7 @@ async function migrateLegacySkillJsonFiles() {
 
     const folderName = uniqueSkillFolderName(skill.name, takenFolders);
     takenFolders.add(folderName);
-    await writeSkillManifest(path.join(skillsDir, folderName), {
-      ...skill,
-      id: skill.id || folderName,
-    });
+    await writeSkillManifest(path.join(skillsDir, folderName), skill);
 
     try {
       await fs.mkdir(backupDir, { recursive: true });
@@ -3563,9 +3553,10 @@ async function loadJsonSkills() {
   return skills.map(toPublicSkill);
 }
 
-async function saveJsonSkill(value: unknown) {
+async function saveJsonSkill(value: unknown, previousNameValue?: unknown) {
   const skill = normalizeSkillDefinition(value);
   validateSkillDefinition(skill);
+  const previousName = safeString(previousNameValue).trim();
 
   let savedDirectoryPath = skill.directoryPath;
   await queueStorageWrite(async () => {
@@ -3574,18 +3565,20 @@ async function saveJsonSkill(value: unknown) {
 
     const skillsDir = getStoragePaths().skillsDir;
     const records = await readSkillFolderRecords();
+    const existing = previousName
+      ? records.find((record) => record.skill.name === previousName)
+      : records.find((record) => record.skill.name === skill.name);
 
     const duplicate = records.find(
       (record) =>
-        record.skill.id !== skill.id && record.skill.name === skill.name,
+        record !== existing && record.skill.name === skill.name,
     );
     if (duplicate)
       throw new Error(`Another skill already uses the name: ${skill.name}`);
 
-    const existing = records.find((record) => record.skill.id === skill.id);
     const taken = new Set(
       records
-        .filter((record) => record.skill.id !== skill.id)
+        .filter((record) => record !== existing)
         .map((record) => record.folderName),
     );
 
@@ -3596,6 +3589,10 @@ async function saveJsonSkill(value: unknown) {
     }
 
     const folderPath = path.join(skillsDir, folderName);
+    if (existing && existing.folderName !== folderName) {
+      await removeSkillFolder(folderPath);
+      await fs.cp(existing.folderPath, folderPath, { recursive: true });
+    }
     await writeSkillManifest(folderPath, skill);
     if (existing && existing.folderName !== folderName) {
       await removeSkillFolder(existing.folderPath);
@@ -3606,15 +3603,15 @@ async function saveJsonSkill(value: unknown) {
   return { ...skill, directoryPath: savedDirectoryPath };
 }
 
-async function deleteJsonSkill(skillId: unknown) {
-  const id = safeString(skillId).trim();
-  if (!id) return;
+async function deleteJsonSkill(skillNameValue: unknown) {
+  const name = safeString(skillNameValue).trim();
+  if (!name) return;
 
   await queueStorageWrite(async () => {
     await initializeJsonStorageIfNeeded();
     const records = await readSkillFolderRecords();
     for (const record of records) {
-      if (record.skill.id === id) await removeSkillFolder(record.folderPath);
+      if (record.skill.name === name) await removeSkillFolder(record.folderPath);
     }
   });
 }
@@ -3741,17 +3738,15 @@ async function importJsonSkillsFromFiles(): Promise<SkillImportResult> {
 
     const skillsDir = getStoragePaths().skillsDir;
     const records = await readSkillFolderRecords();
-    const byId = new Map(records.map((record) => [record.skill.id, record]));
     const byName = new Map(records.map((record) => [record.skill.name, record]));
     const takenFolders = new Set(records.map((record) => record.folderName));
     const usedNames = new Set(records.map((record) => record.skill.name));
 
     for (const { source, skill, sourceFolder } of parsedSkills) {
-      const sameIdRecord = byId.get(skill.id);
       const sameNameRecord = byName.get(skill.name);
       let skillToSave = skill;
 
-      if (sameNameRecord && sameNameRecord.skill.id !== skill.id) {
+      if (sameNameRecord) {
         if (areSkillDefinitionsEquivalent(sameNameRecord.skill, skill)) {
           importResult.skipped.push({
             source,
@@ -3760,6 +3755,7 @@ async function importJsonSkillsFromFiles(): Promise<SkillImportResult> {
           });
           continue;
         }
+
         const renamedName = createUniqueImportedSkillName(skill.name, usedNames);
         skillToSave = { ...skill, name: renamedName };
         importResult.renamed.push({
@@ -3769,8 +3765,6 @@ async function importJsonSkillsFromFiles(): Promise<SkillImportResult> {
         });
       }
 
-      const previousFolder = sameIdRecord?.folderName;
-      if (previousFolder) takenFolders.delete(previousFolder);
       const folderName = uniqueSkillFolderName(skillToSave.name, takenFolders);
       takenFolders.add(folderName);
 
@@ -3784,30 +3778,15 @@ async function importJsonSkillsFromFiles(): Promise<SkillImportResult> {
       } else {
         await fs.mkdir(destFolder, { recursive: true });
       }
-      await writeSkillManifest(destFolder, { ...skillToSave, id: skillToSave.id });
+      await writeSkillManifest(destFolder, skillToSave);
 
-      if (
-        sameIdRecord &&
-        previousFolder &&
-        previousFolder !== folderName
-      ) {
-        await removeSkillFolder(sameIdRecord.folderPath);
-      }
-
-      if (sameIdRecord) {
-        importResult.updated += 1;
-        byName.delete(sameIdRecord.skill.name);
-        usedNames.delete(sameIdRecord.skill.name);
-      } else {
-        importResult.imported += 1;
-      }
+      importResult.imported += 1;
 
       const savedRecord: SkillFolderRecord = {
         skill: skillToSave,
         folderName,
         folderPath: destFolder,
       };
-      byId.set(skillToSave.id, savedRecord);
       byName.set(skillToSave.name, savedRecord);
       usedNames.add(skillToSave.name);
     }
@@ -3836,7 +3815,7 @@ async function writeExportedSkill(
   const destFolder = path.join(parentDir, folderName);
 
   const source = sourceRecords.find(
-    (record) => record.skill.id === skill.id || record.skill.name === skill.name,
+    (record) => record.skill.name === skill.name,
   );
   if (source && path.resolve(source.folderPath) !== path.resolve(destFolder)) {
     await removeSkillFolder(destFolder);
@@ -4571,12 +4550,14 @@ ipcMain.handle("storage:tools:open-folder", async () => openJsonToolsFolder());
 
 ipcMain.handle("storage:skills:load", async () => loadJsonSkills());
 
-ipcMain.handle("storage:skill:save", async (_event, value: unknown) =>
-  saveJsonSkill(value),
+ipcMain.handle(
+  "storage:skill:save",
+  async (_event, value: unknown, previousName: unknown) =>
+    saveJsonSkill(value, previousName),
 );
 
-ipcMain.handle("storage:skill:delete", async (_event, skillId: unknown) =>
-  deleteJsonSkill(skillId),
+ipcMain.handle("storage:skill:delete", async (_event, skillName: unknown) =>
+  deleteJsonSkill(skillName),
 );
 
 ipcMain.handle("storage:skills:import", async () =>

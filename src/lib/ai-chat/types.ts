@@ -464,7 +464,6 @@ export type ToolDefinition = {
 export type LoadedToolInfo = ToolDefinition;
 
 export type SkillDefinition = {
-  id: string;
   name: string;
   enabled: boolean;
   description: string;
