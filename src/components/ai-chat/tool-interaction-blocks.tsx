@@ -1168,7 +1168,6 @@ function parseTaskToolResult(toolResult?: ChatToolResult): AgentTask[] {
         return false;
       const source = task as Record<string, unknown>;
       return (
-        typeof source.id === "number" &&
         typeof source.subject === "string" &&
         typeof source.done === "boolean"
       );
@@ -1262,9 +1261,9 @@ export const TaskListBlock = memo(function TaskListBlock({
               </div>
             ) : (
               <ul className="grid gap-0 text-sm normal-case leading-5 tracking-normal">
-                {tasks.map((task) => (
+                {tasks.map((task, index) => (
                   <li
-                    key={task.id}
+                    key={`${task.subject}-${index}`}
                     className="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2  px-2 py-1.5"
                   >
                     <span className="mt-0.5">{getTaskItemIcon(task.done)}</span>

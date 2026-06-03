@@ -33,6 +33,7 @@ import {
 import type {
   AgentsSettings,
   ChatSession,
+  ChatWorkspaceRoot,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -133,18 +134,69 @@ export function getGlobalEnabledTools({
   ];
 }
 
+
+function normalizeWorkspaceRootPathForCompare(value: string) {
+  return value.trim().replace(/[\\/]+$/, "").toLowerCase();
+}
+
+export function getSkillWorkspaceRoots({
+  activeSkillNames,
+  availableSkillsByName,
+}: {
+  activeSkillNames: string[];
+  availableSkillsByName: Map<string, LoadedSkillInfo>;
+}): ChatWorkspaceRoot[] {
+  return activeSkillNames
+    .map((skillName) => availableSkillsByName.get(skillName))
+    .filter(
+      (skill): skill is LoadedSkillInfo & { directoryPath: string } =>
+        Boolean(skill?.directoryPath?.trim()),
+    )
+    .map((skill) => ({
+      id: `skill:${skill.id || skill.name}`,
+      name: `Skill: ${skill.name}`,
+      path: skill.directoryPath.trim(),
+      createdAt: new Date(0).toISOString(),
+    }));
+}
+
+export function getEffectiveWorkspaceRoots({
+  workspaceRoots = [],
+  activeSkillNames,
+  availableSkillsByName,
+}: {
+  workspaceRoots?: ChatWorkspaceRoot[];
+  activeSkillNames: string[];
+  availableSkillsByName: Map<string, LoadedSkillInfo>;
+}): ChatWorkspaceRoot[] {
+  const byPath = new Map<string, ChatWorkspaceRoot>();
+
+  for (const root of [
+    ...workspaceRoots,
+    ...getSkillWorkspaceRoots({ activeSkillNames, availableSkillsByName }),
+  ]) {
+    const normalizedPath = normalizeWorkspaceRootPathForCompare(root.path);
+    if (!normalizedPath || byPath.has(normalizedPath)) continue;
+    byPath.set(normalizedPath, root);
+  }
+
+  return [...byPath.values()];
+}
+
 export function getEnabledToolsForChat({
   chat,
   oneShotToolNames = [],
   skillRecommendedToolNames = [],
   globalEnabledTools,
   availableToolsByName,
+  effectiveWorkspaceRoots = chat.workspaceRoots ?? [],
 }: {
   chat: ChatSession;
   oneShotToolNames?: string[];
   skillRecommendedToolNames?: string[];
   globalEnabledTools: LoadedToolInfo[];
   availableToolsByName: Map<string, LoadedToolInfo>;
+  effectiveWorkspaceRoots?: ChatWorkspaceRoot[];
 }) {
   const byName = new Map<string, LoadedToolInfo>();
   const chatDisabledToolNames = new Set(chat.disabledToolNames ?? []);
@@ -175,7 +227,7 @@ export function getEnabledToolsForChat({
     if (tool && !byName.has(tool.name)) byName.set(tool.name, tool);
   }
 
-  if (!chat.workspaceRoots?.length) {
+  if (!effectiveWorkspaceRoots.length) {
     byName.delete(FILE_READ_TOOL_NAME);
     byName.delete(FILE_FIND_TOOL_NAME);
     byName.delete(FILE_SEARCH_TEXT_TOOL_NAME);
@@ -406,7 +458,11 @@ export function buildSystemPromptWithActiveSkills({
           .join("\n")}`
       : "";
 
-    return `<skill name="${skill.name}">\n${skill.instructions.trim()}${recommendedTools}\n</skill>`;
+    const skillFiles = skill.directoryPath
+      ? `\n\nThis skill's bundled files are in: ${skill.directoryPath}\nThis folder is automatically available to file tools as workspace rootId "skill:${skill.id || skill.name}" while the skill is active. When the instructions above reference a file (for example one under references/), use file_find or file_read with paths relative to that folder.`
+      : "";
+
+    return `<skill name="${skill.name}">\n${skill.instructions.trim()}${recommendedTools}${skillFiles}\n</skill>`;
   });
 
   return [

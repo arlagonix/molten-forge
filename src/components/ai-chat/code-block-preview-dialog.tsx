@@ -101,15 +101,15 @@ export function CodeBlockPreviewDialog({
 }: CodeBlockPreviewDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTitle className="sr-only">Code block fullscreen</DialogTitle>
-      <DialogDescription className="sr-only">
-        Fullscreen code block viewer with code, preview, wrap, copy, and
-        download actions.
-      </DialogDescription>
       <DialogContent
         showCloseButton={false}
         className="flex h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-h-none max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(70vw,1440px)] data-[state=closed]:animate-none data-[state=closed]:opacity-0"
       >
+        <DialogTitle className="sr-only">Code block fullscreen</DialogTitle>
+        <DialogDescription className="sr-only">
+          Fullscreen code block viewer with code, preview, wrap, copy, and
+          download actions.
+        </DialogDescription>
         <div className="chat-markdown h-full min-h-0 overflow-hidden">
           {open ? children : null}
         </div>

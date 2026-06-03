@@ -32,9 +32,11 @@ import {
   isTaskToolName,
 } from "@/lib/ai-chat/builtin-tools";
 import { buildToolExecutionPreviewForCall } from "@/lib/ai-chat/tool-preview";
+import { cn } from "@/lib/utils";
 import type {
   ChatToolCall,
   ChatToolResult,
+  FileToolChangePreview,
   LoadedToolInfo,
   ToolExecutionPreview,
   ToolExecutionStatus,
@@ -100,6 +102,54 @@ function renderCodeBlock(
 
 function renderCommandCodeBlock(value: string) {
   return renderCodeBlock(value, "bash");
+}
+
+
+function getChangePreviewTitle(preview: FileToolChangePreview) {
+  if (preview.title?.trim()) return preview.title.trim();
+  if (preview.kind === "create") return "Created file";
+  if (preview.kind === "delete") return "Deleted file";
+  return "Edited file";
+}
+
+function renderFileChangePreview(preview?: FileToolChangePreview) {
+  if (!preview || preview.rows.length === 0) return null;
+
+  return (
+    <div className="grid gap-1.5">
+      <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+        Changes
+      </div>
+      <div className="overflow-hidden border bg-muted/20 font-mono text-xs leading-5">
+        <div className="border-b bg-muted/40 px-3 py-2 font-sans text-xs text-muted-foreground">
+          {getChangePreviewTitle(preview)} · {preview.path}
+          {preview.truncated ? " · Preview truncated" : ""}
+        </div>
+        <div className="max-h-[min(24rem,50dvh)] overflow-auto">
+          {preview.rows.map((row, index) => (
+            <div
+              key={`${row.type}-${index}`}
+              className={cn(
+                "grid grid-cols-[1.5rem_minmax(0,1fr)] gap-2 px-3 py-0.5",
+                row.type === "add" &&
+                  "bg-green-500/10 text-green-800 dark:text-green-300",
+                row.type === "delete" &&
+                  "bg-red-500/10 text-red-800 dark:text-red-300",
+                row.type === "context" && "text-muted-foreground",
+              )}
+            >
+              <span className="select-none text-right opacity-70">
+                {row.type === "add" ? "+" : row.type === "delete" ? "-" : " "}
+              </span>
+              <span className="whitespace-pre-wrap break-words">
+                {row.text || " "}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function renderToolExecutionPreview(execution?: ToolExecutionPreview) {
@@ -464,6 +514,7 @@ export function ToolExecutionBlock({
                   )}
                 </div>
               )}
+              {renderFileChangePreview(toolResult?.changePreview)}
               {isLoadSkillTool && loadSkillDetails.instructions.trim() && (
                 <div className="grid gap-1.5">
                   <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">

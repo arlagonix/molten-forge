@@ -76,6 +76,7 @@ import {
 import { estimateAttachmentsTokens } from "@/lib/ai-chat/attachment-limits";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
+  getEffectiveWorkspaceRoots,
   resolveProviderForChat,
   validateProviderForGeneration,
 } from "@/lib/ai-chat/request-builder";
@@ -234,6 +235,9 @@ export default function Home() {
   const [composerAttachmentsByKey, setComposerAttachmentsByKey] = useState<
     Record<string, ChatAttachment[]>
   >({});
+  const [newChatDraftWorkspaceRoots, setNewChatDraftWorkspaceRoots] = useState<
+    ChatWorkspaceRoot[]
+  >([]);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
   const [completedGenerationChatIds, setCompletedGenerationChatIds] = useState<
@@ -522,7 +526,9 @@ export default function Home() {
       activeChatProvider,
       activeChatModel,
     );
-    const attachmentTokens = estimateAttachmentsTokens(activeComposerAttachments);
+    const attachmentTokens = estimateAttachmentsTokens(
+      activeComposerAttachments,
+    );
     const assistantMessages = [...messages]
       .reverse()
       .filter((message) => message.role === "assistant");
@@ -546,7 +552,12 @@ export default function Home() {
       limitTokens: context.length,
       limitSource: context.source,
     };
-  }, [activeChatModel, activeChatProvider, activeComposerAttachments, messages]);
+  }, [
+    activeChatModel,
+    activeChatProvider,
+    activeComposerAttachments,
+    messages,
+  ]);
   const visibleProviderGroups = useMemo(() => {
     const search = sidebarModelSearchValue.trim().toLowerCase();
 
@@ -690,6 +701,22 @@ export default function Home() {
       availableSkills.map((skill) => [skill.name, skill] as const),
     );
   }, [availableSkills]);
+
+  const activeChatVisibleWorkspaceRoots = useMemo(() => {
+    if (isNewChatDraft) return newChatDraftWorkspaceRoots;
+    if (!activeChat) return [];
+
+    return getEffectiveWorkspaceRoots({
+      workspaceRoots: activeChat.workspaceRoots ?? [],
+      activeSkillNames: activeChat.activeSkillNames ?? [],
+      availableSkillsByName,
+    });
+  }, [
+    activeChat,
+    availableSkillsByName,
+    isNewChatDraft,
+    newChatDraftWorkspaceRoots,
+  ]);
 
   const globallyEnabledSkillNames = useMemo(() => {
     if (!skillsSettings.enabled) return new Set<string>();
@@ -973,7 +1000,7 @@ export default function Home() {
       if (event.code === "KeyN") {
         event.preventDefault();
         event.stopPropagation();
-        void createNewChat();
+        createNewChatWithEmptyDraftState();
         return;
       }
 
@@ -1148,7 +1175,7 @@ export default function Home() {
   }
 
   async function addActiveChatWorkspaceRoot() {
-    if (!activeChat) return;
+    if (!activeChat && !isNewChatDraft) return;
 
     try {
       const result = await getWorkspaceBridge().selectFolder();
@@ -1161,6 +1188,20 @@ export default function Home() {
         path: result.path,
         createdAt: now,
       };
+
+      if (isNewChatDraft) {
+        setNewChatDraftWorkspaceRoots((currentRoots) => {
+          if (currentRoots.some((item) => item.path === root.path)) {
+            return currentRoots;
+          }
+
+          return [...currentRoots, root];
+        });
+        showSuccess("Workspace folder added.");
+        return;
+      }
+
+      if (!activeChat) return;
 
       updateChat(activeChat.id, (chat) => {
         const existingRoots = chat.workspaceRoots ?? [];
@@ -1183,6 +1224,14 @@ export default function Home() {
   }
 
   function removeActiveChatWorkspaceRoot(rootId: string) {
+    if (isNewChatDraft) {
+      setNewChatDraftWorkspaceRoots((currentRoots) =>
+        currentRoots.filter((root) => root.id !== rootId),
+      );
+      showSuccess("Workspace folder removed from chat.");
+      return;
+    }
+
     if (!activeChat) return;
 
     updateChat(activeChat.id, (chat) => ({
@@ -1454,6 +1503,9 @@ export default function Home() {
       // the new chat becomes the active chat (see the effect above).
       const chat: ChatSession = {
         ...createEmptyChat(),
+        workspaceRoots: newChatDraftWorkspaceRoots.length
+          ? newChatDraftWorkspaceRoots.map((root) => ({ ...root }))
+          : undefined,
         fileToolAutoApproval:
           buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
       };
@@ -1475,6 +1527,7 @@ export default function Home() {
         delete next[NEW_CHAT_DRAFT_KEY];
         return next;
       });
+      setNewChatDraftWorkspaceRoots([]);
 
       pendingDraftSendRef.current = {
         chatId: chat.id,
@@ -1495,6 +1548,7 @@ export default function Home() {
       isNewChatDraft,
       sendMessage,
       toolsSettings,
+      newChatDraftWorkspaceRoots,
       saveCurrentChatScrollSnapshot,
       resetChatScrollState,
       showError,
@@ -1665,6 +1719,20 @@ export default function Home() {
     updateActiveChatMessages,
     updateChat,
   });
+
+  function createNewChatWithEmptyDraftState() {
+    setNewChatDraftWorkspaceRoots([]);
+    createNewChat();
+  }
+
+  async function removeChatAndResetDraftState(chatId: string) {
+    const willOpenNewChatDraft = chats.every((chat) => chat.id === chatId);
+    if (willOpenNewChatDraft) {
+      setNewChatDraftWorkspaceRoots([]);
+    }
+
+    await removeChat(chatId);
+  }
 
   function cancelPendingChatSwitchFrames() {
     if (pendingChatSwitchFrameRef.current !== null) {
@@ -1912,9 +1980,9 @@ export default function Home() {
           setCompletedGenerationChatIds((currentChatIds) =>
             currentChatIds.filter((currentChatId) => currentChatId !== chatId),
           );
-          void removeChat(chatId);
+          void removeChatAndResetDraftState(chatId);
         }}
-        onCreateNewChat={createNewChat}
+        onCreateNewChat={createNewChatWithEmptyDraftState}
         onCreateChatWithSameSettings={createChatWithSameSettings}
         onOpenSettings={() => setSettingsOpen(true)}
         onClearChat={(chatId) => {
@@ -2072,7 +2140,10 @@ export default function Home() {
           onSend={handleComposerSend}
           onStop={stopGeneration}
           contextUsage={latestContextUsage}
-          supportsVision={modelSupportsVision(activeChatProvider, activeChatModel)}
+          supportsVision={modelSupportsVision(
+            activeChatProvider,
+            activeChatModel,
+          )}
           footerStart={
             <ComposerFooter
               activeChatExists={Boolean(activeChat) || isNewChatDraft}
@@ -2087,9 +2158,9 @@ export default function Home() {
               onSelectProviderModel={selectActiveChatProviderModel}
               workspaceControl={
                 <WorkspaceRootsControl
-                  activeChatExists={Boolean(activeChat)}
+                  activeChatExists={Boolean(activeChat) || isNewChatDraft}
                   disabled={isSending}
-                  roots={activeChat?.workspaceRoots ?? []}
+                  roots={activeChatVisibleWorkspaceRoots}
                   open={isWorkspacePickerOpen}
                   onOpenChange={setIsWorkspacePickerOpen}
                   onAddRoot={addActiveChatWorkspaceRoot}

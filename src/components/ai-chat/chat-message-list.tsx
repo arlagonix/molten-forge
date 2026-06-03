@@ -486,6 +486,9 @@ function getRenderedMessageText(trigger: HTMLElement) {
     .querySelectorAll(
       [
         "[data-codeblock-ui='true']",
+        "[data-slot='dialog-title']",
+        "[data-slot='dialog-description']",
+        ".sr-only",
         ".chat-code-header",
         ".chat-code-toolbar-actions",
         ".chat-code-action",
@@ -940,7 +943,9 @@ const ChatMessageItem = memo(
       options?: { insideThinkingToolGroup?: boolean },
     ): ReactNode => {
       if (group.kind === "tool_batch") {
-        const insideThinkingToolGroup = Boolean(options?.insideThinkingToolGroup);
+        const insideThinkingToolGroup = Boolean(
+          options?.insideThinkingToolGroup,
+        );
 
         return (
           <div
@@ -952,13 +957,17 @@ const ChatMessageItem = memo(
                 : "border border-dashed px-2 py-2 shadow-xs",
             )}
           >
-            <div className={cn(
-              "text-xs font-medium uppercase tracking-wide text-muted-foreground/80",
-              !insideThinkingToolGroup && "px-1",
-            )}>
+            <div
+              className={cn(
+                "text-xs font-medium uppercase tracking-wide text-muted-foreground/80",
+                !insideThinkingToolGroup && "px-1",
+              )}
+            >
               Parallel tool calls
             </div>
-            <div className="grid gap-2">{group.steps.map(renderProcessStep)}</div>
+            <div className="grid gap-2">
+              {group.steps.map(renderProcessStep)}
+            </div>
           </div>
         );
       }
@@ -991,7 +1000,7 @@ const ChatMessageItem = memo(
       >
         {message.role === "assistant" && hasVisibleProcessSteps && (
           <div className="grid gap-2">
-            {processStepGroups.map(renderProcessStepGroup)}
+            {processStepGroups.map((group) => renderProcessStepGroup(group))}
           </div>
         )}
 

@@ -27,6 +27,10 @@ type WorkspaceRootsControlProps = {
   onOpenRoot: (root: ChatWorkspaceRoot) => void;
 };
 
+function isAutomaticSkillRoot(root: ChatWorkspaceRoot) {
+  return root.id.startsWith("skill:");
+}
+
 export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
   activeChatExists,
   disabled,
@@ -87,49 +91,62 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
                   No workspace folder selected.
                 </div>
               ) : (
-                roots.map((root) => (
-                  <CommandItem
-                    key={root.id}
-                    value={`${root.name} ${root.path}`}
-                    onSelect={() => onOpenRoot(root)}
-                    className="min-w-0 cursor-pointer items-start gap-2"
-                    title={root.path}
-                  >
-                    <Check className="mt-0.5 size-4 shrink-0 opacity-70" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{root.name}</div>
-                      <div className="truncate text-sm text-muted-foreground">{root.path}</div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      title="Open folder"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onOpenRoot(root);
-                      }}
+                roots.map((root) => {
+                  const isSkillRoot = isAutomaticSkillRoot(root);
+
+                  return (
+                    <CommandItem
+                      key={root.id}
+                      value={`${root.name} ${root.path}`}
+                      onSelect={() => onOpenRoot(root)}
+                      className="min-w-0 cursor-pointer items-start gap-2"
+                      title={root.path}
                     >
-                      <ExternalLink className="size-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 shrink-0"
-                      title="Remove from chat"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        onRemoveRoot(root.id);
-                      }}
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </CommandItem>
-                ))
+                      <Check className="mt-0.5 size-4 shrink-0 opacity-70" />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <div className="truncate font-medium">{root.name}</div>
+                          {isSkillRoot ? (
+                            <span className="shrink-0 rounded border px-1.5 py-0.5 text-[0.65rem] uppercase tracking-wide text-muted-foreground">
+                              Auto
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="truncate text-sm text-muted-foreground">{root.path}</div>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        title="Open folder"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onOpenRoot(root);
+                        }}
+                      >
+                        <ExternalLink className="size-3.5" />
+                      </Button>
+                      {!isSkillRoot ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          title="Remove from chat"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onRemoveRoot(root.id);
+                          }}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      ) : null}
+                    </CommandItem>
+                  );
+                })
               )}
             </CommandGroup>
           </CommandList>

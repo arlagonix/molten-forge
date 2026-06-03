@@ -65,17 +65,17 @@ export const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
 };
 
 export const ASK_USER_TOOL_NAME = "ask_user";
-export const TASK_ADD_TOOL_NAME = "add_tasks";
-export const TASK_REMOVE_TOOL_NAME = "delete_tasks";
-export const TASK_COMPLETE_TOOL_NAME = "complete_tasks";
-export const TASK_GET_TOOL_NAME = "get_tasks_list";
-export const TASK_CLEAR_TOOL_NAME = "clear_tasks_list";
-export const TASK_TOOL_NAMES = [
-  TASK_ADD_TOOL_NAME,
-  TASK_REMOVE_TOOL_NAME,
-  TASK_COMPLETE_TOOL_NAME,
-  TASK_GET_TOOL_NAME,
-  TASK_CLEAR_TOOL_NAME,
+export const TASK_UPDATE_TOOL_NAME = "update_tasks";
+export const TASK_TOOL_NAMES = [TASK_UPDATE_TOOL_NAME] as const;
+
+// Old tool names kept only so historical saved chats still parse/render.
+// These are not exposed to the model.
+const LEGACY_TASK_TOOL_NAMES = [
+  "add_tasks",
+  "delete_tasks",
+  "complete_tasks",
+  "get_tasks_list",
+  "clear_tasks_list",
 ] as const;
 export const LOAD_SKILL_TOOL_NAME = "load_skill";
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
@@ -105,7 +105,7 @@ const MAX_ASK_USER_DESCRIPTION_LENGTH = 500;
 const MAX_ASK_USER_QUESTION_LENGTH = 500;
 const MAX_ASK_USER_OPTION_LABEL_LENGTH = 160;
 const MAX_ASK_USER_OPTION_DESCRIPTION_LENGTH = 300;
-const MAX_TASK_SUBJECTS = 10;
+const MAX_TASKS = 50;
 const MAX_TASK_SUBJECT_LENGTH = 180;
 
 export const ASK_USER_TOOL: LoadedToolInfo = {
@@ -185,28 +185,40 @@ export const ASK_USER_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
-export const TASK_ADD_TOOL: LoadedToolInfo = {
-  id: "builtin-add-tasks",
-  name: TASK_ADD_TOOL_NAME,
+export const TASK_UPDATE_TOOL: LoadedToolInfo = {
+  id: "builtin-update-tasks",
+  name: TASK_UPDATE_TOOL_NAME,
   enabled: true,
-  description: "Adds one or more tasks to the current chat checklist.",
+  description:
+    "Updates the visible task checklist for the current chat. Always provide the full desired current task list (both done and not-done items that should stay visible). Send an empty array to clear it.",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
-      subjects: {
+      tasks: {
         type: "array",
         description:
-          "One to ten short task subjects to add. Do not include ids; the app assigns them.",
-        minItems: 1,
-        maxItems: MAX_TASK_SUBJECTS,
+          "The full desired current checklist. Include both incomplete and completed tasks that should remain visible. Send [] to clear the list.",
+        maxItems: MAX_TASKS,
         items: {
-          type: "string",
-          description: "Short user-visible task subject.",
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            subject: {
+              type: "string",
+              description: "Short user-visible task subject.",
+              maxLength: MAX_TASK_SUBJECT_LENGTH,
+            },
+            done: {
+              type: "boolean",
+              description: "Whether the task is complete.",
+            },
+          },
+          required: ["subject", "done"],
         },
       },
     },
-    required: ["subjects"],
+    required: ["tasks"],
   },
   command: "",
   args: [],
@@ -214,93 +226,7 @@ export const TASK_ADD_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
-export const TASK_REMOVE_TOOL: LoadedToolInfo = {
-  id: "builtin-delete-tasks",
-  name: TASK_REMOVE_TOOL_NAME,
-  enabled: true,
-  description: "Deletes one or more tasks from the current chat checklist.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      taskIds: {
-        type: "array",
-        description: "Numeric task ids to remove.",
-        minItems: 1,
-        items: { type: "integer" },
-      },
-    },
-    required: ["taskIds"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const TASK_COMPLETE_TOOL: LoadedToolInfo = {
-  id: "builtin-complete-tasks",
-  name: TASK_COMPLETE_TOOL_NAME,
-  enabled: true,
-  description: "Marks one or more checklist tasks as done.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      taskIds: {
-        type: "array",
-        description: "Numeric task ids to mark done.",
-        minItems: 1,
-        items: { type: "integer" },
-      },
-    },
-    required: ["taskIds"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const TASK_GET_TOOL: LoadedToolInfo = {
-  id: "builtin-get-tasks-list",
-  name: TASK_GET_TOOL_NAME,
-  enabled: true,
-  description: "Gets the current chat checklist.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {},
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const TASK_CLEAR_TOOL: LoadedToolInfo = {
-  id: "builtin-clear-tasks-list",
-  name: TASK_CLEAR_TOOL_NAME,
-  enabled: true,
-  description: "Clears the current chat checklist.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {},
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const TASK_TOOLS = [
-  TASK_ADD_TOOL,
-  TASK_REMOVE_TOOL,
-  TASK_COMPLETE_TOOL,
-  TASK_GET_TOOL,
-  TASK_CLEAR_TOOL,
-] as const;
+export const TASK_TOOLS = [TASK_UPDATE_TOOL] as const;
 
 export const WEB_FETCH_TOOL: LoadedToolInfo = {
   id: "builtin-web-fetch",
@@ -331,7 +257,7 @@ export const FILE_READ_TOOL: LoadedToolInfo = {
   name: FILE_READ_TOOL_NAME,
   enabled: true,
   description:
-    "Read a UTF-8 text file from one of the chat workspace folders. Use relative paths whenever possible. The tool cannot read outside approved workspace roots.",
+    "Read a UTF-8 text file from one of the chat workspace folders. Returns a 100-line window by default. Use offset to continue reading from a specific 1-based line number. The result includes startLine, endLine, totalLines, and nextOffset; nextOffset is null at the end of the file. The tool cannot read outside approved workspace roots.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -344,12 +270,12 @@ export const FILE_READ_TOOL: LoadedToolInfo = {
       rootId: {
         type: "string",
         description:
-          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+          "Optional workspace root id. Use this when the chat has multiple workspace roots and the relative path could be ambiguous.",
       },
-      maxChars: {
+      offset: {
         type: "number",
         description:
-          "Optional maximum returned characters. Large files are truncated automatically.",
+          "Optional 1-based starting line number for the 100-line read window. Defaults to 1. Use nextOffset from the previous result to continue reading.",
       },
     },
     required: ["path"],
@@ -406,7 +332,7 @@ export const FILE_SEARCH_TEXT_TOOL: LoadedToolInfo = {
   name: FILE_SEARCH_TEXT_TOOL_NAME,
   enabled: true,
   description:
-    "Search text file contents inside the chat workspace and return matching paths, line numbers, and snippets. Uses plain substring search, not regex.",
+    "Search text file contents inside the chat workspace and return matching paths, line numbers, and snippets. Uses plain substring search, not regex. Provide path to search inside one specific file; startLine/endLine can narrow the search to a line range only when path is provided.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -419,6 +345,21 @@ export const FILE_SEARCH_TEXT_TOOL: LoadedToolInfo = {
         type: "string",
         description:
           "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+      },
+      path: {
+        type: "string",
+        description:
+          "Optional file path to search inside a single file. Prefer a path relative to the workspace root.",
+      },
+      startLine: {
+        type: "number",
+        description:
+          "Optional 1-based start line for file-local search. Only valid when path is provided.",
+      },
+      endLine: {
+        type: "number",
+        description:
+          "Optional 1-based end line for file-local search. Only valid when path is provided.",
       },
       include: {
         type: "array",
@@ -448,7 +389,7 @@ export const FILE_REPLACE_TEXT_TOOL: LoadedToolInfo = {
   name: FILE_REPLACE_TEXT_TOOL_NAME,
   enabled: true,
   description:
-    "Replace exact text in a UTF-8 text file inside the chat workspace. Requires user confirmation before writing. Use only after reading the target file or matching context. By default oldText must match exactly once; include enough surrounding context to make it unique. To replace several occurrences, set expectedReplacements to the exact match count.",
+    "Replace exact text in a UTF-8 text file inside the chat workspace. Requires user confirmation before writing. Use only after reading the target file or matching context. By default oldText must match exactly once; include enough surrounding context to make it unique. To replace several occurrences, set expectedReplacements to the exact match count. Optional startLine/endLine limit the oldText search and replacement to that line range.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -462,6 +403,16 @@ export const FILE_REPLACE_TEXT_TOOL: LoadedToolInfo = {
         type: "string",
         description:
           "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+      },
+      startLine: {
+        type: "number",
+        description:
+          "Optional 1-based start line. When provided, oldText is searched and replaced only inside this line range.",
+      },
+      endLine: {
+        type: "number",
+        description:
+          "Optional 1-based end line. When provided, oldText is searched and replaced only inside this line range.",
       },
       oldText: {
         type: "string",
@@ -662,7 +613,12 @@ export function isBuiltInToolName(toolName: string) {
 }
 
 export function isTaskToolName(toolName: string) {
-  return TASK_TOOL_NAMES.includes(toolName as (typeof TASK_TOOL_NAMES)[number]);
+  return (
+    toolName === TASK_UPDATE_TOOL_NAME ||
+    LEGACY_TASK_TOOL_NAMES.includes(
+      toolName as (typeof LEGACY_TASK_TOOL_NAMES)[number],
+    )
+  );
 }
 
 function getToolArgValue(args: unknown, key: string) {
@@ -829,6 +785,12 @@ export function createFileToolApprovalRequest(
   if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) {
     const oldText = typeof source.oldText === "string" ? source.oldText : "";
     const newText = typeof source.newText === "string" ? source.newText : "";
+    const startLine = typeof source.startLine === "number" ? source.startLine : undefined;
+    const endLine = typeof source.endLine === "number" ? source.endLine : undefined;
+    const lineRange =
+      startLine !== undefined || endLine !== undefined
+        ? `${startLine ?? 1}-${endLine ?? "end"}`
+        : "Whole file";
 
     return {
       title: "Approve workspace file edit",
@@ -839,6 +801,7 @@ export function createFileToolApprovalRequest(
       details: [
         { label: "Old text length", value: String(oldText.length) },
         { label: "New text length", value: String(newText.length) },
+        { label: "Line range", value: lineRange },
         { label: "Scope", value: "Approved workspace folders only" },
       ],
     };
@@ -1221,88 +1184,50 @@ export function parseAskUserRequestFromToolCall(toolCall: ChatToolCall) {
   );
 }
 
-function readTaskIds(args: unknown, toolName: string) {
+export function parseTaskUpdateRequest(args: unknown): { tasks: AgentTask[] } {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
-    throw new Error(`${toolName} arguments must be a JSON object.`);
+    throw new Error(`${TASK_UPDATE_TOOL_NAME} arguments must be a JSON object.`);
   }
 
   const source = args as Record<string, unknown>;
-  if (!Array.isArray(source.taskIds) || source.taskIds.length === 0) {
-    throw new Error(`${toolName} requires at least one task id.`);
+  if (!Array.isArray(source.tasks)) {
+    throw new Error(`${TASK_UPDATE_TOOL_NAME} requires a tasks array.`);
   }
 
-  const ids = source.taskIds.map((rawId, index) => {
-    const parsedId =
-      typeof rawId === "number"
-        ? rawId
-        : typeof rawId === "string" && rawId.trim()
-          ? Number(rawId.trim())
-          : NaN;
-
-    if (!Number.isSafeInteger(parsedId) || parsedId <= 0) {
-      throw new Error(`${toolName} taskIds item ${index + 1} must be a positive integer.`);
-    }
-
-    return parsedId;
-  });
-
-  return [...new Set(ids)];
-}
-
-function parseNoArgTaskRequest(args: unknown, toolName: string) {
-  if (!args || typeof args !== "object" || Array.isArray(args)) {
-    throw new Error(`${toolName} arguments must be a JSON object.`);
-  }
-}
-
-export function parseTaskAddRequest(args: unknown) {
-  if (!args || typeof args !== "object" || Array.isArray(args)) {
-    throw new Error(`${TASK_ADD_TOOL_NAME} arguments must be a JSON object.`);
+  if (source.tasks.length > MAX_TASKS) {
+    throw new Error(`${TASK_UPDATE_TOOL_NAME} supports at most ${MAX_TASKS} tasks.`);
   }
 
-  const source = args as Record<string, unknown>;
-  if (!Array.isArray(source.subjects) || source.subjects.length === 0) {
-    throw new Error(`${TASK_ADD_TOOL_NAME} requires at least one subject.`);
-  }
+  const seen = new Set<string>();
+  const tasks: AgentTask[] = [];
 
-  if (source.subjects.length > MAX_TASK_SUBJECTS) {
-    throw new Error(`${TASK_ADD_TOOL_NAME} supports at most ${MAX_TASK_SUBJECTS} subjects.`);
-  }
+  for (const raw of source.tasks) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const item = raw as Record<string, unknown>;
+    if (typeof item.subject !== "string") continue;
 
-  const subjects = source.subjects.map((rawSubject, index) => {
-    if (typeof rawSubject !== "string") {
-      throw new Error(`${TASK_ADD_TOOL_NAME} subject ${index + 1} must be a string.`);
-    }
-
-    const subject = rawSubject.trim();
-    if (!subject) {
-      throw new Error(`${TASK_ADD_TOOL_NAME} subject ${index + 1} is empty.`);
-    }
-
+    const subject = item.subject.trim().replace(/\s+/g, " ");
+    if (!subject) continue;
     if (subject.length > MAX_TASK_SUBJECT_LENGTH) {
-      throw new Error(`${TASK_ADD_TOOL_NAME} subject ${index + 1} must be ${MAX_TASK_SUBJECT_LENGTH} characters or less.`);
+      throw new Error(
+        `${TASK_UPDATE_TOOL_NAME} subject must be ${MAX_TASK_SUBJECT_LENGTH} characters or less.`,
+      );
     }
 
-    return subject;
-  });
+    const key = subject.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
 
-  return { subjects };
+    tasks.push({ subject, done: item.done === true });
+  }
+
+  return { tasks };
 }
 
 export function parseTaskToolRequestFromToolCall(toolCall: ChatToolCall) {
-  const args = parseToolArgumentsText(toolCall.function.arguments || "{}");
-  const toolName = toolCall.function.name;
-
-  if (toolName === TASK_ADD_TOOL_NAME) return parseTaskAddRequest(args);
-  if (toolName === TASK_REMOVE_TOOL_NAME || toolName === TASK_COMPLETE_TOOL_NAME) {
-    return { taskIds: readTaskIds(args, toolName) };
-  }
-  if (toolName === TASK_GET_TOOL_NAME || toolName === TASK_CLEAR_TOOL_NAME) {
-    parseNoArgTaskRequest(args, toolName);
-    return {};
-  }
-
-  throw new Error(`Unsupported task tool: ${toolName}`);
+  return parseTaskUpdateRequest(
+    parseToolArgumentsText(toolCall.function.arguments || "{}"),
+  );
 }
 
 export function createTaskToolResult({

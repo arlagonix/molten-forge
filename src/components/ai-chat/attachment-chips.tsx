@@ -14,6 +14,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
   useCallback,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -217,6 +218,18 @@ export function AttachmentChips({
     },
     [],
   );
+
+  useLayoutEffect(() => {
+    if (!previewImage?.dataUrl) return;
+
+    let frameId = window.requestAnimationFrame(() => {
+      frameId = window.requestAnimationFrame(() => {
+        fitPreviewToViewport(true);
+      });
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [fitPreviewToViewport, previewImage?.dataUrl]);
 
   async function handlePreviewImage(attachment: ChatAttachment) {
     if (attachment.kind !== "image") return;

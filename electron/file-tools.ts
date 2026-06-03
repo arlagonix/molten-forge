@@ -7,8 +7,9 @@
 // cannot escape a root.
 
 import { shell } from "electron";
-import { promises as fs } from "node:fs";
+import { createReadStream, promises as fs } from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
 
 import {
   FILE_READ_TOOL_NAME,
@@ -32,6 +33,23 @@ import {
   type WorkspaceRoot,
 } from "./tool-utils";
 
+type FileToolChangePreviewRow = {
+  type: "add" | "delete" | "context";
+  text: string;
+  oldLine?: number;
+  newLine?: number;
+};
+
+type FileToolChangePreview = {
+  kind: "create" | "replace" | "delete";
+  rootId?: string;
+  rootName?: string;
+  path: string;
+  title?: string;
+  truncated?: boolean;
+  rows: FileToolChangePreviewRow[];
+};
+
 type FileToolResult = {
   content: string;
   isError: boolean;
@@ -39,12 +57,17 @@ type FileToolResult = {
   stdout: string;
   stderr: string;
   timedOut: false;
+  changePreview?: FileToolChangePreview;
 };
 
+const FILE_TOOL_READ_WINDOW_LINES = 100;
+const FILE_TOOL_MAX_READ_OFFSET = 1_000_000_000;
 const FILE_TOOL_MAX_READ_CHARS = 100_000;
 const FILE_TOOL_MAX_TEXT_FILE_BYTES = 5_000_000;
 const FILE_TOOL_MAX_SEARCH_FILE_BYTES = 2_000_000;
 const FILE_TOOL_MAX_RESULTS = 200;
+const FILE_TOOL_CHANGE_PREVIEW_MAX_LINES = 200;
+const FILE_TOOL_CHANGE_PREVIEW_MAX_LINE_CHARS = 500;
 const FILE_TOOL_DEFAULT_EXCLUDES = new Set([
   ".git",
   "node_modules",
@@ -400,6 +423,7 @@ async function resolveWorkspaceTargetForCreate(
 function buildFileToolResult(
   payload: unknown,
   isError = false,
+  changePreview?: FileToolChangePreview,
 ): FileToolResult {
   const content = stringifyToolResult(payload);
   return {
@@ -409,6 +433,7 @@ function buildFileToolResult(
     stdout: content,
     stderr: isError ? content : "",
     timedOut: false,
+    changePreview,
   };
 }
 
@@ -497,34 +522,266 @@ function truncateText(value: string, maxChars: number) {
   return { text: value.slice(0, maxChars), truncated: true };
 }
 
+
+function readOptionalPositiveIntegerArg(args: unknown, key: string, max: number) {
+  if (!isPlainObject(args) || !(key in args)) return undefined;
+  const value = args[key];
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw new Error(`${key} must be a positive integer.`);
+  }
+  return Math.min(Math.floor(value), max);
+}
+
+function normalizeOptionalLineRange(args: unknown) {
+  const startLine = readOptionalPositiveIntegerArg(
+    args,
+    "startLine",
+    FILE_TOOL_MAX_READ_OFFSET,
+  );
+  const endLine = readOptionalPositiveIntegerArg(
+    args,
+    "endLine",
+    FILE_TOOL_MAX_READ_OFFSET,
+  );
+
+  if (
+    startLine !== undefined &&
+    endLine !== undefined &&
+    endLine < startLine
+  ) {
+    throw new Error("endLine must be greater than or equal to startLine.");
+  }
+
+  return { startLine, endLine };
+}
+
+function splitLinesForPreview(text: string) {
+  if (!text) return [];
+  return text.split(/\r?\n/);
+}
+
+function truncatePreviewLine(text: string) {
+  if (text.length <= FILE_TOOL_CHANGE_PREVIEW_MAX_LINE_CHARS) return text;
+  return `${text.slice(0, FILE_TOOL_CHANGE_PREVIEW_MAX_LINE_CHARS)}…`;
+}
+
+function limitChangePreviewRows(rows: FileToolChangePreviewRow[]) {
+  if (rows.length <= FILE_TOOL_CHANGE_PREVIEW_MAX_LINES) {
+    return { rows, truncated: false };
+  }
+
+  return {
+    rows: rows.slice(0, FILE_TOOL_CHANGE_PREVIEW_MAX_LINES),
+    truncated: true,
+  };
+}
+
+function createChangePreview({
+  kind,
+  rootId,
+  rootName,
+  path: filePath,
+  title,
+  rows,
+}: {
+  kind: FileToolChangePreview["kind"];
+  rootId?: string;
+  rootName?: string;
+  path: string;
+  title?: string;
+  rows: FileToolChangePreviewRow[];
+}): FileToolChangePreview {
+  const limited = limitChangePreviewRows(rows);
+  return {
+    kind,
+    rootId,
+    rootName,
+    path: filePath,
+    title,
+    truncated: limited.truncated,
+    rows: limited.rows,
+  };
+}
+
+function createAddedRows(text: string, startLine = 1): FileToolChangePreviewRow[] {
+  return splitLinesForPreview(text).map((line, index) => ({
+    type: "add",
+    text: truncatePreviewLine(line),
+    newLine: startLine + index,
+  }));
+}
+
+function createDeletedRows(text: string, startLine = 1): FileToolChangePreviewRow[] {
+  return splitLinesForPreview(text).map((line, index) => ({
+    type: "delete",
+    text: truncatePreviewLine(line),
+    oldLine: startLine + index,
+  }));
+}
+
+function getLineStartOffsets(text: string) {
+  const starts = [0];
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] === "\n") starts.push(index + 1);
+  }
+  return starts;
+}
+
+function getLineNumberForOffset(lineStarts: number[], offset: number) {
+  let low = 0;
+  let high = lineStarts.length - 1;
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (lineStarts[mid] <= offset) low = mid + 1;
+    else high = mid - 1;
+  }
+
+  return Math.max(1, high + 1);
+}
+
+function getLineRangeOffsets(
+  text: string,
+  startLineArg?: number,
+  endLineArg?: number,
+) {
+  const lineStarts = getLineStartOffsets(text);
+  const totalLines = text.length === 0 ? 0 : lineStarts.length;
+  const startLine = startLineArg ?? 1;
+  const endLine = endLineArg ?? totalLines;
+
+  if (totalLines === 0) {
+    return {
+      lineStarts,
+      totalLines,
+      startLine,
+      endLine,
+      startOffset: 0,
+      endOffset: 0,
+    };
+  }
+
+  const clampedStartLine = Math.min(startLine, totalLines + 1);
+  const clampedEndLine = Math.min(endLine, totalLines);
+  const startOffset =
+    clampedStartLine <= totalLines ? lineStarts[clampedStartLine - 1] : text.length;
+  const endOffset =
+    clampedEndLine >= totalLines
+      ? text.length
+      : clampedEndLine >= clampedStartLine
+        ? lineStarts[clampedEndLine]
+        : startOffset;
+
+  return {
+    lineStarts,
+    totalLines,
+    startLine: clampedStartLine,
+    endLine: clampedEndLine,
+    startOffset,
+    endOffset,
+  };
+}
+
+function findAllOccurrences(text: string, needle: string) {
+  const positions: number[] = [];
+  if (!needle) return positions;
+
+  let searchFrom = 0;
+  while (searchFrom <= text.length) {
+    const index = text.indexOf(needle, searchFrom);
+    if (index < 0) break;
+    positions.push(index);
+    searchFrom = index + needle.length;
+  }
+
+  return positions;
+}
+
+async function tryReadTextFileForChangePreview(filePath: string, size: number) {
+  if (size > FILE_TOOL_MAX_TEXT_FILE_BYTES) return undefined;
+  if (!isLikelyTextFile(filePath)) return undefined;
+
+  try {
+    const sampleSize = Math.min(FILE_TOOL_TEXT_SAMPLE_BYTES, size);
+    const sample = await readFileSample(filePath, sampleSize);
+    if (!looksLikeTextBuffer(sample)) return undefined;
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+async function readTextFileWindow(filePath: string, offset: number) {
+  const stream = createReadStream(filePath, { encoding: "utf8" });
+  const reader = createInterface({ input: stream, crlfDelay: Infinity });
+  const lines: string[] = [];
+  let lineNumber = 0;
+  const requestedEndLine = offset + FILE_TOOL_READ_WINDOW_LINES - 1;
+
+  try {
+    for await (const line of reader) {
+      lineNumber += 1;
+
+      if (lineNumber >= offset && lineNumber <= requestedEndLine) {
+        lines.push(line);
+      }
+    }
+  } finally {
+    reader.close();
+    stream.destroy();
+  }
+
+  const startLine = lines.length > 0 ? offset : 0;
+  const endLine = lines.length > 0 ? offset + lines.length - 1 : 0;
+  const totalLines = lineNumber;
+  const nextOffset = endLine > 0 && endLine < totalLines ? endLine + 1 : null;
+  const rawContent = lines.join("\n");
+  const truncated = truncateText(rawContent, FILE_TOOL_MAX_READ_CHARS);
+
+  return {
+    offset,
+    startLine,
+    endLine,
+    totalLines,
+    nextOffset,
+    truncated: truncated.truncated,
+    content: truncated.text,
+  };
+}
+
 async function executeFileReadTool(
   args: unknown,
   context: ToolExecutionContext,
 ) {
   const requestedPath = readRequiredString(args, "path");
   const rootId = readOptionalString(args, "rootId");
-  const maxChars = readPositiveIntegerArg(
+  const offset = readPositiveIntegerArg(
     args,
-    "maxChars",
-    FILE_TOOL_MAX_READ_CHARS,
-    FILE_TOOL_MAX_READ_CHARS,
+    "offset",
+    1,
+    FILE_TOOL_MAX_READ_OFFSET,
   );
   const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
   const stats = await assertTextFile(
     target.realPath,
     FILE_TOOL_MAX_TEXT_FILE_BYTES,
   );
-  const text = await fs.readFile(target.realPath, "utf8");
-  const truncated = truncateText(text, maxChars);
+  const window = await readTextFileWindow(target.realPath, offset);
 
   return buildFileToolResult({
     ok: true,
+    type: "file",
     rootId: target.root.id,
     rootName: target.root.name,
     path: target.relativePath,
+    offset: window.offset,
+    startLine: window.startLine,
+    endLine: window.endLine,
+    totalLines: window.totalLines,
+    nextOffset: window.nextOffset,
     bytes: stats.size,
-    truncated: truncated.truncated,
-    content: truncated.text,
+    truncated: window.truncated,
+    content: window.content,
   });
 }
 
@@ -701,21 +958,131 @@ function makeSearchSnippet(
   return `${start > 0 ? "…" : ""}${line.slice(start, end)}${end < line.length ? "…" : ""}`;
 }
 
+async function searchTextInCandidate({
+  candidate,
+  query,
+  caseSensitive,
+  maxResults,
+  startLine,
+  endLine,
+}: {
+  candidate: {
+    root: WorkspaceRoot & { realPath: string };
+    absolutePath: string;
+    realPath: string;
+    relativePath: string;
+  };
+  query: string;
+  caseSensitive: boolean;
+  maxResults: number;
+  startLine?: number;
+  endLine?: number;
+}) {
+  const stats = await assertTextFile(
+    candidate.absolutePath,
+    FILE_TOOL_MAX_SEARCH_FILE_BYTES,
+  );
+  const text = await fs.readFile(candidate.absolutePath, "utf8");
+  const lines = text.split(/\r?\n/);
+  const totalLines = text.length === 0 ? 0 : lines.length;
+  const rangeStartLine = startLine ?? 1;
+  const rangeEndLine = endLine ?? totalLines;
+  const clampedStartLine = Math.max(1, Math.min(rangeStartLine, totalLines + 1));
+  const clampedEndLine = Math.max(
+    0,
+    Math.min(rangeEndLine, totalLines),
+  );
+  const needle = caseSensitive ? query : query.toLowerCase();
+  const results: Array<{
+    rootId: string;
+    rootName: string;
+    path: string;
+    line: number;
+    snippet: string;
+  }> = [];
+
+  if (clampedStartLine <= clampedEndLine) {
+    for (
+      let lineNumber = clampedStartLine;
+      lineNumber <= clampedEndLine;
+      lineNumber += 1
+    ) {
+      const line = lines[lineNumber - 1] ?? "";
+      const haystack = caseSensitive ? line : line.toLowerCase();
+      if (!haystack.includes(needle)) continue;
+      results.push({
+        rootId: candidate.root.id,
+        rootName: candidate.root.name,
+        path: candidate.relativePath,
+        line: lineNumber,
+        snippet: makeSearchSnippet(line, query, caseSensitive),
+      });
+      if (results.length >= maxResults) break;
+    }
+  }
+
+  return {
+    stats,
+    totalLines,
+    startLine: clampedStartLine,
+    endLine: clampedEndLine,
+    results,
+  };
+}
+
 async function executeFileSearchTextTool(
   args: unknown,
   context: ToolExecutionContext,
 ) {
   const query = readRequiredString(args, "query");
   const rootId = readOptionalString(args, "rootId");
+  const requestedPath = readOptionalString(args, "path")?.trim();
   const include = readOptionalStringArray(args, "include");
   const exclude = readOptionalStringArray(args, "exclude");
   const caseSensitive = isPlainObject(args) && args.caseSensitive === true;
+  const { startLine, endLine } = normalizeOptionalLineRange(args);
   const maxResults = readPositiveIntegerArg(
     args,
     "maxResults",
     50,
     FILE_TOOL_MAX_RESULTS,
   );
+
+  if ((startLine !== undefined || endLine !== undefined) && !requestedPath) {
+    throw new Error("startLine and endLine can only be used when path is provided.");
+  }
+
+  if (requestedPath) {
+    const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
+    const searchResult = await searchTextInCandidate({
+      candidate: {
+        root: target.root,
+        absolutePath: target.realPath,
+        realPath: target.realPath,
+        relativePath: target.relativePath,
+      },
+      query,
+      caseSensitive,
+      maxResults,
+      startLine,
+      endLine,
+    });
+
+    return buildFileToolResult({
+      ok: true,
+      query,
+      rootId: target.root.id,
+      rootName: target.root.name,
+      path: target.relativePath,
+      startLine: searchResult.startLine,
+      endLine: searchResult.endLine,
+      totalLines: searchResult.totalLines,
+      bytes: searchResult.stats.size,
+      count: searchResult.results.length,
+      results: searchResult.results,
+    });
+  }
+
   const candidates = await collectWorkspaceFiles({
     context,
     rootId,
@@ -724,7 +1091,6 @@ async function executeFileSearchTextTool(
     maxResults: FILE_TOOL_MAX_RESULTS * 5,
     includeDirectories: false,
   });
-  const needle = caseSensitive ? query : query.toLowerCase();
   const results: Array<{
     rootId: string;
     rootName: string;
@@ -738,27 +1104,13 @@ async function executeFileSearchTextTool(
     if (!isLikelyTextFile(candidate.absolutePath)) continue;
 
     try {
-      const stats = await fs.stat(candidate.absolutePath);
-      if (!stats.isFile() || stats.size > FILE_TOOL_MAX_SEARCH_FILE_BYTES)
-        continue;
-      const sampleSize = Math.min(FILE_TOOL_TEXT_SAMPLE_BYTES, stats.size);
-      const sample = await readFileSample(candidate.absolutePath, sampleSize);
-      if (!looksLikeTextBuffer(sample)) continue;
-      const text = await fs.readFile(candidate.absolutePath, "utf8");
-      const lines = text.split(/\r?\n/);
-      for (let index = 0; index < lines.length; index += 1) {
-        const line = lines[index];
-        const haystack = caseSensitive ? line : line.toLowerCase();
-        if (!haystack.includes(needle)) continue;
-        results.push({
-          rootId: candidate.root.id,
-          rootName: candidate.root.name,
-          path: candidate.relativePath,
-          line: index + 1,
-          snippet: makeSearchSnippet(line, query, caseSensitive),
-        });
-        if (results.length >= maxResults) break;
-      }
+      const searchResult = await searchTextInCandidate({
+        candidate,
+        query,
+        caseSensitive,
+        maxResults: maxResults - results.length,
+      });
+      results.push(...searchResult.results);
     } catch {
       continue;
     }
@@ -780,6 +1132,7 @@ async function executeFileReplaceTextTool(
   const oldText = readRequiredRawString(args, "oldText");
   const newText = readOptionalString(args, "newText") ?? "";
   const rootId = readOptionalString(args, "rootId");
+  const { startLine, endLine } = normalizeOptionalLineRange(args);
   const expectedReplacements =
     isPlainObject(args) &&
     typeof args.expectedReplacements === "number" &&
@@ -793,14 +1146,22 @@ async function executeFileReplaceTextTool(
     FILE_TOOL_MAX_TEXT_FILE_BYTES,
   );
   const current = await fs.readFile(target.realPath, "utf8");
-  const replacementCount = oldText ? current.split(oldText).length - 1 : 0;
+  const lineRange = getLineRangeOffsets(current, startLine, endLine);
+  const scopedCurrent = current.slice(lineRange.startOffset, lineRange.endOffset);
+  const matchPositions = findAllOccurrences(scopedCurrent, oldText);
+  const replacementCount = matchPositions.length;
+
   if (replacementCount === 0) {
-    throw new Error("oldText was not found in the target file.");
+    const scopeText =
+      startLine !== undefined || endLine !== undefined
+        ? ` within lines ${lineRange.startLine}-${lineRange.endLine}`
+        : "";
+    throw new Error(`oldText was not found in the target file${scopeText}.`);
   }
   if (expectedReplacements === undefined) {
     if (replacementCount > 1) {
       throw new Error(
-        `oldText matches ${replacementCount} times. Add surrounding context to make it unique, or set expectedReplacements to ${replacementCount} to replace every match intentionally.`,
+        `oldText matches ${replacementCount} times in the selected scope. Add surrounding context to make it unique, narrow startLine/endLine, or set expectedReplacements to ${replacementCount} to replace every match intentionally.`,
       );
     }
   } else if (replacementCount !== expectedReplacements) {
@@ -809,20 +1170,49 @@ async function executeFileReplaceTextTool(
     );
   }
 
-  const next = current.split(oldText).join(newText);
+  const nextScoped = scopedCurrent.split(oldText).join(newText);
+  const next = `${current.slice(0, lineRange.startOffset)}${nextScoped}${current.slice(lineRange.endOffset)}`;
   const tempPath = `${target.realPath}.chatforge-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`;
   await fs.writeFile(tempPath, next, "utf8");
   await fs.rename(tempPath, target.realPath);
 
-  return buildFileToolResult({
-    ok: true,
+  const rows: FileToolChangePreviewRow[] = [];
+  for (const matchPosition of matchPositions) {
+    const oldStartLine = getLineNumberForOffset(
+      lineRange.lineStarts,
+      lineRange.startOffset + matchPosition,
+    );
+    rows.push(...createDeletedRows(oldText, oldStartLine));
+    rows.push(...createAddedRows(newText, oldStartLine));
+  }
+  const changePreview = createChangePreview({
+    kind: "replace",
     rootId: target.root.id,
     rootName: target.root.name,
     path: target.relativePath,
-    bytesBefore: stats.size,
-    bytesAfter: Buffer.byteLength(next, "utf8"),
-    replacements: replacementCount,
+    title: `Replaced ${replacementCount} occurrence${replacementCount === 1 ? "" : "s"}`,
+    rows,
   });
+
+  return buildFileToolResult(
+    {
+      ok: true,
+      rootId: target.root.id,
+      rootName: target.root.name,
+      path: target.relativePath,
+      bytesBefore: stats.size,
+      bytesAfter: Buffer.byteLength(next, "utf8"),
+      replacements: replacementCount,
+      ...(startLine !== undefined || endLine !== undefined
+        ? {
+            scopeStartLine: lineRange.startLine,
+            scopeEndLine: lineRange.endLine,
+          }
+        : {}),
+    },
+    false,
+    changePreview,
+  );
 }
 
 async function executeFileCreateTool(
@@ -858,14 +1248,27 @@ async function executeFileCreateTool(
     flag: "wx",
   });
 
-  return buildFileToolResult({
-    ok: true,
+  const changePreview = createChangePreview({
+    kind: "create",
     rootId: target.root.id,
     rootName: target.root.name,
     path: target.relativePath,
-    bytes: Buffer.byteLength(content, "utf8"),
-    createdParents: createParents,
+    title: "Created file",
+    rows: createAddedRows(content),
   });
+
+  return buildFileToolResult(
+    {
+      ok: true,
+      rootId: target.root.id,
+      rootName: target.root.name,
+      path: target.relativePath,
+      bytes: Buffer.byteLength(content, "utf8"),
+      createdParents: createParents,
+    },
+    false,
+    changePreview,
+  );
 }
 
 async function executeFileDeleteTool(
@@ -887,16 +1290,35 @@ async function executeFileDeleteTool(
     );
   }
 
+  const deletedContent = await tryReadTextFileForChangePreview(
+    target.realPath,
+    stats.size,
+  );
+  const changePreview = deletedContent
+    ? createChangePreview({
+        kind: "delete",
+        rootId: target.root.id,
+        rootName: target.root.name,
+        path: target.relativePath,
+        title: "Deleted file",
+        rows: createDeletedRows(deletedContent),
+      })
+    : undefined;
+
   await shell.trashItem(target.absolutePath);
 
-  return buildFileToolResult({
-    ok: true,
-    rootId: target.root.id,
-    rootName: target.root.name,
-    path: target.relativePath,
-    bytes: stats.size,
-    deletedVia: "trash",
-  });
+  return buildFileToolResult(
+    {
+      ok: true,
+      rootId: target.root.id,
+      rootName: target.root.name,
+      path: target.relativePath,
+      bytes: stats.size,
+      deletedVia: "trash",
+    },
+    false,
+    changePreview,
+  );
 }
 
 export async function executeFileTool(

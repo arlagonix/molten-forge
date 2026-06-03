@@ -72,40 +72,13 @@ const TOOL_TEST_STATES_STORAGE_KEY = "chat-forge-tool-test-states";
 const TOOL_TEST_STATE_SAVE_DELAY_MS = 350;
 const BUILTIN_ASK_USER_TOOL_NAME = "ask_user";
 const BUILTIN_ASK_USER_TOOL_ID = "builtin-ask-user";
-const BUILTIN_TASK_TOOL_NAMES = [
-  "add_tasks",
-  "delete_tasks",
-  "complete_tasks",
-  "get_tasks_list",
-  "clear_tasks_list",
-] as const;
+const BUILTIN_TASK_TOOL_NAMES = ["update_tasks"] as const;
 const BUILTIN_TASK_TOOL_META = [
   {
-    id: "builtin-add-tasks",
-    name: "add_tasks",
-    description: "Adds one or more tasks to the current chat task list.",
-  },
-  {
-    id: "builtin-delete-tasks",
-    name: "delete_tasks",
+    id: "builtin-update-tasks",
+    name: "update_tasks",
     description:
-      "Deletes one or more tasks from the current chat task list by numeric id.",
-  },
-  {
-    id: "builtin-complete-tasks",
-    name: "complete_tasks",
-    description: "Marks one or more tasks as done by numeric id.",
-  },
-  {
-    id: "builtin-get-tasks-list",
-    name: "get_tasks_list",
-    description:
-      "Gets the current chat task list.",
-  },
-  {
-    id: "builtin-clear-tasks-list",
-    name: "clear_tasks_list",
-    description: "Clears all tasks from the current chat task list.",
+      "Updates the visible task checklist for the current chat by setting the full current list.",
   },
 ] as const;
 const BUILTIN_LOAD_SKILL_TOOL_NAME = "load_skill";
@@ -131,14 +104,14 @@ const BUILTIN_FILE_TOOL_META = [
     id: "builtin-file-read",
     name: BUILTIN_FILE_READ_TOOL_NAME,
     setting: "fileReadEnabled" as const,
-    description: "Reads UTF-8 text files inside approved workspace folders.",
+    description: "Reads UTF-8 text files inside approved workspace folders in 100-line windows.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
         path: { type: "string" },
         rootId: { type: "string" },
-        maxChars: { type: "number" },
+        offset: { type: "number" },
       },
       required: ["path"],
     },
@@ -288,7 +261,7 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
   required: ["questions"],
 };
 const BUILTIN_TASK_TOOLS_DESCRIPTION =
-  "Manage a simple persistent task list for the current chat with numeric ids and done states.";
+  "The assistant uses one task list tool (`update_tasks`) to show and update a checklist in the current chat. It always sends the full current list; sending an empty list clears it.";
 const BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION =
   "Loads full instructions for one relevant skill and activates it for the current chat when skills are available.";
 const BUILTIN_WEB_FETCH_TOOL_DESCRIPTION =
@@ -321,56 +294,34 @@ const BUILTIN_WEB_FETCH_TOOL_PARAMETERS = {
 };
 
 const BUILTIN_TASK_TOOL_PARAMETERS = {
-  add_tasks: {
+  update_tasks: {
     type: "object",
     additionalProperties: false,
     properties: {
-      subjects: {
+      tasks: {
         type: "array",
         description:
-          "One to ten short task subjects to add. The app assigns numeric ids.",
-        minItems: 1,
-        maxItems: 10,
-        items: { type: "string" },
+          "The full desired current checklist. Include both incomplete and completed tasks that should remain visible. Send [] to clear the list.",
+        maxItems: 50,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            subject: {
+              type: "string",
+              description: "Short user-visible task subject.",
+              maxLength: 180,
+            },
+            done: {
+              type: "boolean",
+              description: "Whether the task is complete.",
+            },
+          },
+          required: ["subject", "done"],
+        },
       },
     },
-    required: ["subjects"],
-  },
-  delete_tasks: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      taskIds: {
-        type: "array",
-        description: "Numeric task ids to remove.",
-        minItems: 1,
-        items: { type: "integer" },
-      },
-    },
-    required: ["taskIds"],
-  },
-  complete_tasks: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      taskIds: {
-        type: "array",
-        description: "Numeric task ids to mark done.",
-        minItems: 1,
-        items: { type: "integer" },
-      },
-    },
-    required: ["taskIds"],
-  },
-  get_tasks_list: {
-    type: "object",
-    additionalProperties: false,
-    properties: {},
-  },
-  clear_tasks_list: {
-    type: "object",
-    additionalProperties: false,
-    properties: {},
+    required: ["tasks"],
   },
 };
 
@@ -918,7 +869,7 @@ export const ToolsDialog = memo(function ToolsDialog({
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 14;
+  const totalToolsCount = loadedTools.length + 10;
   const enabledToolsCount = useMemo(
     () =>
       loadedTools.filter((tool) => tool.enabled).length +
@@ -1473,8 +1424,8 @@ export const ToolsDialog = memo(function ToolsDialog({
                       className="mt-0.5 shrink-0 cursor-pointer"
                       title={
                         toolsSettings.taskToolsEnabled
-                          ? "Disable task tools"
-                          : "Enable task tools"
+                          ? "Disable task list tool"
+                          : "Enable task list tool"
                       }
                     />
                   </div>
@@ -1808,15 +1759,14 @@ export const ToolsDialog = memo(function ToolsDialog({
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
-                          The assistant can use the task tools during complex
-                          work to add, delete, complete, get, or clear tasks
-                          in the current chat. The five task tools share this
-                          single settings switch.
+                          The assistant can use the task list tool during complex
+                          work to show and update the checklist in the current
+                          chat. It always sends the full current list in one call.
                         </p>
                         <p>
-                          Tasks use numeric ids, a short subject, and a done
-                          boolean. Numeric ids are generated by the app and are
-                          not reused after clearing tasks. Every successful task tool renders the current task list in chat.
+                          Each task has a short subject and a done boolean. Sending
+                          an empty tasks array clears the visible checklist. Every
+                          successful task tool call renders the current task list in chat.
                         </p>
                       </div>
                     </div>

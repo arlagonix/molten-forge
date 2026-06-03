@@ -17,11 +17,6 @@ import {
 import {
   ASK_USER_TOOL_NAME,
   isTaskToolName,
-  TASK_ADD_TOOL_NAME,
-  TASK_REMOVE_TOOL_NAME,
-  TASK_COMPLETE_TOOL_NAME,
-  TASK_CLEAR_TOOL_NAME,
-  TASK_GET_TOOL_NAME,
   CALL_AGENT_TOOL_NAME,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL_NAME,
@@ -66,6 +61,7 @@ import {
   buildSystemPromptWithActiveSkills,
   getEnabledAgentsForChat,
   getEnabledSkillsForChat,
+  getEffectiveWorkspaceRoots,
   getEnabledToolsForChat,
   getGlobalEnabledAgents,
   getGlobalEnabledSkills,
@@ -78,7 +74,6 @@ import {
   validateToolMentionsForRequest,
 } from "@/lib/ai-chat/request-builder";
 import type {
-  AgentTask,
   AgentsSettings,
   AskUserResponse,
   ToolApprovalResponse,
@@ -633,47 +628,8 @@ export function useChatGeneration({
     generationRefs.current[chatId]?.controller.abort();
   }
 
-  function normalizeTaskCounter(tasks: AgentTask[], nextTaskId?: number) {
-    const maxTaskId = tasks.reduce(
-      (maxId, task) => Math.max(maxId, task.id),
-      0,
-    );
-    return Math.max(nextTaskId ?? 1, maxTaskId + 1);
-  }
-
   function shouldRenderTaskListStep(toolResult: ChatToolResult) {
     return isTaskToolName(toolResult.toolName) && toolResult.isError !== true;
-  }
-
-  function normalizeTaskSubject(subject: string) {
-    return subject.trim().replace(/\s+/g, " ");
-  }
-
-  function normalizeTaskSubjectKey(subject: string) {
-    return normalizeTaskSubject(subject).toLocaleLowerCase();
-  }
-
-  function dedupeTaskList(tasks: AgentTask[]) {
-    const tasksBySubjectKey = new Map<string, AgentTask>();
-
-    for (const task of tasks) {
-      const subject = normalizeTaskSubject(task.subject);
-      const subjectKey = normalizeTaskSubjectKey(subject);
-      if (!subjectKey) continue;
-
-      const existingTask = tasksBySubjectKey.get(subjectKey);
-      if (!existingTask) {
-        tasksBySubjectKey.set(subjectKey, { ...task, subject });
-        continue;
-      }
-
-      tasksBySubjectKey.set(subjectKey, {
-        ...existingTask,
-        done: existingTask.done || task.done,
-      });
-    }
-
-    return [...tasksBySubjectKey.values()];
   }
 
   function getFinalTaskToolCall(toolCalls: ChatToolCall[]) {
@@ -711,73 +667,9 @@ export function useChatGeneration({
   }
 
   function executeTaskTool(toolCall: ChatToolCall, chatId: string): ChatToolResult {
+    void chatId;
     const request = parseTaskToolRequestFromToolCall(toolCall);
-    const currentChat = chatsRef.current.find((chat) => chat.id === chatId);
-    if (!currentChat) throw new Error("Chat not found for task tool call.");
-
-    const currentTasks = dedupeTaskList(currentChat.tasks ?? []);
-
-    if (toolCall.function.name === TASK_GET_TOOL_NAME) {
-      return createTaskToolResult({ toolCall, tasks: currentTasks });
-    }
-
-    let nextTasks = currentTasks;
-    let nextTaskId = normalizeTaskCounter(currentTasks, currentChat.nextTaskId);
-
-    if (toolCall.function.name === TASK_ADD_TOOL_NAME) {
-      const subjects = "subjects" in request ? request.subjects : [];
-      const existingSubjectKeys = new Set(
-        currentTasks.map((task) => normalizeTaskSubjectKey(task.subject)),
-      );
-      const incomingSubjectKeys = new Set<string>();
-      const uniqueSubjects = subjects
-        .map((subject) => normalizeTaskSubject(subject))
-        .filter((subject) => {
-          const key = normalizeTaskSubjectKey(subject);
-          if (!key || existingSubjectKeys.has(key) || incomingSubjectKeys.has(key)) {
-            return false;
-          }
-          incomingSubjectKeys.add(key);
-          return true;
-        });
-      const addedTasks = uniqueSubjects.map((subject) => ({
-        id: nextTaskId++,
-        subject,
-        done: false,
-      }));
-      nextTasks = addedTasks.length ? [...currentTasks, ...addedTasks] : currentTasks;
-    } else if (toolCall.function.name === TASK_REMOVE_TOOL_NAME) {
-      const taskIds = "taskIds" in request ? new Set(request.taskIds) : new Set<number>();
-      nextTasks = currentTasks.filter((task) => !taskIds.has(task.id));
-    } else if (toolCall.function.name === TASK_COMPLETE_TOOL_NAME) {
-      const taskIds = "taskIds" in request ? new Set(request.taskIds) : new Set<number>();
-      nextTasks = currentTasks.map((task) =>
-        taskIds.has(task.id) ? { ...task, done: true } : task,
-      );
-    } else if (toolCall.function.name === TASK_CLEAR_TOOL_NAME) {
-      nextTasks = [];
-      nextTaskId = 1;
-    }
-
-    nextTasks = dedupeTaskList(nextTasks);
-    nextTaskId = toolCall.function.name === TASK_CLEAR_TOOL_NAME
-      ? 1
-      : normalizeTaskCounter(nextTasks, nextTaskId);
-
-    const updatedAt = new Date().toISOString();
-    chatsRef.current = chatsRef.current.map((chat) =>
-      chat.id === chatId
-        ? { ...chat, tasks: nextTasks, nextTaskId, updatedAt }
-        : chat,
-    );
-    updateChat(chatId, (chat) => ({
-      ...chat,
-      tasks: nextTasks,
-      nextTaskId,
-      updatedAt,
-    }));
-
-    return createTaskToolResult({ toolCall, tasks: nextTasks });
+    return createTaskToolResult({ toolCall, tasks: request.tasks });
   }
 
   const {
@@ -790,7 +682,12 @@ export function useChatGeneration({
     activeChatId,
     loadedTools,
     availableSkillsByName,
-    workspaceRoots: activeChat?.workspaceRoots ?? [],
+    workspaceRoots: activeChat
+      ? getEffectiveWorkspaceRootsForChat(
+          activeChat,
+          activeChat.activeSkillNames ?? [],
+        )
+      : [],
     fileToolAutoApproval: activeChat?.fileToolAutoApproval,
     modelSelectableSkillNames: activeChat
       ? getEnabledSkillsForChat({
@@ -906,36 +803,69 @@ export function useChatGeneration({
     const now = new Date().toISOString();
     const existingStepId =
       activeStep?.type === "tool_building" ? activeStep.id : undefined;
+    const stepId = existingStepId ?? createId();
+    const toolCallIds = new Set(toolCalls.map((toolCall) => toolCall.id));
 
-    if (existingStepId) {
-      updateAssistantVariant(
-        chatId,
-        assistantMessageId,
-        variantId,
-        (variant) => ({
+    let shouldKeepBuildingStep = true;
+
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => {
+        const processSteps = variant.processSteps ?? [];
+        const hasVisibleToolStep = processSteps.some((step) => {
+          if (step.type === "tool_building") return false;
+          if (!("toolCall" in step)) return false;
+          return toolCallIds.has(step.toolCall.id);
+        });
+
+        if (hasVisibleToolStep) {
+          shouldKeepBuildingStep = false;
+
+          return {
+            ...variant,
+            processSteps: processSteps.filter(
+              (step) => step.type !== "tool_building",
+            ),
+          };
+        }
+
+        const hasExistingToolBuildingStep = processSteps.some(
+          (step) => step.id === stepId && step.type === "tool_building",
+        );
+
+        return {
           ...variant,
-          processSteps: (variant.processSteps ?? []).map((step) =>
-            step.id === existingStepId && step.type === "tool_building"
-              ? { ...step, toolCalls, updatedAt: now }
-              : step,
-          ),
-        }),
-        { touch: false },
-      );
-      return;
-    }
-
-    const stepId = createId();
-    appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
-      {
-        id: stepId,
-        type: "tool_building",
-        status: "running",
-        toolCalls,
-        updatedAt: now,
+          processSteps: hasExistingToolBuildingStep
+            ? processSteps.map((step) =>
+                step.id === stepId && step.type === "tool_building"
+                  ? { ...step, toolCalls, updatedAt: now }
+                  : step,
+              )
+            : [
+                ...processSteps,
+                {
+                  id: stepId,
+                  type: "tool_building" as const,
+                  status: "running" as const,
+                  toolCalls,
+                  updatedAt: now,
+                },
+              ],
+        };
       },
-    ]);
-    setActiveStreamProcessStep(bufferKey, { type: "tool_building", id: stepId });
+      { touch: false },
+    );
+
+    if (shouldKeepBuildingStep) {
+      setActiveStreamProcessStep(bufferKey, {
+        type: "tool_building",
+        id: stepId,
+      });
+    } else if (activeStep?.type === "tool_building") {
+      delete streamActiveProcessStepRefs.current[bufferKey];
+    }
   }
 
   function removeToolBuildingProcessSteps(
@@ -1110,12 +1040,18 @@ export function useChatGeneration({
       (skillName) =>
         availableSkillsByName.get(skillName)?.recommendedToolNames ?? [],
     );
+    const effectiveWorkspaceRoots = getEffectiveWorkspaceRoots({
+      workspaceRoots: chat.workspaceRoots ?? [],
+      activeSkillNames,
+      availableSkillsByName,
+    });
     const tools = getEnabledToolsForChat({
       chat,
       oneShotToolNames,
       skillRecommendedToolNames,
       globalEnabledTools,
       availableToolsByName,
+      effectiveWorkspaceRoots,
     });
     const enabledAgentsForChat = getEnabledAgentsForChat({
       chat,
@@ -1149,8 +1085,34 @@ export function useChatGeneration({
     ];
   }
 
+  function getEffectiveWorkspaceRootsForChat(
+    chat: ChatSession | undefined,
+    activeSkillNames: string[],
+  ) {
+    return getEffectiveWorkspaceRoots({
+      workspaceRoots: chat?.workspaceRoots ?? [],
+      activeSkillNames,
+      availableSkillsByName,
+    });
+  }
+
+  function getCurrentChatSnapshot(chatId: string) {
+    return chatsRef.current.find((chat) => chat.id === chatId);
+  }
+
+
+  function mergeToolsByName(...toolLists: LoadedToolInfo[][]) {
+    const byName = new Map<string, LoadedToolInfo>();
+    for (const tools of toolLists) {
+      for (const tool of tools) {
+        if (!byName.has(tool.name)) byName.set(tool.name, tool);
+      }
+    }
+    return [...byName.values()];
+  }
+
   function getChatFileToolAutoApproval(chatId: string) {
-    return chats.find((chat) => chat.id === chatId)?.fileToolAutoApproval;
+    return getCurrentChatSnapshot(chatId)?.fileToolAutoApproval;
   }
 
   function getChatThinkingSettings(chatId: string) {
@@ -1684,6 +1646,14 @@ export function useChatGeneration({
 
     try {
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+        const chatSnapshot = getCurrentChatSnapshot(chatId);
+        const currentInheritedToolsForRun = chatSnapshot
+          ? mergeToolsByName(
+              inheritedToolsForRun,
+              getToolsForChat(chatSnapshot, [], currentAgentActiveSkillNames),
+            )
+          : inheritedToolsForRun;
+
         const result = await streamProviderChat({
           provider,
           systemPrompt: createAgentSystemPrompt(agent, currentAgentActiveSkillNames),
@@ -1697,7 +1667,7 @@ export function useChatGeneration({
           tools: getAgentTools({
             agent,
             depth,
-            inheritedToolsForRun,
+            inheritedToolsForRun: currentInheritedToolsForRun,
             chatEnabledAgents,
           }),
           settingsOverride: getChatThinkingSettings(chatId),
@@ -1777,7 +1747,7 @@ export function useChatGeneration({
                   contextMessages,
                   userMessage,
                   userAttachments,
-                  inheritedToolsForRun,
+                  inheritedToolsForRun: currentInheritedToolsForRun,
                   inheritedActiveSkillNames: currentAgentActiveSkillNames,
                 });
                 return {
@@ -1803,8 +1773,10 @@ export function useChatGeneration({
                   stepId: `${agentCall.id}:${childToolCall.id}`,
                   signal,
                   activeSkillNames: currentAgentActiveSkillNames,
-                  workspaceRoots:
-                    chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [],
+                  workspaceRoots: getEffectiveWorkspaceRootsForChat(
+                    getCurrentChatSnapshot(chatId),
+                    currentAgentActiveSkillNames,
+                  ),
                   fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
                 });
               }
@@ -1813,8 +1785,10 @@ export function useChatGeneration({
                 return executeTaskTool(childToolCall, chatId);
               }
 
-              const childWorkspaceRoots =
-                chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [];
+              const childWorkspaceRoots = getEffectiveWorkspaceRootsForChat(
+                getCurrentChatSnapshot(chatId),
+                currentAgentActiveSkillNames,
+              );
 
               const childTool = availableToolsByName.get(
                 childToolCall.function.name,
@@ -1882,7 +1856,7 @@ export function useChatGeneration({
                   variantId,
                   stepId: autoApproved ? executionStepId : approvalStepId,
                   signal,
-                  activeSkillNames: agent.loadedSkillNames ?? [],
+                  activeSkillNames: currentAgentActiveSkillNames,
                   workspaceRoots: childWorkspaceRoots,
                   fileToolAutoApproval: autoApproval,
                 });
@@ -2217,7 +2191,10 @@ export function useChatGeneration({
                 request: requiresFileToolApproval(toolCall.function.name)
                   ? parseFileToolApprovalRequestFromToolCall(
                       toolCall,
-                      chats.find((chat) => chat.id === chatId)?.workspaceRoots ?? [],
+                      getEffectiveWorkspaceRootsForChat(
+                        getCurrentChatSnapshot(chatId),
+                        currentActiveSkillNames,
+                      ),
                     )
                   : createToolApprovalRequest(toolCall, tool),
               });
@@ -2299,6 +2276,13 @@ export function useChatGeneration({
                 return {
                   ...step,
                   status: toolResult.isError ? "failed" : "complete",
+                };
+              }
+
+              if (step.type === "approval" || step.type === "file_approval") {
+                return {
+                  ...step,
+                  toolResult,
                 };
               }
 
@@ -2509,6 +2493,18 @@ export function useChatGeneration({
       let lastStreamResult: StreamProviderChatResult | undefined;
 
       for (let toolRound = 0; toolRound <= MAX_TOOL_ROUNDS; toolRound += 1) {
+        const chatSnapshot = getCurrentChatSnapshot(chatId);
+        const currentToolsForRun = chatSnapshot
+          ? mergeToolsByName(
+              toolsForRun,
+              getToolsForChat(chatSnapshot, [], currentActiveSkillNames),
+            )
+          : toolsForRun;
+        const currentWorkspaceRoots = getEffectiveWorkspaceRootsForChat(
+          chatSnapshot,
+          currentActiveSkillNames,
+        );
+
         const thinkingStepId = createId();
         appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
           {
@@ -2538,8 +2534,8 @@ export function useChatGeneration({
               : undefined,
           signal: controller.signal,
           tools: forcedAgentRequests.length
-            ? toolsForRun.filter((tool) => tool.name !== CALL_AGENT_TOOL_NAME)
-            : toolsForRun,
+            ? currentToolsForRun.filter((tool) => tool.name !== CALL_AGENT_TOOL_NAME)
+            : currentToolsForRun,
           settingsOverride: getChatThinkingSettings(chatId),
           onContentDelta: (delta) => {
             accumulatedContent += delta;
@@ -2688,7 +2684,7 @@ export function useChatGeneration({
                       contextMessages,
                       userMessage,
                       userAttachments,
-                      inheritedToolsForRun: toolsForRun,
+                      inheritedToolsForRun: currentToolsForRun,
                       inheritedActiveSkillNames: currentActiveSkillNames,
                     });
                     return {
@@ -2711,6 +2707,7 @@ export function useChatGeneration({
                   stepId: toolStepIdsByToolCallId.get(toolCall.id) ?? toolCall.id,
                   signal: controller.signal,
                   activeSkillNames: currentActiveSkillNames,
+                  workspaceRoots: currentWorkspaceRoots,
                   fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
                 });
 
@@ -2767,7 +2764,12 @@ export function useChatGeneration({
 
       updateAssistantVariant(chatId, assistantMessageId, variantId, (variant) =>
         markAssistantVariantDone({
-          variant,
+          variant: {
+            ...variant,
+            processSteps: (variant.processSteps ?? []).filter(
+              (step) => step.type !== "tool_building",
+            ),
+          },
           responseStartedAtMs,
           provider: providerForRun,
           streamResult: lastStreamResult ?? {},
@@ -2796,7 +2798,12 @@ export function useChatGeneration({
       }
       updateAssistantVariant(chatId, assistantMessageId, variantId, (variant) =>
         markAssistantVariantErrored({
-          variant,
+          variant: {
+            ...variant,
+            processSteps: (variant.processSteps ?? []).filter(
+              (step) => step.type !== "tool_building",
+            ),
+          },
           errorLabel: labelForError(error),
           wasAborted,
           responseStartedAtMs,

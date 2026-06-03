@@ -336,6 +336,7 @@ export function useToolExecution({
       skillName,
       instructions: skill.instructions,
       recommendedToolNames: skill.recommendedToolNames ?? [],
+      ...(skill.directoryPath ? { directoryPath: skill.directoryPath } : {}),
     };
 
     if (activeSkillNamesForRun.includes(skillName)) {
@@ -421,6 +422,7 @@ export function useToolExecution({
       content: result.content,
       isError: result.timedOut || result.exitCode !== 0,
       execution: result.execution,
+      changePreview: result.changePreview,
     };
   }
 
@@ -559,6 +561,7 @@ export function useToolExecution({
           content: execution.content,
           isError: execution.timedOut || execution.exitCode !== 0,
           execution: execution.execution,
+          changePreview: execution.changePreview,
         };
       }
 

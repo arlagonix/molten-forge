@@ -106,12 +106,30 @@ export type ToolExecutionPreview = {
   usesPlaceholders: boolean;
 };
 
+export type FileToolChangePreviewRow = {
+  type: "add" | "delete" | "context";
+  text: string;
+  oldLine?: number;
+  newLine?: number;
+};
+
+export type FileToolChangePreview = {
+  kind: "create" | "replace" | "delete";
+  rootId?: string;
+  rootName?: string;
+  path: string;
+  title?: string;
+  truncated?: boolean;
+  rows: FileToolChangePreviewRow[];
+};
+
 export type ChatToolResult = {
   toolCallId: string;
   toolName: string;
   content: string;
   isError?: boolean;
   execution?: ToolExecutionPreview;
+  changePreview?: FileToolChangePreview;
   loadedSkillName?: string;
   loadedSkillInstructions?: string;
   loadedSkillRecommendedToolNames?: string[];
@@ -222,7 +240,6 @@ export type UserInputStatus = "waiting" | "complete" | "cancelled" | "failed";
 export type ThinkingStatus = "waiting" | "in_progress" | "complete";
 
 export type AgentTask = {
-  id: number;
   subject: string;
   done: boolean;
 };
@@ -385,8 +402,6 @@ export type ChatSession = {
   workspaceRoots?: ChatWorkspaceRoot[];
   fileToolAutoApproval?: ChatFileToolAutoApproval;
   thinkingMode?: ChatThinkingMode;
-  tasks?: AgentTask[];
-  nextTaskId?: number;
 };
 
 export type ApiToolCall = ChatToolCall;
@@ -427,6 +442,7 @@ export type ToolCommandResult = {
   stderr: string;
   timedOut: boolean;
   execution?: ToolExecutionPreview;
+  changePreview?: FileToolChangePreview;
 };
 
 export type ToolDefinition = {
@@ -454,6 +470,12 @@ export type SkillDefinition = {
   description: string;
   instructions: string;
   recommendedToolNames: string[];
+  /**
+   * Absolute path to the skill's folder on disk. Populated at load time so the
+   * model can read bundled files (e.g. references/) with the file tool. Never
+   * written to SKILL.md frontmatter — it is derived from the folder location.
+   */
+  directoryPath?: string;
 };
 
 export type LoadedSkillInfo = SkillDefinition;
