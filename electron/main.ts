@@ -1752,6 +1752,7 @@ type StorageSnapshot = {
   providerModelsCache?: Record<string, unknown>;
   appSettings?: unknown;
   mcpSettings?: unknown;
+  modesState?: unknown;
   chats?: unknown[];
 };
 
@@ -3008,6 +3009,7 @@ async function initializeJsonStorageIfNeeded() {
     agentsSettings: DEFAULT_AGENTS_SETTINGS,
     appSettings: DEFAULT_APP_SETTINGS,
     mcpSettings: DEFAULT_MCP_SETTINGS,
+    modesState: undefined,
   });
   await writeJsonAtomic(getStoragePaths().providers, null);
   await writeJsonAtomic(getStoragePaths().chatsIndex, { chats: [] });
@@ -3243,6 +3245,7 @@ async function migrateFromIndexedDbSnapshot(snapshot: StorageSnapshot) {
       agentsSettings: DEFAULT_AGENTS_SETTINGS,
       appSettings: normalizeAppSettings(snapshot.appSettings),
       mcpSettings: normalizeMcpSettings(snapshot.mcpSettings),
+      modesState: snapshot.modesState,
     };
 
     await writeJsonAtomic(getStoragePaths().settings, settings);
@@ -4957,6 +4960,16 @@ ipcMain.handle("storage:mcp-settings:load", async () => {
 
 ipcMain.handle("storage:mcp-settings:save", async (_event, value: unknown) => {
   await writeSettingsPatch({ mcpSettings: normalizeMcpSettings(value) });
+});
+
+ipcMain.handle("storage:modes-state:load", async () => {
+  await initializeJsonStorageIfNeeded();
+  const settings = await readSettingsFile();
+  return settings.modesState;
+});
+
+ipcMain.handle("storage:modes-state:save", async (_event, value: unknown) => {
+  await writeSettingsPatch({ modesState: value });
 });
 
 ipcMain.handle("storage:tools:load", async () => loadJsonTools());

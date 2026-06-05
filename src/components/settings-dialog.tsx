@@ -6,6 +6,7 @@ import {
   Cpu,
   MessageSquareText,
   Moon,
+  Layers3,
   Network,
   SlidersHorizontal,
   Sun,
@@ -164,6 +165,7 @@ type SettingsDialogProps = {
   onOpenTools: () => void;
   onOpenSkills: () => void;
   onOpenAgents: () => void;
+  onOpenModes: () => void;
   onOpenMcp: () => void;
   onOpenSystemPrompt: () => void;
 };
@@ -182,6 +184,7 @@ export const SettingsDialog = memo(function SettingsDialog({
   onOpenTools,
   onOpenSkills,
   onOpenAgents,
+  onOpenModes,
   onOpenMcp,
   onOpenSystemPrompt,
 }: SettingsDialogProps) {
@@ -222,6 +225,12 @@ export const SettingsDialog = memo(function SettingsDialog({
                   title="Agents"
                   description="Manage delegated agent profiles and permissions."
                   onClick={onOpenAgents}
+                />
+                <SettingsActionRow
+                  icon={<Layers3 className="size-4" />}
+                  title="Modes"
+                  description="Manage chat modes, instructions, and default capabilities."
+                  onClick={onOpenModes}
                 />
                 <SettingsActionRow
                   icon={<Network className="size-4" />}

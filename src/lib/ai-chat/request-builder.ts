@@ -39,6 +39,7 @@ import {
   parseSkillMentionNames,
   parseToolMentionNames,
 } from "@/lib/ai-chat/builtin-tools";
+import { getModeCapabilityNames, getModeInstructionsBlock } from "@/lib/ai-chat/modes";
 import type {
   AgentsSettings,
   ChatSession,
@@ -46,6 +47,7 @@ import type {
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
+  LoadedModeInfo,
   ProviderConfig,
   SkillsSettings,
   ToolsSettings,
@@ -201,6 +203,18 @@ export function getEffectiveWorkspaceRoots({
   return [...byPath.values()];
 }
 
+
+function toNameSet(names: string[]) {
+  return new Set(names.map((name) => name.trim()).filter(Boolean));
+}
+
+function isNameAllowedByModeDefault(
+  name: string,
+  allowedNames: Set<string> | undefined,
+) {
+  return !allowedNames || allowedNames.has(name);
+}
+
 export function getEnabledToolsForChat({
   chat,
   oneShotToolNames = [],
@@ -208,6 +222,8 @@ export function getEnabledToolsForChat({
   globalEnabledTools,
   availableToolsByName,
   effectiveWorkspaceRoots = chat.workspaceRoots ?? [],
+  mode,
+  modeCapabilityContext,
 }: {
   chat: ChatSession;
   oneShotToolNames?: string[];
@@ -215,12 +231,22 @@ export function getEnabledToolsForChat({
   globalEnabledTools: LoadedToolInfo[];
   availableToolsByName: Map<string, LoadedToolInfo>;
   effectiveWorkspaceRoots?: ChatWorkspaceRoot[];
+  mode?: LoadedModeInfo;
+  modeCapabilityContext?: {
+    availableTools: LoadedToolInfo[];
+    availableSkills: LoadedSkillInfo[];
+    availableAgents: LoadedAgentInfo[];
+  };
 }) {
   const byName = new Map<string, LoadedToolInfo>();
   const chatDisabledToolNames = new Set(chat.disabledToolNames ?? []);
+  const modeAllowedToolNames = modeCapabilityContext
+    ? toNameSet(getModeCapabilityNames(mode, modeCapabilityContext).toolNames)
+    : undefined;
 
   for (const tool of globalEnabledTools) {
     if (chatDisabledToolNames.has(tool.name)) continue;
+    if (!isNameAllowedByModeDefault(tool.name, modeAllowedToolNames)) continue;
     if (!byName.has(tool.name)) byName.set(tool.name, tool);
   }
 
@@ -309,16 +335,28 @@ export function getEnabledSkillsForChat({
   chat,
   globalEnabledSkills,
   availableSkillsByName,
+  mode,
+  modeCapabilityContext,
 }: {
   chat: ChatSession;
   globalEnabledSkills: LoadedSkillInfo[];
   availableSkillsByName: Map<string, LoadedSkillInfo>;
+  mode?: LoadedModeInfo;
+  modeCapabilityContext?: {
+    availableTools: LoadedToolInfo[];
+    availableSkills: LoadedSkillInfo[];
+    availableAgents: LoadedAgentInfo[];
+  };
 }) {
   const byName = new Map<string, LoadedSkillInfo>();
   const chatDisabledSkillNames = new Set(chat.disabledSkillNames ?? []);
+  const modeAllowedSkillNames = modeCapabilityContext
+    ? toNameSet(getModeCapabilityNames(mode, modeCapabilityContext).skillNames)
+    : undefined;
 
   for (const skill of globalEnabledSkills) {
     if (chatDisabledSkillNames.has(skill.name)) continue;
+    if (!isNameAllowedByModeDefault(skill.name, modeAllowedSkillNames)) continue;
     if (!byName.has(skill.name)) byName.set(skill.name, skill);
   }
 
@@ -396,22 +434,34 @@ export function getEnabledAgentsForChat({
   chat,
   globalEnabledAgents,
   availableAgentsByName,
+  mode,
+  modeCapabilityContext,
 }: {
   chat: ChatSession;
   globalEnabledAgents: LoadedAgentInfo[];
   availableAgentsByName: Map<string, LoadedAgentInfo>;
+  mode?: LoadedModeInfo;
+  modeCapabilityContext?: {
+    availableTools: LoadedToolInfo[];
+    availableSkills: LoadedSkillInfo[];
+    availableAgents: LoadedAgentInfo[];
+  };
 }) {
   const globallyEnabledAgentNames = new Set(
     globalEnabledAgents.map((agent) => agent.name),
   );
   const chatEnabledAgentNames = new Set(chat.enabledAgentNames ?? []);
   const chatDisabledAgentNames = new Set(chat.disabledAgentNames ?? []);
+  const modeAllowedAgentNames = modeCapabilityContext
+    ? toNameSet(getModeCapabilityNames(mode, modeCapabilityContext).agentNames)
+    : undefined;
 
   return [...availableAgentsByName.values()].filter((agent) => {
     if (!agent.enabled) return false;
     if (chatDisabledAgentNames.has(agent.name)) return false;
     return (
-      globallyEnabledAgentNames.has(agent.name) ||
+      (globallyEnabledAgentNames.has(agent.name) &&
+        isNameAllowedByModeDefault(agent.name, modeAllowedAgentNames)) ||
       chatEnabledAgentNames.has(agent.name)
     );
   });
@@ -462,16 +512,22 @@ export function buildSystemPromptWithActiveSkills({
   systemPrompt,
   activeSkillNames,
   availableSkillsByName,
+  mode,
 }: {
   systemPrompt: string;
   activeSkillNames: string[];
   availableSkillsByName: Map<string, LoadedSkillInfo>;
+  mode?: LoadedModeInfo;
 }) {
   const activeSkills = activeSkillNames
     .map((skillName) => availableSkillsByName.get(skillName))
     .filter((skill): skill is LoadedSkillInfo => Boolean(skill));
 
-  if (activeSkills.length === 0) return systemPrompt;
+  const modeBlock = getModeInstructionsBlock(mode);
+
+  if (activeSkills.length === 0) {
+    return [systemPrompt.trim(), modeBlock].filter(Boolean).join("\n\n");
+  }
 
   const skillBlocks = activeSkills.map((skill) => {
     const recommendedTools = skill.recommendedToolNames.length
@@ -489,6 +545,7 @@ export function buildSystemPromptWithActiveSkills({
 
   return [
     systemPrompt.trim(),
+    modeBlock,
     "Active skills are persistent instructions loaded for this chat. Follow them when relevant.",
     ...skillBlocks,
   ]

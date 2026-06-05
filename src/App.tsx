@@ -19,6 +19,7 @@ import { WorkspaceRootsControl } from "@/components/ai-chat/workspace-roots-cont
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { SystemPromptDialog } from "@/components/dialogs/system-prompt-dialog";
 import { McpDialog } from "@/components/mcp-dialog";
+import { ModesDialog } from "@/components/modes-dialog";
 import { ProviderSettingsDialog } from "@/components/provider-settings-dialog";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { SkillsDialog } from "@/components/skills-dialog";
@@ -86,6 +87,12 @@ import {
 } from "@/lib/ai-chat/chat-utils";
 import { estimateAttachmentsTokens } from "@/lib/ai-chat/attachment-limits";
 import { buildLoadedMcpTools, DEFAULT_MCP_SETTINGS } from "@/lib/ai-chat/mcp";
+import {
+  DEFAULT_MODE_ID,
+  getModeCapabilityNames,
+  normalizeModesState,
+  resolveModeForChat,
+} from "@/lib/ai-chat/modes";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
   getEffectiveWorkspaceRoots,
@@ -100,6 +107,7 @@ import {
   loadAppSettings,
   loadChats,
   loadMcpSettings,
+  loadModesState,
   loadProvidersState,
   loadSkills,
   loadSkillsSettings,
@@ -111,6 +119,7 @@ import {
   saveAppSettings,
   saveChat,
   saveMcpSettings,
+  saveModesState,
   saveProvidersState,
   saveSkillsSettings,
   saveSystemPrompt,
@@ -130,6 +139,7 @@ import type {
   LoadedSkillInfo,
   LoadedToolInfo,
   McpSettings,
+  ModesState,
   ProviderConfig,
   ProvidersState,
   SkillsSettings,
@@ -227,6 +237,9 @@ export default function Home() {
   const [mcpSettings, setMcpSettings] = useState<McpSettings>(
     DEFAULT_MCP_SETTINGS,
   );
+  const [modesState, setModesState] = useState<ModesState>(() =>
+    normalizeModesState(undefined),
+  );
   const [loadedTools, setLoadedTools] = useState<LoadedToolInfo[]>([]);
   const [loadedSkills, setLoadedSkills] = useState<LoadedSkillInfo[]>([]);
   const [loadedAgents, setLoadedAgents] = useState<LoadedAgentInfo[]>([]);
@@ -256,6 +269,7 @@ export default function Home() {
   const [newChatDraftWorkspaceRoots, setNewChatDraftWorkspaceRoots] = useState<
     ChatWorkspaceRoot[]
   >([]);
+  const [newChatDraftModeId, setNewChatDraftModeId] = useState(DEFAULT_MODE_ID);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
   const [completedGenerationChatIds, setCompletedGenerationChatIds] = useState<
@@ -277,6 +291,8 @@ export default function Home() {
   const [isSidebarModelComboboxOpen, setIsSidebarModelComboboxOpen] =
     useState(false);
   const [sidebarModelSearchValue, setSidebarModelSearchValue] = useState("");
+  const [isModePickerOpen, setIsModePickerOpen] = useState(false);
+  const [modeSearchValue, setModeSearchValue] = useState("");
   const [isChatCapabilitiesDialogOpen, setIsChatCapabilitiesDialogOpen] =
     useState(false);
   const [isChatToolPickerOpen, setIsChatToolPickerOpen] = useState(false);
@@ -290,6 +306,7 @@ export default function Home() {
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [modesOpen, setModesOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
@@ -525,6 +542,27 @@ export default function Home() {
   const activeComposerAttachments = composerDraftKey
     ? (composerAttachmentsByKey[composerDraftKey] ?? [])
     : [];
+  const enabledModes = useMemo(
+    () => normalizeModesState(modesState).modes.filter((mode) => mode.enabled),
+    [modesState],
+  );
+  const activeMode = useMemo(
+    () =>
+      resolveModeForChat(
+        isNewChatDraft ? newChatDraftModeId : activeChat?.modeId,
+        modesState,
+      ),
+    [activeChat?.modeId, isNewChatDraft, modesState, newChatDraftModeId],
+  );
+  const visibleModes = useMemo(() => {
+    const search = modeSearchValue.trim().toLowerCase();
+
+    return enabledModes.filter((mode) =>
+      search
+        ? `${mode.name} ${mode.description}`.toLowerCase().includes(search)
+        : true,
+    );
+  }, [enabledModes, modeSearchValue]);
 
   const providers = providersState.providers.length
     ? providersState.providers
@@ -687,6 +725,22 @@ export default function Home() {
     return names;
   }, [agentsSettings.enabled, executableTools, toolsSettings]);
 
+  const modeDefaultEnabledToolNames = useMemo(() => {
+    const modeAllowedToolNames = new Set(
+      getModeCapabilityNames(activeMode, {
+        availableTools,
+        availableSkills: [],
+        availableAgents: [],
+      }).toolNames,
+    );
+
+    return new Set(
+      [...globallyEnabledToolNames].filter((toolName) =>
+        modeAllowedToolNames.has(toolName),
+      ),
+    );
+  }, [activeMode, availableTools, globallyEnabledToolNames]);
+
   const activeChatEnabledToolNames = useMemo(() => {
     if (!activeChat) return [];
 
@@ -698,14 +752,14 @@ export default function Home() {
       .filter(
         (toolName) =>
           !chatDisabled.has(toolName) &&
-          (globallyEnabledToolNames.has(toolName) || chatEnabled.has(toolName)),
+          (modeDefaultEnabledToolNames.has(toolName) || chatEnabled.has(toolName)),
       );
   }, [
     activeChat?.disabledToolNames,
     activeChat?.enabledToolNames,
     activeChat?.id,
     availableTools,
-    globallyEnabledToolNames,
+    modeDefaultEnabledToolNames,
   ]);
 
   const visibleChatTools = useMemo(() => {
@@ -718,15 +772,24 @@ export default function Home() {
     );
   }, [availableTools, chatToolSearchValue]);
 
-  const toolMentionOptions = useMemo<ToolMentionOption[]>(
-    () =>
-      availableTools.map((tool) => ({
+  const toolMentionOptions = useMemo<ToolMentionOption[]>(() => {
+    const enabledNames = activeChat
+      ? new Set(activeChatEnabledToolNames)
+      : modeDefaultEnabledToolNames;
+
+    return availableTools
+      .filter((tool) => enabledNames.has(tool.name))
+      .map((tool) => ({
         name: tool.name,
         description: tool.description,
         isBuiltin: isBuiltInToolName(tool.name),
-      })),
-    [availableTools],
-  );
+      }));
+  }, [
+    activeChat,
+    activeChatEnabledToolNames,
+    availableTools,
+    modeDefaultEnabledToolNames,
+  ]);
 
   const availableSkills = useMemo(() => {
     const byName = new Map<string, LoadedSkillInfo>();
@@ -807,6 +870,22 @@ export default function Home() {
     );
   }, [availableSkills, skillsSettings.enabled]);
 
+  const modeDefaultEnabledSkillNames = useMemo(() => {
+    const modeAllowedSkillNames = new Set(
+      getModeCapabilityNames(activeMode, {
+        availableTools,
+        availableSkills,
+        availableAgents: [],
+      }).skillNames,
+    );
+
+    return new Set(
+      [...globallyEnabledSkillNames].filter((skillName) =>
+        modeAllowedSkillNames.has(skillName),
+      ),
+    );
+  }, [activeMode, availableSkills, availableTools, globallyEnabledSkillNames]);
+
   const activeChatEnabledSkillNames = useMemo(() => {
     if (!activeChat) return [];
 
@@ -818,7 +897,7 @@ export default function Home() {
       .filter(
         (skillName) =>
           !chatDisabled.has(skillName) &&
-          (globallyEnabledSkillNames.has(skillName) ||
+          (modeDefaultEnabledSkillNames.has(skillName) ||
             chatEnabled.has(skillName)),
       );
   }, [
@@ -826,7 +905,7 @@ export default function Home() {
     activeChat?.enabledSkillNames,
     activeChat?.id,
     availableSkills,
-    globallyEnabledSkillNames,
+    modeDefaultEnabledSkillNames,
   ]);
 
   const visibleChatSkills = useMemo(() => {
@@ -839,14 +918,23 @@ export default function Home() {
     );
   }, [availableSkills, chatSkillSearchValue]);
 
-  const skillMentionOptions = useMemo(
-    () =>
-      availableSkills.map((skill) => ({
+  const skillMentionOptions = useMemo(() => {
+    const enabledNames = activeChat
+      ? new Set(activeChatEnabledSkillNames)
+      : modeDefaultEnabledSkillNames;
+
+    return availableSkills
+      .filter((skill) => enabledNames.has(skill.name))
+      .map((skill) => ({
         name: skill.name,
         description: skill.description,
-      })),
-    [availableSkills],
-  );
+      }));
+  }, [
+    activeChat,
+    activeChatEnabledSkillNames,
+    availableSkills,
+    modeDefaultEnabledSkillNames,
+  ]);
   const availableAgents = useMemo(() => {
     const byName = new Map<string, LoadedAgentInfo>();
 
@@ -876,15 +964,6 @@ export default function Home() {
     );
   }, [availableAgents]);
 
-  const agentMentionOptions = useMemo(
-    () =>
-      availableAgents.map((agent) => ({
-        name: agent.name,
-        description: agent.description,
-      })),
-    [availableAgents],
-  );
-
   const globallyEnabledAgentNames = useMemo(() => {
     if (!agentsSettings.enabled) return new Set<string>();
 
@@ -894,6 +973,22 @@ export default function Home() {
         .map((agent) => agent.name),
     );
   }, [agentsSettings.enabled, availableAgents]);
+
+  const modeDefaultEnabledAgentNames = useMemo(() => {
+    const modeAllowedAgentNames = new Set(
+      getModeCapabilityNames(activeMode, {
+        availableTools,
+        availableSkills,
+        availableAgents,
+      }).agentNames,
+    );
+
+    return new Set(
+      [...globallyEnabledAgentNames].filter((agentName) =>
+        modeAllowedAgentNames.has(agentName),
+      ),
+    );
+  }, [activeMode, availableAgents, availableSkills, availableTools, globallyEnabledAgentNames]);
 
   const activeChatEnabledAgentNames = useMemo(() => {
     if (!activeChat) return [];
@@ -906,7 +1001,7 @@ export default function Home() {
       .filter(
         (agentName) =>
           !chatDisabled.has(agentName) &&
-          (globallyEnabledAgentNames.has(agentName) ||
+          (modeDefaultEnabledAgentNames.has(agentName) ||
             chatEnabled.has(agentName)),
       );
   }, [
@@ -914,7 +1009,25 @@ export default function Home() {
     activeChat?.enabledAgentNames,
     activeChat?.id,
     availableAgents,
-    globallyEnabledAgentNames,
+    modeDefaultEnabledAgentNames,
+  ]);
+
+  const agentMentionOptions = useMemo(() => {
+    const enabledNames = activeChat
+      ? new Set(activeChatEnabledAgentNames)
+      : modeDefaultEnabledAgentNames;
+
+    return availableAgents
+      .filter((agent) => enabledNames.has(agent.name))
+      .map((agent) => ({
+        name: agent.name,
+        description: agent.description,
+      }));
+  }, [
+    activeChat,
+    activeChatEnabledAgentNames,
+    availableAgents,
+    modeDefaultEnabledAgentNames,
   ]);
 
   const visibleChatAgents = useMemo(() => {
@@ -981,6 +1094,7 @@ export default function Home() {
           loadedAgentsSettings,
           loadedAppSettings,
           loadedMcpSettings,
+          loadedModesState,
           loadedToolManifests,
           loadedSkillManifests,
           loadedAgentManifests,
@@ -994,6 +1108,7 @@ export default function Home() {
           loadAgentsSettings(),
           loadAppSettings(),
           loadMcpSettings(),
+          loadModesState(),
           loadTools(),
           loadSkills(),
           loadAgents(),
@@ -1037,6 +1152,7 @@ export default function Home() {
         setAgentsSettings(loadedAgentsSettings);
         setAppSettings(loadedAppSettings);
         setMcpSettings(loadedMcpSettings);
+        setModesState(loadedModesState);
         setLoadedTools(loadedToolManifests);
         setLoadedSkills(loadedSkillManifests);
         setLoadedAgents(loadedAgentManifests);
@@ -1160,6 +1276,13 @@ export default function Home() {
       console.error("Failed to save MCP settings:", error),
     );
   }, [mcpSettings]);
+
+  useEffect(() => {
+    if (!didHydrateRef.current) return;
+    saveModesState(modesState).catch((error) =>
+      console.error("Failed to save modes:", error),
+    );
+  }, [modesState]);
 
   useEffect(() => {
     if (!didHydrateRef.current || !activeChatId) return;
@@ -1494,6 +1617,7 @@ export default function Home() {
     toolsSettings,
     skillsSettings,
     agentsSettings,
+    modesState,
     chatTitleGenerationMode: appSettings.chatTitleGenerationMode,
     loadedTools: executableTools,
     availableToolsByName,
@@ -1631,6 +1755,7 @@ export default function Home() {
 
       const chat: ChatSession = {
         ...emptyChat,
+        modeId: activeMode.id,
         workspaceRoots: workspaceRoots.length ? workspaceRoots : undefined,
         fileToolAutoApproval:
           buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
@@ -1671,6 +1796,7 @@ export default function Home() {
       return true;
     },
     [
+      activeMode.id,
       isNewChatDraft,
       sendMessage,
       toolsSettings,
@@ -1779,6 +1905,22 @@ export default function Home() {
     setSidebarModelSearchValue("");
   }
 
+  function selectActiveChatMode(modeId: string) {
+    if (!enabledModes.some((mode) => mode.id === modeId)) return;
+
+    if (isNewChatDraft || !activeChat) {
+      setNewChatDraftModeId(modeId);
+    } else {
+      updateChat(activeChat.id, (chat) => ({
+        ...chat,
+        modeId,
+      }));
+    }
+
+    setIsModePickerOpen(false);
+    setModeSearchValue("");
+  }
+
   async function saveSettingsChanges() {
     try {
       await Promise.all([
@@ -1821,9 +1963,9 @@ export default function Home() {
     availableSkills,
     availableAgents,
     chats,
-    globallyEnabledToolNames,
-    globallyEnabledSkillNames,
-    globallyEnabledAgentNames,
+    globallyEnabledToolNames: modeDefaultEnabledToolNames,
+    globallyEnabledSkillNames: modeDefaultEnabledSkillNames,
+    globallyEnabledAgentNames: modeDefaultEnabledAgentNames,
     fileToolAutoApprovalDefaults:
       buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
     isSending,
@@ -1848,6 +1990,7 @@ export default function Home() {
 
   function createNewChatWithEmptyDraftState() {
     setNewChatDraftWorkspaceRoots([]);
+    setNewChatDraftModeId(DEFAULT_MODE_ID);
     createNewChat();
   }
 
@@ -1855,6 +1998,7 @@ export default function Home() {
     const willOpenNewChatDraft = chats.every((chat) => chat.id === chatId);
     if (willOpenNewChatDraft) {
       setNewChatDraftWorkspaceRoots([]);
+      setNewChatDraftModeId(DEFAULT_MODE_ID);
     }
 
     await removeChat(chatId);
@@ -2282,6 +2426,13 @@ export default function Home() {
               modelSearchValue={sidebarModelSearchValue}
               onModelSearchValueChange={setSidebarModelSearchValue}
               onSelectProviderModel={selectActiveChatProviderModel}
+              activeMode={activeMode}
+              visibleModes={visibleModes}
+              isModePickerOpen={isModePickerOpen}
+              onModePickerOpenChange={setIsModePickerOpen}
+              modeSearchValue={modeSearchValue}
+              onModeSearchValueChange={setModeSearchValue}
+              onSelectMode={selectActiveChatMode}
               workspaceControl={
                 <WorkspaceRootsControl
                   activeChatExists={Boolean(activeChat) || isNewChatDraft}
@@ -2347,6 +2498,7 @@ export default function Home() {
         onOpenTools={() => setToolsOpen(true)}
         onOpenSkills={() => setSkillsOpen(true)}
         onOpenAgents={() => setAgentsOpen(true)}
+        onOpenModes={() => setModesOpen(true)}
         onOpenMcp={() => setMcpOpen(true)}
         onOpenSystemPrompt={() => setSystemPromptOpen(true)}
       />
@@ -2387,6 +2539,19 @@ export default function Home() {
         availableTools={availableTools}
         availableSkills={availableSkills}
         providers={providers}
+        showSuccess={stableShowSuccess}
+        showError={stableShowError}
+      />
+
+
+      <ModesDialog
+        open={modesOpen}
+        onOpenChange={setModesOpen}
+        modesState={modesState}
+        onModesStateChange={setModesState}
+        availableTools={availableTools}
+        availableSkills={availableSkills}
+        availableAgents={availableAgents}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />

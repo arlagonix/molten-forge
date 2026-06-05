@@ -1,4 +1,5 @@
 import { defaultGenerationSettings, defaultProvider } from "./provider-presets";
+import { normalizeModesState, serializeModesState } from "./modes";
 import { normalizeProviderForState, sortChatsByUpdatedAt } from "./chat-utils";
 import type {
   AgentsSettings,
@@ -10,6 +11,7 @@ import type {
   LoadedSkillInfo,
   LoadedToolInfo,
   McpSettings,
+  ModesState,
   ProviderConfig,
   ProvidersState,
   SkillExportResult,
@@ -35,6 +37,7 @@ const SKILLS_SETTINGS_KEY = "skills-settings";
 const AGENTS_SETTINGS_KEY = "agents-settings";
 const APP_SETTINGS_KEY = "app-settings";
 const MCP_SETTINGS_KEY = "mcp-settings";
+const MODES_STATE_KEY = "modes-state";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
@@ -81,6 +84,8 @@ type ChatForgeStorageApi = {
   saveAppSettings: (value: AppSettings) => Promise<void>;
   loadMcpSettings: () => Promise<McpSettings | undefined>;
   saveMcpSettings: (value: McpSettings) => Promise<void>;
+  loadModesState: () => Promise<ModesState | undefined>;
+  saveModesState: (value: ModesState) => Promise<void>;
   loadTools: () => Promise<LoadedToolInfo[]>;
   saveTool: (tool: LoadedToolInfo) => Promise<LoadedToolInfo>;
   deleteTool: (toolId: string) => Promise<void>;
@@ -844,6 +849,31 @@ export async function saveMcpSettings(value: McpSettings): Promise<void> {
   }
 
   await legacySetSetting(MCP_SETTINGS_KEY, normalized);
+}
+
+
+export async function loadModesState(): Promise<ModesState> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return normalizeModesState(await api.loadModesState());
+  }
+
+  return normalizeModesState(
+    await legacyGetSetting<ModesState | undefined>(MODES_STATE_KEY, undefined),
+  );
+}
+
+export async function saveModesState(value: ModesState): Promise<void> {
+  const normalized = serializeModesState(value);
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.saveModesState(normalized);
+    return;
+  }
+
+  await legacySetSetting(MODES_STATE_KEY, normalized);
 }
 
 export async function loadTools(): Promise<LoadedToolInfo[]> {

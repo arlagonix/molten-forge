@@ -187,6 +187,14 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
     return ipcRenderer.invoke("storage:mcp-settings:save", value);
   },
 
+  loadModesState() {
+    return ipcRenderer.invoke("storage:modes-state:load");
+  },
+
+  saveModesState(value: unknown) {
+    return ipcRenderer.invoke("storage:modes-state:save", value);
+  },
+
   loadTools() {
     return ipcRenderer.invoke("storage:tools:load");
   },

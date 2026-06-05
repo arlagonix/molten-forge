@@ -9,6 +9,7 @@ import type {
   LoadedSkillInfo,
   LoadedToolInfo,
   McpSettings,
+  ModesState,
   ChatWorkspaceRoot,
   ChatAttachment,
   ToolCommandResult,
@@ -143,6 +144,8 @@ declare global {
       saveAppSettings: (value: AppSettings) => Promise<void>;
       loadMcpSettings: () => Promise<McpSettings | undefined>;
       saveMcpSettings: (value: McpSettings) => Promise<void>;
+      loadModesState: () => Promise<ModesState | undefined>;
+      saveModesState: (value: ModesState) => Promise<void>;
       loadTools: () => Promise<LoadedToolInfo[]>;
       saveTool: (tool: LoadedToolInfo) => Promise<LoadedToolInfo>;
       deleteTool: (toolId: string) => Promise<void>;

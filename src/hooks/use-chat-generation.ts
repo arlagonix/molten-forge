@@ -11,6 +11,7 @@ import {
   titleFromMessage,
 } from "@/lib/ai-chat/chat-utils";
 import { generateTitleFromFirstExchange } from "@/lib/ai-chat/title-generation";
+import { resolveModeForChat } from "@/lib/ai-chat/modes";
 import {
   isBuiltInAgentName,
 } from "@/lib/ai-chat/builtin-agents";
@@ -90,9 +91,11 @@ import type {
   ChatToolCall,
   ChatToolResult,
   LoadedAgentInfo,
+  LoadedModeInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   ProviderConfig,
+  ModesState,
   SkillsSettings,
   ToolCommandResult,
   ToolExecutionStatus,
@@ -210,6 +213,7 @@ export function useChatGeneration({
   toolsSettings,
   skillsSettings,
   agentsSettings,
+  modesState,
   chatTitleGenerationMode,
   loadedTools,
   availableToolsByName,
@@ -243,6 +247,7 @@ export function useChatGeneration({
   toolsSettings: ToolsSettings;
   skillsSettings: SkillsSettings;
   agentsSettings: AgentsSettings;
+  modesState: ModesState;
   chatTitleGenerationMode: ChatTitleGenerationMode;
   loadedTools: LoadedToolInfo[];
   availableToolsByName: Map<string, LoadedToolInfo>;
@@ -316,6 +321,19 @@ export function useChatGeneration({
     () => getGlobalEnabledAgents({ agentsSettings, loadedAgents }),
     [agentsSettings, loadedAgents],
   );
+
+  const modeCapabilityContext = useMemo(
+    () => ({
+      availableTools: [...availableToolsByName.values()],
+      availableSkills: [...availableSkillsByName.values()],
+      availableAgents: [...availableAgentsByName.values()],
+    }),
+    [availableAgentsByName, availableSkillsByName, availableToolsByName],
+  );
+
+  function getModeForChat(chat: ChatSession | undefined): LoadedModeInfo {
+    return resolveModeForChat(chat?.modeId, modesState);
+  }
 
   function appendToAssistantVariant(
     chatId: string,
@@ -681,6 +699,8 @@ export function useChatGeneration({
           chat: activeChat,
           globalEnabledSkills,
           availableSkillsByName,
+          mode: getModeForChat(activeChat),
+          modeCapabilityContext,
         }).map((skill) => skill.name)
       : [],
     activeSkillNames: activeChat?.activeSkillNames ?? [],
@@ -932,6 +952,24 @@ export function useChatGeneration({
       return undefined;
     }
 
+    if (activeChat && validation.toolNames.length > 0) {
+      const enabledToolNames = new Set(
+        getToolsForChat(activeChat).map((tool) => tool.name),
+      );
+      const unavailableToolNames = validation.toolNames.filter(
+        (toolName) => !enabledToolNames.has(toolName),
+      );
+
+      if (unavailableToolNames.length > 0) {
+        showError(
+          unavailableToolNames.length === 1
+            ? `Tool is not available in this chat mode: ${unavailableToolNames[0]}`
+            : `Tools are not available in this chat mode: ${unavailableToolNames.join(", ")}`,
+        );
+        return undefined;
+      }
+    }
+
     return validation.toolNames;
   }
 
@@ -946,6 +984,32 @@ export function useChatGeneration({
       return undefined;
     }
 
+    if (activeChat && validation.skillNames.length > 0) {
+      const enabledSkillNames = new Set(
+        getEnabledSkillsForChat({
+          chat: activeChat,
+          globalEnabledSkills,
+          availableSkillsByName,
+          mode: getModeForChat(activeChat),
+          modeCapabilityContext,
+        }).map((skill) => skill.name),
+      );
+      const activeSkillNames = new Set(activeChat.activeSkillNames ?? []);
+      const unavailableSkillNames = validation.skillNames.filter(
+        (skillName) =>
+          !enabledSkillNames.has(skillName) && !activeSkillNames.has(skillName),
+      );
+
+      if (unavailableSkillNames.length > 0) {
+        showError(
+          unavailableSkillNames.length === 1
+            ? `Skill is not available in this chat mode: ${unavailableSkillNames[0]}`
+            : `Skills are not available in this chat mode: ${unavailableSkillNames.join(", ")}`,
+        );
+        return undefined;
+      }
+    }
+
     return validation.skillNames;
   }
 
@@ -958,6 +1022,30 @@ export function useChatGeneration({
     if (!validation.ok) {
       showError(validation.message);
       return undefined;
+    }
+
+    if (activeChat && validation.agentNames.length > 0) {
+      const enabledAgentNames = new Set(
+        getEnabledAgentsForChat({
+          chat: activeChat,
+          globalEnabledAgents,
+          availableAgentsByName,
+          mode: getModeForChat(activeChat),
+          modeCapabilityContext,
+        }).map((agent) => agent.name),
+      );
+      const unavailableAgentNames = validation.agentNames.filter(
+        (agentName) => !enabledAgentNames.has(agentName),
+      );
+
+      if (unavailableAgentNames.length > 0) {
+        showError(
+          unavailableAgentNames.length === 1
+            ? `Agent is not available in this chat mode: ${unavailableAgentNames[0]}`
+            : `Agents are not available in this chat mode: ${unavailableAgentNames.join(", ")}`,
+        );
+        return undefined;
+      }
     }
 
     return validation.agentNames;
@@ -1032,6 +1120,7 @@ export function useChatGeneration({
       activeSkillNames,
       availableSkillsByName,
     });
+    const mode = getModeForChat(chat);
     const tools = getEnabledToolsForChat({
       chat,
       oneShotToolNames,
@@ -1039,11 +1128,15 @@ export function useChatGeneration({
       globalEnabledTools,
       availableToolsByName,
       effectiveWorkspaceRoots,
+      mode,
+      modeCapabilityContext,
     });
     const enabledAgentsForChat = getEnabledAgentsForChat({
       chat,
       globalEnabledAgents,
       availableAgentsByName,
+      mode,
+      modeCapabilityContext,
     });
     const chatDisabledToolNames = new Set(chat.disabledToolNames ?? []);
     const toolsWithoutStaticAgentTool = tools.filter(
@@ -1066,6 +1159,8 @@ export function useChatGeneration({
         chat,
         globalEnabledSkills,
         availableSkillsByName,
+        mode,
+        modeCapabilityContext,
       }),
       activeSkillNames,
       loadSkillEnabled: toolsSettings.enabled && toolsSettings.loadSkillEnabled,
@@ -1130,6 +1225,7 @@ export function useChatGeneration({
   }
 
   function composeSystemPrompt(
+    chat: ChatSession | undefined,
     activeSkillNames: string[],
     alreadyLoadedMentionedSkillNames: string[] = [],
   ) {
@@ -1706,16 +1802,19 @@ export function useChatGeneration({
     let currentAgentActiveSkillNames = isBuiltInAgentName(agent.name)
       ? [...new Set(inheritedActiveSkillNames)]
       : [...new Set(agent.loadedSkillNames ?? [])];
+    const chatForAgentCall = chats.find((candidate) => candidate.id === chatId) ?? {
+      id: chatId,
+      title: "",
+      messages: [],
+      createdAt: startedAt,
+      updatedAt: startedAt,
+    };
     const chatEnabledAgents = getEnabledAgentsForChat({
-      chat: chats.find((candidate) => candidate.id === chatId) ?? {
-        id: chatId,
-        title: "",
-        messages: [],
-        createdAt: startedAt,
-        updatedAt: startedAt,
-      },
+      chat: chatForAgentCall,
       globalEnabledAgents,
       availableAgentsByName,
+      mode: getModeForChat(chatForAgentCall),
+      modeCapabilityContext,
     });
 
     const transcriptMessages = [
@@ -3117,6 +3216,7 @@ export function useChatGeneration({
         const streamResult = await streamProviderChat({
           provider: providerForRun,
           systemPrompt: composeSystemPrompt(
+            getCurrentChatSnapshot(chatId),
             currentActiveSkillNames,
             forcedSkillRequests,
           ),

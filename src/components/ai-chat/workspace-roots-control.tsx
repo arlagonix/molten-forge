@@ -49,29 +49,24 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
         <Button
           type="button"
           variant="outline"
+          size="icon"
           role="combobox"
           disabled={!activeChatExists || disabled}
           aria-expanded={open}
-          className="h-9 max-w-[13rem] justify-between gap-2 px-3 text-left font-normal"
+          className={cn(
+            "h-9 w-9 shrink-0",
+            roots.length === 0 && "text-muted-foreground",
+          )}
           title={
             disabled
               ? "Wait until this chat finishes generating"
               : roots.length > 0
-                ? "Manage workspace folders for this chat"
+                ? `${label}: manage workspace folders for this chat`
                 : "Add a workspace folder for this chat"
           }
+          aria-label="Manage workspace folders for this chat"
         >
-          <span className="flex min-w-0 items-center gap-2">
-            <FolderOpen className="size-4 shrink-0 opacity-70" />
-            <span
-              className={cn(
-                "min-w-0 truncate",
-                roots.length === 0 && "text-muted-foreground",
-              )}
-            >
-              {label}
-            </span>
-          </span>
+          <FolderOpen className="size-4 opacity-70" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(26rem,calc(100vw-2rem))] p-0">

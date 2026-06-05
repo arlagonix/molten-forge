@@ -16,7 +16,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { providerDisplayName, providerLabel } from "@/lib/ai-chat/chat-utils";
-import type { ProviderConfig } from "@/lib/ai-chat/types";
+import type { LoadedModeInfo, ProviderConfig } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
 type VisibleProviderGroup = {
@@ -35,6 +35,13 @@ type ComposerFooterProps = {
   modelSearchValue: string;
   onModelSearchValueChange: (value: string) => void;
   onSelectProviderModel: (providerId: string, model: string) => void;
+  activeMode: LoadedModeInfo;
+  visibleModes: LoadedModeInfo[];
+  isModePickerOpen: boolean;
+  onModePickerOpenChange: (open: boolean) => void;
+  modeSearchValue: string;
+  onModeSearchValueChange: (value: string) => void;
+  onSelectMode: (modeId: string) => void;
   workspaceControl?: ReactNode;
   onOpenCapabilities: () => void;
 };
@@ -50,11 +57,85 @@ export const ComposerFooter = memo(function ComposerFooter({
   modelSearchValue,
   onModelSearchValueChange,
   onSelectProviderModel,
+  activeMode,
+  visibleModes,
+  isModePickerOpen,
+  onModePickerOpenChange,
+  modeSearchValue,
+  onModeSearchValueChange,
+  onSelectMode,
   workspaceControl,
   onOpenCapabilities,
 }: ComposerFooterProps) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <Popover open={isModePickerOpen} onOpenChange={onModePickerOpenChange}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            role="combobox"
+            disabled={!activeChatExists || isSending}
+            aria-expanded={isModePickerOpen}
+            className="h-9 w-full max-w-[8rem] justify-between overflow-hidden px-3 text-left font-normal"
+            title={
+              isSending
+                ? "Wait until this chat finishes generating"
+                : activeMode.description || "Select a mode"
+            }
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {activeMode.name || "Mode"}
+            </span>
+            <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent
+          align="start"
+          className="w-[min(22rem,calc(100vw-2rem))] min-w-[var(--radix-popover-trigger-width)] p-0"
+        >
+          <Command shouldFilter={false}>
+            <CommandInput
+              value={modeSearchValue}
+              onValueChange={onModeSearchValueChange}
+              placeholder="Search modes..."
+            />
+            <CommandList>
+              {visibleModes.length > 0 ? (
+                <CommandGroup heading="Modes">
+                  {visibleModes.map((mode) => (
+                    <CommandItem
+                      key={mode.id}
+                      value={`${mode.name} ${mode.description}`}
+                      onSelect={() => onSelectMode(mode.id)}
+                      className="min-w-0 cursor-pointer items-start"
+                      title={mode.description}
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">{mode.name}</span>
+                        {mode.description ? (
+                          <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                            {mode.description}
+                          </span>
+                        ) : null}
+                      </span>
+                      <Check
+                        className={cn(
+                          "mt-1 size-4 shrink-0",
+                          activeMode.id === mode.id ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ) : (
+                <CommandEmpty>No enabled modes found.</CommandEmpty>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+
       <Popover open={isModelPickerOpen} onOpenChange={onModelPickerOpenChange}>
         <PopoverTrigger asChild>
           <Button
@@ -63,7 +144,7 @@ export const ComposerFooter = memo(function ComposerFooter({
             role="combobox"
             disabled={!activeChatExists || isSending}
             aria-expanded={isModelPickerOpen}
-            className="model-picker-trigger h-9 w-full max-w-[14rem] justify-between overflow-hidden px-3 text-left font-normal"
+            className="h-9 w-full max-w-[14rem] justify-between overflow-hidden px-3 text-left font-normal"
             title={
               isSending
                 ? "Wait until this chat finishes generating"
@@ -85,7 +166,7 @@ export const ComposerFooter = memo(function ComposerFooter({
         </PopoverTrigger>
         <PopoverContent
           align="start"
-          className="w-[min(var(--radix-popover-trigger-width),24rem)] p-0"
+          className="w-[min(28rem,calc(100vw-2rem))] min-w-[var(--radix-popover-trigger-width)] p-0"
         >
           <Command shouldFilter={false}>
             <CommandInput

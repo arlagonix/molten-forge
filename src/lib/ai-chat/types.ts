@@ -386,6 +386,28 @@ export type ChatTitleMode = "auto" | "manual";
 
 export type ChatTitleGenerationMode = "local" | "ai";
 
+export type ModeBuiltInId = "default" | "minimal";
+
+export type ModeDefinition = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  description: string;
+  instructions?: string;
+  builtIn?: ModeBuiltInId;
+  /** Built-in modes can keep dynamic default capabilities until explicitly edited. */
+  usesDefaultCapabilities?: boolean;
+  allowedToolNames: string[];
+  allowedSkillNames: string[];
+  allowedAgentNames: string[];
+};
+
+export type LoadedModeInfo = ModeDefinition;
+
+export type ModesState = {
+  modes: LoadedModeInfo[];
+};
+
 export type AppFontFamily = "sans" | "mono";
 
 export type AppSettings = {
@@ -428,6 +450,7 @@ export type ChatSession = {
   workspaceRoots?: ChatWorkspaceRoot[];
   fileToolAutoApproval?: ChatFileToolAutoApproval;
   thinkingMode?: ChatThinkingMode;
+  modeId?: string;
 };
 
 export type ApiToolCall = ChatToolCall;

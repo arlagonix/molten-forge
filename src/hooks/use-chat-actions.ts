@@ -268,6 +268,7 @@ export function useChatActions({
     const now = new Date().toISOString();
     const chat: ChatSession = {
       ...createEmptyChat(),
+      modeId: sourceChat.modeId,
       enabledToolNames: sourceChat.enabledToolNames
         ? [...sourceChat.enabledToolNames]
         : undefined,
@@ -427,6 +428,7 @@ export function useChatActions({
       title: `${baseTitle} (branch)`,
       titleMode: "manual",
       messages: branchedMessages,
+      modeId: activeChat.modeId,
       enabledToolNames: activeChat.enabledToolNames
         ? [...activeChat.enabledToolNames]
         : undefined,
