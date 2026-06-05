@@ -7,9 +7,8 @@
 // cannot escape a root.
 
 import { shell } from "electron";
-import { createReadStream, promises as fs } from "node:fs";
+import { promises as fs } from "node:fs";
 import path from "node:path";
-import { createInterface } from "node:readline";
 
 import {
   FILE_READ_TOOL_NAME,
@@ -60,9 +59,9 @@ type FileToolResult = {
   changePreview?: FileToolChangePreview;
 };
 
-const FILE_TOOL_READ_WINDOW_LINES = 100;
+const FILE_TOOL_DEFAULT_READ_WINDOW_LINES = 100;
 const FILE_TOOL_MAX_READ_OFFSET = 1_000_000_000;
-const FILE_TOOL_MAX_READ_CHARS = 100_000;
+const FILE_TOOL_MAX_READ_LIMIT_LINES = 10_000;
 const FILE_TOOL_MAX_TEXT_FILE_BYTES = 5_000_000;
 const FILE_TOOL_MAX_SEARCH_FILE_BYTES = 2_000_000;
 const FILE_TOOL_MAX_RESULTS = 200;
@@ -517,11 +516,6 @@ function isLikelyTextFile(filePath: string) {
   return !isKnownBinaryFilePath(filePath);
 }
 
-function truncateText(value: string, maxChars: number) {
-  if (value.length <= maxChars) return { text: value, truncated: false };
-  return { text: value.slice(0, maxChars), truncated: true };
-}
-
 
 function readOptionalPositiveIntegerArg(args: unknown, key: string, max: number) {
   if (!isPlainObject(args) || !(key in args)) return undefined;
@@ -711,41 +705,48 @@ async function tryReadTextFileForChangePreview(filePath: string, size: number) {
   }
 }
 
-async function readTextFileWindow(filePath: string, offset: number) {
-  const stream = createReadStream(filePath, { encoding: "utf8" });
-  const reader = createInterface({ input: stream, crlfDelay: Infinity });
-  const lines: string[] = [];
-  let lineNumber = 0;
-  const requestedEndLine = offset + FILE_TOOL_READ_WINDOW_LINES - 1;
+function readTextFileSelection(
+  text: string,
+  offset: number,
+  limit?: number,
+) {
+  const lineRange = getLineRangeOffsets(
+    text,
+    offset,
+    limit === undefined ? undefined : offset + limit - 1,
+  );
+  const isPaged = limit !== undefined;
 
-  try {
-    for await (const line of reader) {
-      lineNumber += 1;
-
-      if (lineNumber >= offset && lineNumber <= requestedEndLine) {
-        lines.push(line);
-      }
-    }
-  } finally {
-    reader.close();
-    stream.destroy();
+  if (lineRange.totalLines === 0) {
+    return {
+      offset,
+      limit: limit ?? null,
+      startLine: 0,
+      endLine: 0,
+      totalLines: 0,
+      nextOffset: null,
+      content: "",
+    };
   }
 
-  const startLine = lines.length > 0 ? offset : 0;
-  const endLine = lines.length > 0 ? offset + lines.length - 1 : 0;
-  const totalLines = lineNumber;
-  const nextOffset = endLine > 0 && endLine < totalLines ? endLine + 1 : null;
-  const rawContent = lines.join("\n");
-  const truncated = truncateText(rawContent, FILE_TOOL_MAX_READ_CHARS);
+  const hasReadableLines = lineRange.startLine <= lineRange.endLine;
+  const startLine = hasReadableLines ? lineRange.startLine : 0;
+  const endLine = hasReadableLines ? lineRange.endLine : 0;
+  const nextOffset =
+    isPaged && endLine > 0 && endLine < lineRange.totalLines
+      ? endLine + 1
+      : null;
 
   return {
     offset,
+    limit: limit ?? null,
     startLine,
     endLine,
-    totalLines,
+    totalLines: lineRange.totalLines,
     nextOffset,
-    truncated: truncated.truncated,
-    content: truncated.text,
+    content: hasReadableLines
+      ? text.slice(lineRange.startOffset, lineRange.endOffset)
+      : "",
   };
 }
 
@@ -755,18 +756,32 @@ async function executeFileReadTool(
 ) {
   const requestedPath = readRequiredString(args, "path");
   const rootId = readOptionalString(args, "rootId");
+  const hasOffset = isPlainObject(args) && "offset" in args;
+  const hasLimit = isPlainObject(args) && "limit" in args;
   const offset = readPositiveIntegerArg(
     args,
     "offset",
     1,
     FILE_TOOL_MAX_READ_OFFSET,
   );
+  const requestedLimit = readOptionalPositiveIntegerArg(
+    args,
+    "limit",
+    FILE_TOOL_MAX_READ_LIMIT_LINES,
+  );
+  const limit =
+    requestedLimit !== undefined
+      ? requestedLimit
+      : hasOffset
+        ? FILE_TOOL_DEFAULT_READ_WINDOW_LINES
+        : undefined;
   const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
   const stats = await assertTextFile(
     target.realPath,
     FILE_TOOL_MAX_TEXT_FILE_BYTES,
   );
-  const window = await readTextFileWindow(target.realPath, offset);
+  const text = await fs.readFile(target.realPath, "utf8");
+  const selection = readTextFileSelection(text, offset, limit);
 
   return buildFileToolResult({
     ok: true,
@@ -774,14 +789,15 @@ async function executeFileReadTool(
     rootId: target.root.id,
     rootName: target.root.name,
     path: target.relativePath,
-    offset: window.offset,
-    startLine: window.startLine,
-    endLine: window.endLine,
-    totalLines: window.totalLines,
-    nextOffset: window.nextOffset,
+    offset: selection.offset,
+    limit: selection.limit,
+    startLine: selection.startLine,
+    endLine: selection.endLine,
+    totalLines: selection.totalLines,
+    nextOffset: selection.nextOffset,
     bytes: stats.size,
-    truncated: window.truncated,
-    content: window.content,
+    paged: hasOffset || hasLimit,
+    content: selection.content,
   });
 }
 

@@ -253,8 +253,23 @@ function normalizeSkillsSettings(
 function normalizeAgentsSettings(
   value: Partial<AgentsSettings> | undefined,
 ): AgentsSettings {
+  const builtInAgentMaxNestingDepths: Record<string, number> = {};
+  const source = value?.builtInAgentMaxNestingDepths;
+
+  if (source && typeof source === "object" && !Array.isArray(source)) {
+    for (const [name, rawDepth] of Object.entries(source)) {
+      const depth = Number(rawDepth);
+      if (!name.trim() || !Number.isFinite(depth)) continue;
+      builtInAgentMaxNestingDepths[name] = Math.min(
+        Math.max(Math.round(depth), 1),
+        8,
+      );
+    }
+  }
+
   return {
     enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
+    builtInAgentMaxNestingDepths,
   };
 }
 

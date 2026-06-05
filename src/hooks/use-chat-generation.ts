@@ -493,33 +493,6 @@ export function useChatGeneration({
     );
   }
 
-  function completeAssistantToolExecutionStepForResult(
-    chatId: string,
-    assistantMessageId: string,
-    variantId: string,
-    toolResult: ChatToolResult,
-  ) {
-    updateAssistantVariant(
-      chatId,
-      assistantMessageId,
-      variantId,
-      (variant) => ({
-        ...variant,
-        processSteps: (variant.processSteps ?? []).map((step) =>
-          step.type === "tool_execution" &&
-          step.toolCall.id === toolResult.toolCallId
-            ? {
-                ...step,
-                status: toolResult.isError ? "failed" : "complete",
-                toolResult,
-              }
-            : step,
-        ),
-      }),
-      { touch: false },
-    );
-  }
-
   function updateAssistantUserInputStepStatus(
     chatId: string,
     assistantMessageId: string,
@@ -1058,10 +1031,19 @@ export function useChatGeneration({
       globalEnabledAgents,
       availableAgentsByName,
     });
+    const chatDisabledToolNames = new Set(chat.disabledToolNames ?? []);
+    const toolsWithoutStaticAgentTool = tools.filter(
+      (tool) => tool.name !== CALL_AGENT_TOOL_NAME,
+    );
 
     const toolsWithAgentTool = (() => {
+      if (chatDisabledToolNames.has(CALL_AGENT_TOOL_NAME)) {
+        return toolsWithoutStaticAgentTool;
+      }
       const callAgentTool = createCallAgentTool(enabledAgentsForChat);
-      return callAgentTool ? [...tools, callAgentTool] : tools;
+      return callAgentTool
+        ? [...toolsWithoutStaticAgentTool, callAgentTool]
+        : toolsWithoutStaticAgentTool;
     })();
 
     return getToolsWithLoadSkillTool({
@@ -1133,9 +1115,23 @@ export function useChatGeneration({
     return false;
   }
 
-  function composeSystemPrompt(activeSkillNames: string[]) {
+  function composeSystemPrompt(
+    activeSkillNames: string[],
+    alreadyLoadedMentionedSkillNames: string[] = [],
+  ) {
+    const mentionedSkills = [...new Set(alreadyLoadedMentionedSkillNames)].filter(
+      (skillName) => activeSkillNames.includes(skillName),
+    );
+    const mentionNote = mentionedSkills.length
+      ? [
+          `The user's message explicitly mentioned these skills: ${mentionedSkills.join(", ")}.`,
+          "They have already been loaded by the app before this model response. Their full instructions are included in the active skills section below.",
+          "Do not call load_skill for these skills and do not say that you need to load them. Continue directly with the user's task using the already-loaded skill instructions.",
+        ].join(" ")
+      : "";
+
     return buildSystemPromptWithActiveSkills({
-      systemPrompt,
+      systemPrompt: [systemPrompt.trim(), mentionNote].filter(Boolean).join("\n\n"),
       activeSkillNames,
       availableSkillsByName,
     });
@@ -1196,22 +1192,92 @@ export function useChatGeneration({
     };
   }
 
+  function createSyntheticLoadSkillToolCall(skillName: string): ChatToolCall {
+    return {
+      id: createId(),
+      type: "function",
+      function: {
+        name: LOAD_SKILL_TOOL_NAME,
+        arguments: JSON.stringify({ skillName }),
+      },
+    };
+  }
+
+  function createLoadSkillMentionToolResult(
+    toolCall: ChatToolCall,
+    skillName: string,
+  ): ChatToolResult {
+    const skill = availableSkillsByName.get(skillName);
+    const payload = {
+      ok: Boolean(skill),
+      status: skill ? "loaded" : "missing",
+      skillName,
+      instructions: skill?.instructions ?? "",
+      recommendedToolNames: skill?.recommendedToolNames ?? [],
+      ...(skill?.directoryPath ? { directoryPath: skill.directoryPath } : {}),
+    };
+
+    return {
+      toolCallId: toolCall.id,
+      toolName: LOAD_SKILL_TOOL_NAME,
+      content: JSON.stringify(payload, null, 2),
+      isError: !skill,
+      loadedSkillName: skill ? skillName : undefined,
+      loadedSkillInstructions: skill?.instructions,
+      loadedSkillRecommendedToolNames: skill?.recommendedToolNames ?? [],
+    };
+  }
+
+  function updateAgentCallProcessSteps(
+    processSteps: ChatAssistantProcessStep[] | undefined,
+    callId: string,
+    updater: (agentCall: ChatAgentCall) => ChatAgentCall,
+  ): ChatAssistantProcessStep[] | undefined {
+    if (!processSteps) return processSteps;
+
+    return processSteps.map((step) => {
+      if (step.type !== "agent_call") return step;
+      const nextAgentCall = updateAgentCallInTree(
+        step.agentCall,
+        callId,
+        updater,
+      );
+      return {
+        ...step,
+        status: nextAgentCall.status,
+        agentCall: nextAgentCall,
+      };
+    });
+  }
+
+  function updateAgentCallInTree(
+    call: ChatAgentCall,
+    callId: string,
+    updater: (agentCall: ChatAgentCall) => ChatAgentCall,
+  ): ChatAgentCall {
+    const nextCall = {
+      ...call,
+      processSteps: updateAgentCallProcessSteps(
+        call.processSteps,
+        callId,
+        updater,
+      ),
+      childAgentCalls: updateAgentCallTree(
+        call.childAgentCalls ?? [],
+        callId,
+        updater,
+      ),
+    };
+
+    return call.id === callId ? updater(nextCall) : nextCall;
+  }
+
   function updateAgentCallTree(
     calls: ChatAgentCall[],
     callId: string,
     updater: (agentCall: ChatAgentCall) => ChatAgentCall,
   ): ChatAgentCall[] {
-    return calls.map((call) => {
-      if (call.id === callId) return updater(call);
-      return {
-        ...call,
-        childAgentCalls: updateAgentCallTree(
-          call.childAgentCalls ?? [],
-          callId,
-          updater,
-        ),
-      };
-    });
+    return calls.map((call) => updateAgentCallInTree(call, callId, updater));
   }
 
   function updateAssistantAgentCall(
@@ -1229,24 +1295,15 @@ export function useChatGeneration({
         ...variant,
         processSteps: (variant.processSteps ?? []).map((step) => {
           if (step.type !== "agent_call") return step;
-          if (step.agentCall.id === agentCallId) {
-            const nextAgentCall = updater(step.agentCall);
-            return {
-              ...step,
-              status: nextAgentCall.status,
-              agentCall: nextAgentCall,
-            };
-          }
+          const nextAgentCall = updateAgentCallInTree(
+            step.agentCall,
+            agentCallId,
+            updater,
+          );
           return {
             ...step,
-            agentCall: {
-              ...step.agentCall,
-              childAgentCalls: updateAgentCallTree(
-                step.agentCall.childAgentCalls ?? [],
-                agentCallId,
-                updater,
-              ),
-            },
+            status: nextAgentCall.status,
+            agentCall: nextAgentCall,
           };
         }),
       }),
@@ -1259,12 +1316,16 @@ export function useChatGeneration({
     assistantMessageId,
     variantId,
     parentAgentCallId,
+    toolCall,
+    toolBatchId,
     childAgentCall,
   }: {
     chatId: string;
     assistantMessageId: string;
     variantId: string;
     parentAgentCallId: string;
+    toolCall: ChatToolCall;
+    toolBatchId?: string;
     childAgentCall: ChatAgentCall;
   }) {
     updateAssistantAgentCall(
@@ -1275,6 +1336,65 @@ export function useChatGeneration({
       (agentCall) => ({
         ...agentCall,
         childAgentCalls: [...(agentCall.childAgentCalls ?? []), childAgentCall],
+        processSteps: [
+          ...(agentCall.processSteps ?? []),
+          {
+            id: createId(),
+            type: "agent_call" as const,
+            toolBatchId,
+            status: childAgentCall.status,
+            toolCall,
+            agentCall: childAgentCall,
+          },
+        ],
+      }),
+    );
+  }
+
+  // --- Agent processSteps recording (ordered timeline per agent run) ---------
+  //
+  // These mirror the main-chat process-step helpers but write into the agent
+  // call's own `processSteps` so the transcript can reconstruct interleaving
+  // (think -> tool -> think -> tool -> nested agent -> answer) faithfully.
+
+  function appendAgentProcessSteps(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    agentCallId: string,
+    steps: ChatAssistantProcessStep[],
+  ) {
+    if (steps.length === 0) return;
+    updateAssistantAgentCall(
+      chatId,
+      assistantMessageId,
+      variantId,
+      agentCallId,
+      (agentCall) => ({
+        ...agentCall,
+        processSteps: [...(agentCall.processSteps ?? []), ...steps],
+      }),
+    );
+  }
+
+  function updateAgentProcessStep(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    agentCallId: string,
+    stepId: string,
+    updater: (step: ChatAssistantProcessStep) => ChatAssistantProcessStep,
+  ) {
+    updateAssistantAgentCall(
+      chatId,
+      assistantMessageId,
+      variantId,
+      agentCallId,
+      (agentCall) => ({
+        ...agentCall,
+        processSteps: (agentCall.processSteps ?? []).map((step) =>
+          step.id === stepId ? updater(step) : step,
+        ),
       }),
     );
   }
@@ -1398,16 +1518,17 @@ export function useChatGeneration({
     inheritedToolsForRun: LoadedToolInfo[];
     chatEnabledAgents: LoadedAgentInfo[];
   }) {
-    const canCallAllowedAgents =
-      agentsSettings.enabled && depth < Math.max(1, agent.maxNestingDepth ?? 2);
+    const canCallAllowedAgents = agentsSettings.enabled;
 
     if (isBuiltInAgentName(agent.name)) {
       const tools = inheritedToolsForRun.filter(
         (tool) => tool.enabled && tool.name !== CALL_AGENT_TOOL_NAME,
       );
-      const nextAgents = chatEnabledAgents.filter(
-        (candidate) => candidate.name !== agent.name,
-      );
+      // Built-in agents are depth-limited, so allow them to call any enabled
+      // agent, including another instance of themselves. This is important for
+      // general_full -> general_full decomposition where the same full-context
+      // helper may need to split work recursively.
+      const nextAgents = chatEnabledAgents;
       const callAgentTool = canCallAllowedAgents
         ? createCallAgentTool(nextAgents)
         : null;
@@ -1424,9 +1545,8 @@ export function useChatGeneration({
       });
 
     const allowedAgentNames = new Set(agent.allowedAgentNames ?? []);
-    const nextAgents = globalEnabledAgents.filter(
-      (candidate) =>
-        candidate.name !== agent.name && allowedAgentNames.has(candidate.name),
+    const nextAgents = globalEnabledAgents.filter((candidate) =>
+      allowedAgentNames.has(candidate.name),
     );
     const callAgentTool = canCallAllowedAgents
       ? createCallAgentTool(nextAgents)
@@ -1449,7 +1569,6 @@ export function useChatGeneration({
     maxAllowedDepth,
     signal,
     contextMessages,
-    userMessage,
     userAttachments,
     inheritedToolsForRun,
     inheritedActiveSkillNames,
@@ -1467,7 +1586,6 @@ export function useChatGeneration({
     maxAllowedDepth?: number;
     signal: AbortSignal;
     contextMessages: ChatMessage[];
-    userMessage: string;
     userAttachments?: ChatAttachment[];
     inheritedToolsForRun: LoadedToolInfo[];
     inheritedActiveSkillNames: string[];
@@ -1506,7 +1624,7 @@ export function useChatGeneration({
     }
 
     if (maxAllowedDepth !== undefined && depth > Math.max(1, maxAllowedDepth)) {
-      const content = `Agent nesting depth exceeded (${maxAllowedDepth}).`;
+      const content = `Max agent nesting depth has been reached (${maxAllowedDepth}). Do not call another agent from this agent call; continue with the available context or explain that deeper delegation is blocked.`;
       const result = createAgentToolResult({
         toolCall,
         agentName,
@@ -1544,6 +1662,8 @@ export function useChatGeneration({
         assistantMessageId,
         variantId,
         parentAgentCallId,
+        toolCall: visibleToolCall,
+        toolBatchId,
         childAgentCall: agentCall,
       });
     } else {
@@ -1614,19 +1734,14 @@ export function useChatGeneration({
     let accumulatedReasoningMetadata: ChatReasoningMetadata | undefined;
     let toolCallsForContext: ChatToolCall[] = [];
     let toolResultsForContext: ChatToolResult[] = [];
+
+    // Design 2: an agent always sees its caller's transcript plus its
+    // delegated task. `contextMessages` is the caller's context: for a
+    // top-level call that is the main chat's prior messages; for a nested
+    // call it is the parent agent's transcript so far. A `task_only` agent
+    // gets no caller transcript, only the task.
     const agentContextMessages =
-      agent.contextMode === "full_chat"
-        ? [
-            ...contextMessages,
-            {
-              id: createId(),
-              role: "user" as const,
-              content: userMessage,
-              createdAt: new Date().toISOString(),
-              ...(userAttachments?.length ? { attachments: userAttachments } : {}),
-            },
-          ]
-        : [];
+      agent.contextMode === "full_chat" ? [...contextMessages] : [];
     const delegatedTaskMessage =
       agent.contextMode === "full_chat"
         ? `Delegated task for agent ${agent.name}:\n\n${task}`
@@ -1644,8 +1759,38 @@ export function useChatGeneration({
     let currentMessages = agentContextMessages;
     let currentUserMessage: string | undefined = delegatedTaskMessage;
 
+    // Active per-round process-step ids for the agent timeline. A new
+    // thinking/assistant_message step is opened on the first delta of a run
+    // and continued by subsequent deltas, mirroring the main chat loop.
+    let activeAgentThinkingStepId: string | undefined;
+    let activeAgentMessageStepId: string | undefined;
+
+    const completeActiveAgentThinkingStep = () => {
+      if (!activeAgentThinkingStepId) return;
+      const stepId = activeAgentThinkingStepId;
+      activeAgentThinkingStepId = undefined;
+      updateAgentProcessStep(
+        chatId,
+        assistantMessageId,
+        variantId,
+        agentCall.id,
+        stepId,
+        (step) =>
+          step.type === "thinking"
+            ? {
+                ...step,
+                status: "complete",
+                completedAt: step.completedAt ?? new Date().toISOString(),
+              }
+            : step,
+      );
+    };
+
     try {
       for (let round = 0; round <= MAX_TOOL_ROUNDS; round += 1) {
+        // A fresh provider turn starts a new assistant text block; any open
+        // thinking block from the previous round is finished.
+        activeAgentMessageStepId = undefined;
         const chatSnapshot = getCurrentChatSnapshot(chatId);
         const currentInheritedToolsForRun = chatSnapshot
           ? mergeToolsByName(
@@ -1659,10 +1804,7 @@ export function useChatGeneration({
           systemPrompt: createAgentSystemPrompt(agent, currentAgentActiveSkillNames),
           messages: currentMessages,
           userMessage: currentUserMessage,
-          userAttachments:
-            round === 0 && agent.contextMode !== "full_chat"
-              ? userAttachments
-              : undefined,
+          userAttachments: round === 0 ? userAttachments : undefined,
           signal,
           tools: getAgentTools({
             agent,
@@ -1673,6 +1815,31 @@ export function useChatGeneration({
           settingsOverride: getChatThinkingSettings(chatId),
           onContentDelta: (delta) => {
             accumulatedOutput += delta;
+            if (!activeAgentMessageStepId) {
+              completeActiveAgentThinkingStep();
+              const stepId = createId();
+              activeAgentMessageStepId = stepId;
+              appendAgentProcessSteps(
+                chatId,
+                assistantMessageId,
+                variantId,
+                agentCall.id,
+                [{ id: stepId, type: "assistant_message", content: delta }],
+              );
+            } else {
+              const stepId = activeAgentMessageStepId;
+              updateAgentProcessStep(
+                chatId,
+                assistantMessageId,
+                variantId,
+                agentCall.id,
+                stepId,
+                (step) =>
+                  step.type === "assistant_message"
+                    ? { ...step, content: step.content + delta }
+                    : step,
+              );
+            }
             updateAssistantAgentCall(
               chatId,
               assistantMessageId,
@@ -1687,6 +1854,41 @@ export function useChatGeneration({
           },
           onReasoningDelta: (delta) => {
             accumulatedReasoning += delta;
+            const hasVisibleDelta = delta.trim().length > 0;
+            if (!activeAgentThinkingStepId) {
+              if (!hasVisibleDelta) return;
+              const stepId = createId();
+              activeAgentThinkingStepId = stepId;
+              activeAgentMessageStepId = undefined;
+              appendAgentProcessSteps(
+                chatId,
+                assistantMessageId,
+                variantId,
+                agentCall.id,
+                [
+                  {
+                    id: stepId,
+                    type: "thinking",
+                    content: delta,
+                    status: "in_progress",
+                    startedAt: new Date().toISOString(),
+                  },
+                ],
+              );
+            } else {
+              const stepId = activeAgentThinkingStepId;
+              updateAgentProcessStep(
+                chatId,
+                assistantMessageId,
+                variantId,
+                agentCall.id,
+                stepId,
+                (step) =>
+                  step.type === "thinking"
+                    ? { ...step, content: step.content + delta }
+                    : step,
+              );
+            }
             updateAssistantAgentCall(
               chatId,
               assistantMessageId,
@@ -1700,6 +1902,10 @@ export function useChatGeneration({
           },
         });
 
+        // The model finished a turn; close any open thinking block before
+        // tool steps are recorded so the timeline reads think -> tools.
+        completeActiveAgentThinkingStep();
+
         accumulatedReasoningMetadata = mergeReasoningMetadata(
           accumulatedReasoningMetadata,
           result.reasoningMetadata,
@@ -1707,6 +1913,9 @@ export function useChatGeneration({
 
         const toolCalls = result.toolCalls ?? [];
         const childToolBatchId = toolCalls.length > 1 ? createId() : undefined;
+        const childToolBatchIdsByToolCallId = new Map<string, string>();
+        const callerTranscriptToolCallsForContext = toolCallsForContext;
+        const callerTranscriptToolResultsForContext = toolResultsForContext;
         const contextToolCalls = coalesceTaskToolCallsForContext(toolCalls);
         toolCallsForContext = [...toolCallsForContext, ...contextToolCalls];
         updateAssistantAgentCall(
@@ -1727,188 +1936,336 @@ export function useChatGeneration({
           );
         }
 
-        const executeChildToolCall = async (childToolCall: ChatToolCall) => {
-            if (childToolCall.function.name === CALL_AGENT_TOOL_NAME) {
-              try {
-                const request =
-                  parseCallAgentRequestFromToolCall(childToolCall);
-                const child = await runAgentCall({
-                  chatId,
-                  assistantMessageId,
-                  variantId,
-                  agentName: request.agentName,
-                  task: request.task,
-                  toolCall: childToolCall,
-                  depth: depth + 1,
-                  parentAgentCallId: agentCall.id,
-                  parentProvider: provider,
-                  maxAllowedDepth: agent.maxNestingDepth,
-                  signal,
-                  contextMessages,
-                  userMessage,
-                  userAttachments,
-                  inheritedToolsForRun: currentInheritedToolsForRun,
-                  inheritedActiveSkillNames: currentAgentActiveSkillNames,
-                });
-                return {
-                  ...child.toolResult,
-                  toolCallId: childToolCall.id,
-                };
-              } catch (error) {
-                return createAgentToolResult({
-                  toolCall: childToolCall,
-                  agentName,
-                  output: labelForError(error),
-                  isError: true,
-                });
-              }
-            }
+        // Record an ordered timeline step for each tool call in this round so
+        // the transcript reconstructs think -> tool -> think interleaving.
+        // - call_agent gets a `tool_execution` step (the "called an agent"
+        //   block) that completes on successful dispatch (status (i)); the
+        //   running agent itself is recorded separately as an `agent_call`
+        //   step by the nested run via attachChildAgentCallToVisibleTree.
+        // - ask_user / approvals are surfaced at the parent level for the
+        //   interactive affordance, but also mirrored here in order.
+        const agentToolExecutionStepIdByToolCallId = new Map<string, string>();
+        const agentApprovalStepIdByToolCallId = new Map<string, string>();
+        const agentTimelineSteps: ChatAssistantProcessStep[] = [];
+        for (const childToolCall of toolCalls) {
+          const stepId = createId();
+          const childTool = availableToolsByName.get(
+            childToolCall.function.name,
+          );
+          const childNeedsApproval = requiresToolApproval(
+            childToolCall.function.name,
+            childTool,
+          );
+          const childAutoApproval = getChatFileToolAutoApproval(chatId);
+          const childAutoApproved =
+            requiresFileToolApproval(childToolCall.function.name) &&
+            isFileToolCallAutoApproved(
+              childToolCall.function.name,
+              childAutoApproval,
+            );
+          const shouldMirrorApproval = childNeedsApproval && !childAutoApproved;
+          const stepToolBatchId =
+            childToolCall.function.name === CALL_AGENT_TOOL_NAME
+              ? (childToolBatchId ?? createId())
+              : (childToolBatchId ??
+                (shouldMirrorApproval ? createId() : undefined));
+          if (stepToolBatchId) {
+            childToolBatchIdsByToolCallId.set(childToolCall.id, stepToolBatchId);
+          }
 
+          if (shouldMirrorApproval) {
             try {
-              if (childToolCall.function.name === ASK_USER_TOOL_NAME) {
-                return await executeToolCall(childToolCall, {
-                  chatId,
-                  assistantMessageId,
-                  variantId,
-                  stepId: `${agentCall.id}:${childToolCall.id}`,
-                  signal,
-                  activeSkillNames: currentAgentActiveSkillNames,
-                  workspaceRoots: getEffectiveWorkspaceRootsForChat(
-                    getCurrentChatSnapshot(chatId),
-                    currentAgentActiveSkillNames,
-                  ),
-                  fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
-                });
-              }
-
-              if (isTaskToolName(childToolCall.function.name)) {
-                return executeTaskTool(childToolCall, chatId);
-              }
-
-              const childWorkspaceRoots = getEffectiveWorkspaceRootsForChat(
-                getCurrentChatSnapshot(chatId),
-                currentAgentActiveSkillNames,
+              const approvalStepId = createId();
+              agentApprovalStepIdByToolCallId.set(
+                childToolCall.id,
+                approvalStepId,
               );
+              agentTimelineSteps.push({
+                id: approvalStepId,
+                type: "approval" as const,
+                toolBatchId: stepToolBatchId,
+                status: "waiting" as const,
+                toolCall: childToolCall,
+                request: requiresFileToolApproval(childToolCall.function.name)
+                  ? parseFileToolApprovalRequestFromToolCall(
+                      childToolCall,
+                      getEffectiveWorkspaceRootsForChat(
+                        getCurrentChatSnapshot(chatId),
+                        currentAgentActiveSkillNames,
+                      ),
+                    )
+                  : createToolApprovalRequest(childToolCall, childTool),
+              });
+            } catch {
+              // Keep invalid approval calls visible as failed tool executions
+              // once executeToolCall returns the validation error.
+            }
+          }
 
-              const childTool = availableToolsByName.get(
-                childToolCall.function.name,
-              );
+          agentToolExecutionStepIdByToolCallId.set(childToolCall.id, stepId);
+          agentTimelineSteps.push({
+            id: stepId,
+            type: "tool_execution",
+            toolBatchId: stepToolBatchId,
+            status: shouldMirrorApproval ? "pending" : "running",
+            toolCall: childToolCall,
+          });
+        }
+        appendAgentProcessSteps(
+          chatId,
+          assistantMessageId,
+          variantId,
+          agentCall.id,
+          agentTimelineSteps,
+        );
 
-              if (requiresToolApproval(childToolCall.function.name, childTool)) {
-                const autoApproval = getChatFileToolAutoApproval(chatId);
-                const autoApproved =
-                  requiresFileToolApproval(childToolCall.function.name) &&
-                  isFileToolCallAutoApproved(
-                    childToolCall.function.name,
-                    autoApproval,
-                  );
-                const approvalStepId = createId();
-                const executionStepId = createId();
+        const recordAgentToolStepResult = (toolResult: ChatToolResult) => {
+          const stepId = agentToolExecutionStepIdByToolCallId.get(
+            toolResult.toolCallId,
+          );
+          if (!stepId) return;
+          updateAgentProcessStep(
+            chatId,
+            assistantMessageId,
+            variantId,
+            agentCall.id,
+            stepId,
+            (step) =>
+              step.type === "tool_execution"
+                ? {
+                    ...step,
+                    status: toolResult.isError ? "failed" : "complete",
+                    toolResult,
+                  }
+                : step,
+          );
+        };
 
-                if (autoApproved) {
-                  appendAssistantProcessSteps(
-                    chatId,
-                    assistantMessageId,
-                    variantId,
-                    [
-                      {
-                        id: executionStepId,
-                        type: "tool_execution" as const,
-                        toolBatchId: childToolBatchId,
-                        status: "pending" as const,
-                        toolCall: childToolCall,
-                      },
-                    ],
-                  );
-                } else {
-                  appendAssistantProcessSteps(
-                    chatId,
-                    assistantMessageId,
-                    variantId,
-                    [
-                      {
-                        id: approvalStepId,
-                        type: "approval" as const,
-                        toolBatchId: childToolBatchId,
-                        status: "waiting" as const,
-                        toolCall: childToolCall,
-                        request: requiresFileToolApproval(childToolCall.function.name)
-                          ? parseFileToolApprovalRequestFromToolCall(
-                              childToolCall,
-                              childWorkspaceRoots,
-                            )
-                          : createToolApprovalRequest(childToolCall, childTool),
-                      },
-                      {
-                        id: executionStepId,
-                        type: "tool_execution" as const,
-                        toolBatchId: childToolBatchId,
-                        status: "pending" as const,
-                        toolCall: childToolCall,
-                      },
-                    ],
-                  );
-                }
+        const recordAgentApprovalStepResult = (toolResult: ChatToolResult) => {
+          const stepId = agentApprovalStepIdByToolCallId.get(
+            toolResult.toolCallId,
+          );
+          if (!stepId) return;
+          updateAgentProcessStep(
+            chatId,
+            assistantMessageId,
+            variantId,
+            agentCall.id,
+            stepId,
+            (step) =>
+              step.type === "approval" || step.type === "file_approval"
+                ? {
+                    ...step,
+                    status: "complete",
+                    toolResult,
+                  }
+                : step,
+          );
+        };
 
-                const toolResult = await executeToolCall(childToolCall, {
-                  chatId,
-                  assistantMessageId,
-                  variantId,
-                  stepId: autoApproved ? executionStepId : approvalStepId,
-                  signal,
-                  activeSkillNames: currentAgentActiveSkillNames,
-                  workspaceRoots: childWorkspaceRoots,
-                  fileToolAutoApproval: autoApproval,
-                });
-                completeAssistantToolExecutionStepForResult(
-                  chatId,
-                  assistantMessageId,
-                  variantId,
-                  toolResult,
-                );
-                return toolResult;
-              }
+        // For call_agent, the tool step (the act of delegating) completes as
+        // soon as the call is dispatched, decoupled from the agent outcome.
+        const markAgentCallDispatched = (childToolCall: ChatToolCall) => {
+          const stepId = agentToolExecutionStepIdByToolCallId.get(
+            childToolCall.id,
+          );
+          if (!stepId) return;
+          updateAgentProcessStep(
+            chatId,
+            assistantMessageId,
+            variantId,
+            agentCall.id,
+            stepId,
+            (step) =>
+              step.type === "tool_execution"
+                ? { ...step, status: "complete" }
+                : step,
+          );
+        };
 
-              const executionStepId = createId();
-              appendAssistantProcessSteps(
+        // Build this agent's conversation so far, to forward to a nested
+        // agent as its caller transcript (Design 2). It mirrors how the main
+        // chat's context is the user's prior turns: here the "caller" is this
+        // agent, so the transcript is the delegated task plus the assistant
+        // turn (content + tool calls/results) accumulated to this point.
+        const buildAgentCallerTranscript = (): ChatMessage[] => [
+          ...baseAgentMessages,
+          createContinuationAssistantMessage({
+            assistantMessageId: createId(),
+            variantId: createId(),
+            accumulatedContent: accumulatedOutput,
+            accumulatedReasoning,
+            accumulatedReasoningMetadata,
+            // A nested full-context agent must receive only this caller's
+            // completed transcript. Do not include the current unresolved
+            // call_agent tool call: provider APIs require assistant tool calls
+            // to be followed by matching tool results, and the nested agent is
+            // being launched before that result exists.
+            toolCalls: callerTranscriptToolCallsForContext,
+            toolResults: callerTranscriptToolResultsForContext,
+          }),
+        ];
+
+        const executeChildToolCall = async (childToolCall: ChatToolCall) => {
+          if (childToolCall.function.name === CALL_AGENT_TOOL_NAME) {
+            // Status (i): the call_agent tool step is complete on dispatch.
+            markAgentCallDispatched(childToolCall);
+            try {
+              const request = parseCallAgentRequestFromToolCall(childToolCall);
+              const child = await runAgentCall({
                 chatId,
                 assistantMessageId,
                 variantId,
-                [
-                  {
-                    id: executionStepId,
-                    type: "tool_execution" as const,
-                    toolBatchId: childToolBatchId,
-                    status: "pending" as const,
-                    toolCall: childToolCall,
-                  },
-                ],
-              );
+                agentName: request.agentName,
+                task: request.task,
+                toolCall: childToolCall,
+                toolBatchId: childToolBatchIdsByToolCallId.get(
+                  childToolCall.id,
+                ),
+                depth: depth + 1,
+                parentAgentCallId: agentCall.id,
+                parentProvider: provider,
+                maxAllowedDepth: agent.maxNestingDepth,
+                signal,
+                // Design 2 / Q1-A: a nested agent sees its CALLER's
+                // transcript, not the root chat. The caller here is this
+                // agent, so forward this agent's conversation so far.
+                contextMessages: buildAgentCallerTranscript(),
+                userAttachments,
+                inheritedToolsForRun: currentInheritedToolsForRun,
+                inheritedActiveSkillNames: currentAgentActiveSkillNames,
+              });
+              return {
+                ...child.toolResult,
+                toolCallId: childToolCall.id,
+              };
+            } catch (error) {
+              const errorResult = createAgentToolResult({
+                toolCall: childToolCall,
+                agentName: "unknown",
+                output: labelForError(error),
+                isError: true,
+              });
+              recordAgentToolStepResult(errorResult);
+              return errorResult;
+            }
+          }
+
+          try {
+            if (childToolCall.function.name === ASK_USER_TOOL_NAME) {
+              const askResult = await executeToolCall(childToolCall, {
+                chatId,
+                assistantMessageId,
+                variantId,
+                stepId: `${agentCall.id}:${childToolCall.id}`,
+                signal,
+                activeSkillNames: currentAgentActiveSkillNames,
+                workspaceRoots: getEffectiveWorkspaceRootsForChat(
+                  getCurrentChatSnapshot(chatId),
+                  currentAgentActiveSkillNames,
+                ),
+                fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
+              });
+              recordAgentToolStepResult(askResult);
+              return askResult;
+            }
+
+            if (isTaskToolName(childToolCall.function.name)) {
+              const taskResult = executeTaskTool(childToolCall, chatId);
+              recordAgentToolStepResult(taskResult);
+              return taskResult;
+            }
+
+            const childWorkspaceRoots = getEffectiveWorkspaceRootsForChat(
+              getCurrentChatSnapshot(chatId),
+              currentAgentActiveSkillNames,
+            );
+
+            const childTool = availableToolsByName.get(
+              childToolCall.function.name,
+            );
+
+            if (requiresToolApproval(childToolCall.function.name, childTool)) {
+              const autoApproval = getChatFileToolAutoApproval(chatId);
+              const autoApproved =
+                requiresFileToolApproval(childToolCall.function.name) &&
+                isFileToolCallAutoApproved(
+                  childToolCall.function.name,
+                  autoApproval,
+                );
+              const approvalStepId = createId();
+              const agentTimelineStepId =
+                agentToolExecutionStepIdByToolCallId.get(childToolCall.id) ??
+                createId();
+
+              // The approval prompt is surfaced at the parent (main chat)
+              // level so the user can act on it even while the agent
+              // transcript modal is closed. The executed tool result is
+              // recorded into the agent timeline for the transcript.
+              if (!autoApproved) {
+                appendAssistantProcessSteps(
+                  chatId,
+                  assistantMessageId,
+                  variantId,
+                  [
+                    {
+                      id: approvalStepId,
+                      type: "approval" as const,
+                      toolBatchId: childToolBatchId,
+                      status: "waiting" as const,
+                      toolCall: childToolCall,
+                      request: requiresFileToolApproval(childToolCall.function.name)
+                        ? parseFileToolApprovalRequestFromToolCall(
+                            childToolCall,
+                            childWorkspaceRoots,
+                          )
+                        : createToolApprovalRequest(childToolCall, childTool),
+                    },
+                  ],
+                );
+              }
+
               const toolResult = await executeToolCall(childToolCall, {
                 chatId,
                 assistantMessageId,
                 variantId,
-                stepId: executionStepId,
+                stepId: autoApproved ? agentTimelineStepId : approvalStepId,
                 signal,
                 activeSkillNames: currentAgentActiveSkillNames,
                 workspaceRoots: childWorkspaceRoots,
-                fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
+                fileToolAutoApproval: autoApproval,
               });
-              completeAssistantToolExecutionStepForResult(
-                chatId,
-                assistantMessageId,
-                variantId,
-                toolResult,
-              );
+              recordAgentApprovalStepResult(toolResult);
+              recordAgentToolStepResult(toolResult);
               return toolResult;
-            } catch (error) {
-              return {
-                toolCallId: childToolCall.id,
-                toolName: childToolCall.function.name,
-                content: labelForError(error),
-                isError: true,
-              } satisfies ChatToolResult;
             }
+
+            const agentTimelineStepId =
+              agentToolExecutionStepIdByToolCallId.get(childToolCall.id) ??
+              createId();
+            const toolResult = await executeToolCall(childToolCall, {
+              chatId,
+              assistantMessageId,
+              variantId,
+              stepId: agentTimelineStepId,
+              signal,
+              activeSkillNames: currentAgentActiveSkillNames,
+              workspaceRoots: childWorkspaceRoots,
+              fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
+            });
+            recordAgentToolStepResult(toolResult);
+            return toolResult;
+          } catch (error) {
+            const errorResult = {
+              toolCallId: childToolCall.id,
+              toolName: childToolCall.function.name,
+              content: labelForError(error),
+              isError: true,
+            } satisfies ChatToolResult;
+            recordAgentApprovalStepResult(errorResult);
+            recordAgentToolStepResult(errorResult);
+            return errorResult;
+          }
         };
 
         let childTaskQueue = Promise.resolve();
@@ -2091,6 +2448,7 @@ export function useChatGeneration({
     providerForRun,
     toolsForRun,
     activeSkillNamesForRun,
+    oneShotSkillNames = [],
     oneShotAgentNames = [],
   }: {
     chatId: string;
@@ -2103,6 +2461,7 @@ export function useChatGeneration({
     providerForRun: ProviderConfig;
     toolsForRun: LoadedToolInfo[];
     activeSkillNamesForRun: string[];
+    oneShotSkillNames?: string[];
     oneShotAgentNames?: string[];
   }) {
     const controller = new AbortController();
@@ -2128,6 +2487,7 @@ export function useChatGeneration({
     let accumulatedReasoning = "";
     let accumulatedReasoningMetadata: ChatReasoningMetadata | undefined;
     let currentActiveSkillNames = [...new Set(activeSkillNamesForRun)];
+    const forcedSkillRequests = [...new Set(oneShotSkillNames)];
     const forcedAgentRequests = oneShotAgentNames.map((agentName) => ({
       agentName,
       task: userMessage || "Please analyze the attached files.",
@@ -2149,6 +2509,30 @@ export function useChatGeneration({
 
       for (const toolCall of toolCalls) {
         if (toolCall.function.name === CALL_AGENT_TOOL_NAME) {
+          // Q2=B: show the call_agent invocation as its own tool block ("I
+          // called an agent"), grouped with the agent block that follows.
+          // Ensure both share a batch id so they render as one group even
+          // when call_agent is the only tool call this round.
+          const agentGroupId =
+            toolBatchIdsByToolCallId.get(toolCall.id) ?? createId();
+          toolBatchIdsByToolCallId.set(toolCall.id, agentGroupId);
+          toolSteps.push({
+            id: createId(),
+            type: "tool_execution" as const,
+            toolBatchId: agentGroupId,
+            // Status (i): completed on successful dispatch. Marked complete
+            // immediately since reaching this point means the call is being
+            // dispatched; the agent's own lifecycle is shown by the agent
+            // block. Errors in dispatch surface via the agent block.
+            status: "complete" as const,
+            toolCall,
+            toolResult: {
+              toolCallId: toolCall.id,
+              toolName: CALL_AGENT_TOOL_NAME,
+              content: "Agent dispatched.",
+              isError: false,
+            },
+          });
           continue;
         }
 
@@ -2181,11 +2565,19 @@ export function useChatGeneration({
             );
 
           try {
+            const approvalGroupId = !autoApproved
+              ? (toolBatchId ?? createId())
+              : toolBatchId;
+
+            if (approvalGroupId) {
+              toolBatchIdsByToolCallId.set(toolCall.id, approvalGroupId);
+            }
+
             if (!autoApproved) {
               toolSteps.push({
                 id: createId(),
                 type: "approval" as const,
-                toolBatchId,
+                toolBatchId: approvalGroupId,
                 status: "waiting" as const,
                 toolCall,
                 request: requiresFileToolApproval(toolCall.function.name)
@@ -2203,7 +2595,7 @@ export function useChatGeneration({
             toolSteps.push({
               id: createId(),
               type: "tool_execution" as const,
-              toolBatchId,
+              toolBatchId: approvalGroupId,
               status: "pending" as const,
               toolCall,
             });
@@ -2271,6 +2663,16 @@ export function useChatGeneration({
               }
 
               if (step.toolCall.id !== toolResult.toolCallId) return step;
+
+              // The call_agent tool step is completed on dispatch (status (i))
+              // and must not be re-coupled to the agent's eventual result. The
+              // agent's outcome is reflected on the sibling agent_call step.
+              if (
+                step.type === "tool_execution" &&
+                step.toolCall.function.name === CALL_AGENT_TOOL_NAME
+              ) {
+                return step;
+              }
 
               if (step.type === "agent_call") {
                 return {
@@ -2404,6 +2806,87 @@ export function useChatGeneration({
       }),
     ];
 
+    function runForcedSkills() {
+      if (!forcedSkillRequests.length) return;
+
+      const forcedSkillToolCalls = forcedSkillRequests.map((skillName) =>
+        createSyntheticLoadSkillToolCall(skillName),
+      );
+      const forcedSkillToolResults = forcedSkillToolCalls.map((toolCall) => {
+        try {
+          const parsed = JSON.parse(toolCall.function.arguments || "{}");
+          const skillName =
+            parsed && typeof parsed.skillName === "string"
+              ? parsed.skillName.trim()
+              : "";
+          return createLoadSkillMentionToolResult(toolCall, skillName);
+        } catch (error) {
+          return {
+            toolCallId: toolCall.id,
+            toolName: LOAD_SKILL_TOOL_NAME,
+            content: labelForError(error),
+            isError: true,
+          } satisfies ChatToolResult;
+        }
+      });
+      const forcedSkillBatchId =
+        forcedSkillToolCalls.length > 1 ? createId() : undefined;
+
+      toolCallsForContext = [...toolCallsForContext, ...forcedSkillToolCalls];
+      toolResultsForContext = [
+        ...toolResultsForContext,
+        ...forcedSkillToolResults,
+      ];
+
+      updateAssistantVariant(
+        chatId,
+        assistantMessageId,
+        variantId,
+        (variant) => {
+          const existingCallIds = new Set(
+            (variant.toolCalls ?? []).map((toolCall) => toolCall.id),
+          );
+          const existingResultIds = new Set(
+            (variant.toolResults ?? []).map((toolResult) => toolResult.toolCallId),
+          );
+
+          return {
+            ...variant,
+            toolCalls: [
+              ...(variant.toolCalls ?? []),
+              ...forcedSkillToolCalls.filter(
+                (toolCall) => !existingCallIds.has(toolCall.id),
+              ),
+            ],
+            toolResults: [
+              ...(variant.toolResults ?? []),
+              ...forcedSkillToolResults.filter(
+                (toolResult) => !existingResultIds.has(toolResult.toolCallId),
+              ),
+            ],
+            processSteps: [
+              ...(variant.processSteps ?? []),
+              ...forcedSkillToolCalls.map((toolCall, index) => ({
+                id: createId(),
+                type: "tool_execution" as const,
+                toolBatchId: forcedSkillBatchId,
+                status: forcedSkillToolResults[index]?.isError
+                  ? ("failed" as const)
+                  : ("complete" as const),
+                toolCall,
+                toolResult: forcedSkillToolResults[index],
+              })),
+            ],
+          };
+        },
+        { touch: false },
+      );
+
+      if (chatId === activeChatId) {
+        scheduleStickyScrollToBottom({ force: true, settleFrames: 5 });
+      }
+    }
+
     async function runForcedAgents() {
       if (!forcedAgentRequests.length) return;
 
@@ -2413,6 +2896,22 @@ export function useChatGeneration({
           request.agentName,
           request.task,
         );
+        const forcedAgentGroupId = createId();
+        appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
+          {
+            id: createId(),
+            type: "tool_execution" as const,
+            toolBatchId: forcedAgentGroupId,
+            status: "complete" as const,
+            toolCall: forcedToolCall,
+            toolResult: {
+              toolCallId: forcedToolCall.id,
+              toolName: CALL_AGENT_TOOL_NAME,
+              content: "Agent dispatched.",
+              isError: false,
+            },
+          },
+        ]);
         const result = await runAgentCall({
           chatId,
           assistantMessageId,
@@ -2420,11 +2919,22 @@ export function useChatGeneration({
           agentName: request.agentName,
           task: request.task,
           toolCall: forcedToolCall,
+          toolBatchId: forcedAgentGroupId,
           depth: 1,
           parentProvider: providerForRun,
           signal: controller.signal,
-          contextMessages,
-          userMessage,
+          contextMessages: [
+            ...contextMessages,
+            {
+              id: createId(),
+              role: "user" as const,
+              content: userMessage,
+              createdAt: new Date().toISOString(),
+              ...(userAttachments?.length
+                ? { attachments: userAttachments }
+                : {}),
+            },
+          ],
           userAttachments,
           inheritedToolsForRun: toolsForRun,
           inheritedActiveSkillNames: activeSkillNamesForRun,
@@ -2473,6 +2983,7 @@ export function useChatGeneration({
     let runWasCancelled = false;
 
     try {
+      runForcedSkills();
       await runForcedAgents();
       let currentMessages = forcedAgentRequests.length
         ? [
@@ -2525,7 +3036,10 @@ export function useChatGeneration({
 
         const streamResult = await streamProviderChat({
           provider: providerForRun,
-          systemPrompt: composeSystemPrompt(currentActiveSkillNames),
+          systemPrompt: composeSystemPrompt(
+            currentActiveSkillNames,
+            forcedSkillRequests,
+          ),
           messages: currentMessages,
           userMessage: currentUserMessage,
           userAttachments:
@@ -2681,8 +3195,18 @@ export function useChatGeneration({
                       depth: 1,
                       parentProvider: providerForRun,
                       signal: controller.signal,
-                      contextMessages,
-                      userMessage,
+                      contextMessages: [
+                        ...contextMessages,
+                        {
+                          id: createId(),
+                          role: "user" as const,
+                          content: userMessage,
+                          createdAt: new Date().toISOString(),
+                          ...(userAttachments?.length
+                            ? { attachments: userAttachments }
+                            : {}),
+                        },
+                      ],
                       userAttachments,
                       inheritedToolsForRun: currentToolsForRun,
                       inheritedActiveSkillNames: currentActiveSkillNames,
@@ -2919,6 +3443,7 @@ export function useChatGeneration({
       providerForRun,
       toolsForRun,
       activeSkillNamesForRun,
+      oneShotSkillNames,
       oneShotAgentNames,
     });
 
@@ -3016,6 +3541,7 @@ export function useChatGeneration({
       providerForRun,
       toolsForRun,
       activeSkillNamesForRun,
+      oneShotSkillNames,
       oneShotAgentNames,
     });
   }
@@ -3195,6 +3721,7 @@ export function useChatGeneration({
       providerForRun,
       toolsForRun,
       activeSkillNamesForRun,
+      oneShotSkillNames,
       oneShotAgentNames,
     });
   }

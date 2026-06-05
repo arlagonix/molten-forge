@@ -5,6 +5,7 @@ import {
 } from "@/lib/ai-chat/chat-utils";
 import type { StreamProviderChatResult } from "@/lib/ai-chat/direct-provider-client";
 import type {
+  ChatAgentCall,
   ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatMessage,
@@ -53,18 +54,14 @@ export function cancelUnfinishedTaskListSteps(
     }
 
     if (step.type === "agent_call") {
+      const cancelledAgentCall = cancelUnfinishedAgentCall(step.agentCall);
       if (step.status === "complete" || step.status === "failed" || step.status === "cancelled") {
-        return step;
+        return { ...step, agentCall: cancelledAgentCall };
       }
       return {
         ...step,
         status: "cancelled",
-        agentCall: {
-          ...step.agentCall,
-          status: "cancelled",
-          completedAt: step.agentCall.completedAt ?? new Date().toISOString(),
-          error: step.agentCall.error ?? "Agent call cancelled.",
-        },
+        agentCall: cancelledAgentCall,
       };
     }
 
@@ -75,6 +72,32 @@ export function cancelUnfinishedTaskListSteps(
 
     return step;
   });
+}
+
+function cancelUnfinishedAgentCall(
+  agentCall: ChatAgentCall,
+): ChatAgentCall {
+  const isFinished =
+    agentCall.status === "complete" ||
+    agentCall.status === "failed" ||
+    agentCall.status === "cancelled";
+
+  return {
+    ...agentCall,
+    status: isFinished ? agentCall.status : "cancelled",
+    completedAt: isFinished
+      ? agentCall.completedAt
+      : (agentCall.completedAt ?? new Date().toISOString()),
+    error: isFinished
+      ? agentCall.error
+      : (agentCall.error ?? "Agent call cancelled."),
+    processSteps: agentCall.processSteps
+      ? cancelUnfinishedTaskListSteps(agentCall.processSteps)
+      : agentCall.processSteps,
+    childAgentCalls: (agentCall.childAgentCalls ?? []).map(
+      cancelUnfinishedAgentCall,
+    ),
+  };
 }
 
 function completeThinkingProcessSteps(

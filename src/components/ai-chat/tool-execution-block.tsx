@@ -464,7 +464,11 @@ export function ToolExecutionBlock({
       </article>
 
       <Dialog open={isDetailsOpen} onOpenChange={setIsDetailsOpen}>
-        <DialogContent className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none max-w-[min(96vw,56rem)] flex-col overflow-hidden p-0 text-base leading-6">
+        <DialogContent
+          className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none max-w-[min(96vw,56rem)] flex-col overflow-hidden p-0 text-base leading-6"
+          overlayStyle={{ zIndex: 200 }}
+          style={{ zIndex: 201 }}
+        >
           <DialogHeader className="border-b px-5 py-4">
             <DialogTitle className="flex min-w-0 items-center gap-2 pr-8 text-sm font-medium uppercase tracking-wide text-muted-foreground">
               <Wrench className="size-4 shrink-0" />

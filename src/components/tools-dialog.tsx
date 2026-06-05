@@ -1,5 +1,6 @@
 import {
   BookOpen,
+  Bot,
   Check,
   Copy,
   Download,
@@ -83,6 +84,8 @@ const BUILTIN_TASK_TOOL_META = [
 ] as const;
 const BUILTIN_LOAD_SKILL_TOOL_NAME = "load_skill";
 const BUILTIN_LOAD_SKILL_TOOL_ID = "builtin-load-skill";
+const BUILTIN_CALL_AGENT_TOOL_NAME = "call_agent";
+const BUILTIN_CALL_AGENT_TOOL_ID = "builtin-call-agent";
 const BUILTIN_WEB_FETCH_TOOL_NAME = "web_fetch";
 const BUILTIN_WEB_FETCH_TOOL_ID = "builtin-web-fetch";
 const BUILTIN_FILE_READ_TOOL_NAME = "file_read";
@@ -104,7 +107,7 @@ const BUILTIN_FILE_TOOL_META = [
     id: "builtin-file-read",
     name: BUILTIN_FILE_READ_TOOL_NAME,
     setting: "fileReadEnabled" as const,
-    description: "Reads UTF-8 text files inside approved workspace folders in 100-line windows.",
+    description: "Reads UTF-8 text files inside approved workspace folders. Reads the whole file by default; supports optional line windows with offset/limit.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -112,6 +115,7 @@ const BUILTIN_FILE_TOOL_META = [
         path: { type: "string" },
         rootId: { type: "string" },
         offset: { type: "number" },
+        limit: { type: "number" },
       },
       required: ["path"],
     },
@@ -264,6 +268,8 @@ const BUILTIN_TASK_TOOLS_DESCRIPTION =
   "The assistant uses one task list tool (`update_tasks`) to show and update a checklist in the current chat. It always sends the full current list; sending an empty list clears it.";
 const BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION =
   "Loads full instructions for one relevant skill and activates it for the current chat when skills are available.";
+const BUILTIN_CALL_AGENT_TOOL_DESCRIPTION =
+  "Delegates a focused subtask to one enabled agent. The actual runtime schema is rebuilt per chat so agentName is limited to currently available agents.";
 const BUILTIN_WEB_FETCH_TOOL_DESCRIPTION =
   "Fetches readable text from a specific HTTP/HTTPS URL. It can read official docs or user-provided links, but it does not search the web.";
 const BUILTIN_LOAD_SKILL_TOOL_PARAMETERS = {
@@ -279,6 +285,23 @@ const BUILTIN_LOAD_SKILL_TOOL_PARAMETERS = {
 
 const TOOL_INFO_CODE_BLOCK_CLASS_NAME =
   "chat-markdown-compact chat-tool-info-codeblock";
+
+const BUILTIN_CALL_AGENT_TOOL_PARAMETERS = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    agentName: {
+      type: "string",
+      description: "Name of the configured agent to call.",
+    },
+    task: {
+      type: "string",
+      description:
+        "Focused task for the agent. Include all important constraints and what output you need back.",
+    },
+  },
+  required: ["agentName", "task"],
+};
 
 const BUILTIN_WEB_FETCH_TOOL_PARAMETERS = {
   type: "object",
@@ -355,6 +378,7 @@ type ToolsDialogProps = {
   onToolsSettingsChange: Dispatch<SetStateAction<ToolsSettings>>;
   loadedTools: LoadedToolInfo[];
   onLoadedToolsChange: Dispatch<SetStateAction<LoadedToolInfo[]>>;
+  callAgentEnabled: boolean;
   showSuccess: (message: string, description?: string) => void;
   showError: (message: string, description?: string) => void;
 };
@@ -764,6 +788,7 @@ function validateToolDraft(tool: LoadedToolInfo) {
       tool.name as (typeof BUILTIN_TASK_TOOL_NAMES)[number],
     ) ||
     tool.name === BUILTIN_LOAD_SKILL_TOOL_NAME ||
+    tool.name === BUILTIN_CALL_AGENT_TOOL_NAME ||
     tool.name === BUILTIN_WEB_FETCH_TOOL_NAME ||
     BUILTIN_FILE_TOOL_NAMES.includes(tool.name)
   ) {
@@ -835,6 +860,7 @@ export const ToolsDialog = memo(function ToolsDialog({
   onToolsSettingsChange,
   loadedTools,
   onLoadedToolsChange,
+  callAgentEnabled,
   showSuccess,
   showError,
 }: ToolsDialogProps) {
@@ -856,6 +882,8 @@ export const ToolsDialog = memo(function ToolsDialog({
   const isTaskToolsSelected = Boolean(selectedTaskToolInfo);
   const isLoadSkillToolSelected =
     selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME;
+  const isCallAgentToolSelected =
+    selectedToolName === BUILTIN_CALL_AGENT_TOOL_NAME;
   const isWebFetchToolSelected =
     selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME;
   const selectedFileToolInfo = BUILTIN_FILE_TOOL_META.find(
@@ -869,13 +897,14 @@ export const ToolsDialog = memo(function ToolsDialog({
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 10;
+  const totalToolsCount = loadedTools.length + 11;
   const enabledToolsCount = useMemo(
     () =>
       loadedTools.filter((tool) => tool.enabled).length +
       (toolsSettings.askUserEnabled ? 1 : 0) +
       (toolsSettings.taskToolsEnabled ? BUILTIN_TASK_TOOL_NAMES.length : 0) +
       (toolsSettings.loadSkillEnabled ? 1 : 0) +
+      (callAgentEnabled ? 1 : 0) +
       (toolsSettings.webFetchEnabled ? 1 : 0) +
       (toolsSettings.fileReadEnabled ? 1 : 0) +
       (toolsSettings.fileFindEnabled ? 1 : 0) +
@@ -888,6 +917,7 @@ export const ToolsDialog = memo(function ToolsDialog({
       toolsSettings.askUserEnabled,
       toolsSettings.taskToolsEnabled,
       toolsSettings.loadSkillEnabled,
+      callAgentEnabled,
       toolsSettings.webFetchEnabled,
       toolsSettings.fileReadEnabled,
       toolsSettings.fileFindEnabled,
@@ -923,6 +953,7 @@ export const ToolsDialog = memo(function ToolsDialog({
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
       isTaskToolsSelected ||
       selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
+      selectedToolName === BUILTIN_CALL_AGENT_TOOL_NAME ||
       selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME ||
       Boolean(
         selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName),
@@ -944,6 +975,7 @@ export const ToolsDialog = memo(function ToolsDialog({
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
       isTaskToolsSelected ||
       selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
+      selectedToolName === BUILTIN_CALL_AGENT_TOOL_NAME ||
       selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME ||
       Boolean(
         selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName),
@@ -977,6 +1009,7 @@ export const ToolsDialog = memo(function ToolsDialog({
       isAskUserToolSelected ||
       isTaskToolsSelected ||
       isLoadSkillToolSelected ||
+      isCallAgentToolSelected ||
       isWebFetchToolSelected
     ) {
       return false;
@@ -991,6 +1024,7 @@ export const ToolsDialog = memo(function ToolsDialog({
     isAskUserToolSelected,
     isTaskToolsSelected,
     isLoadSkillToolSelected,
+    isCallAgentToolSelected,
     isWebFetchToolSelected,
     selectedTool,
     toolDraft,
@@ -1480,6 +1514,44 @@ export const ToolsDialog = memo(function ToolsDialog({
               </div>
 
               <div
+                key={BUILTIN_CALL_AGENT_TOOL_ID}
+                role="button"
+                tabIndex={0}
+                className={cn(
+                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
+                  isCallAgentToolSelected
+                    ? "border-primary/30 bg-accent text-accent-foreground"
+                    : "border-transparent hover:border-border hover:bg-muted/60",
+                )}
+                onClick={() =>
+                  setSelectedToolName(BUILTIN_CALL_AGENT_TOOL_NAME)
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedToolName(BUILTIN_CALL_AGENT_TOOL_NAME);
+                  }
+                }}
+              >
+                <Bot className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
+                    <span className="truncate">
+                      {BUILTIN_CALL_AGENT_TOOL_NAME}
+                    </span>
+                    <Lock className="size-3 shrink-0 text-muted-foreground" />
+                  </div>
+                </div>
+                <Switch
+                  checked={callAgentEnabled}
+                  disabled
+                  onClick={(event) => event.stopPropagation()}
+                  className="mt-0.5 shrink-0 cursor-not-allowed"
+                  title="Controlled by Agents settings and the current chat's enabled agents"
+                />
+              </div>
+
+              <div
                 key={BUILTIN_WEB_FETCH_TOOL_ID}
                 role="button"
                 tabIndex={0}
@@ -1836,6 +1908,61 @@ export const ToolsDialog = memo(function ToolsDialog({
                       {renderJsonCodeBlock(
                         JSON.stringify(
                           BUILTIN_LOAD_SKILL_TOOL_PARAMETERS,
+                          null,
+                          2,
+                        ),
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            ) : isCallAgentToolSelected ? (
+              <>
+                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
+                  <div className="flex w-full items-center justify-between gap-4">
+                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                      Built-in tool
+                    </Label>
+                    <span className="inline-flex shrink-0 items-center gap-1  border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                      <Lock className="size-3.5" />
+                      Locked
+                    </span>
+                  </div>
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
+                  <div className="grid gap-5 pb-1">
+                    <div className="grid gap-1">
+                      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
+                        <Bot className="size-5 text-muted-foreground" />
+                        {BUILTIN_CALL_AGENT_TOOL_NAME}
+                      </h3>
+                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
+                        {BUILTIN_CALL_AGENT_TOOL_DESCRIPTION}
+                      </p>
+                    </div>
+
+                    <div className="grid gap-2  border bg-muted/20 p-3">
+                      <Label>Behavior</Label>
+                      <div className="grid gap-2 text-base leading-6 text-muted-foreground">
+                        <p>
+                          The assistant can call this tool to delegate a focused
+                          subtask to an enabled agent, then use that agent's
+                          result in the same response.
+                        </p>
+                        <p>
+                          Availability is controlled by Agents settings, enabled
+                          agents for the current chat, and this chat's tool
+                          picker. Custom tool settings do not affect it.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-2">
+                      <Label>Parameters JSON schema</Label>
+                      {renderJsonCodeBlock(
+                        JSON.stringify(
+                          BUILTIN_CALL_AGENT_TOOL_PARAMETERS,
                           null,
                           2,
                         ),
@@ -2363,6 +2490,7 @@ export const ToolsDialog = memo(function ToolsDialog({
             {!isAskUserToolSelected &&
             !isTaskToolsSelected &&
             !isLoadSkillToolSelected &&
+            !isCallAgentToolSelected &&
             !isWebFetchToolSelected &&
             toolDraft ? (
               <Button
@@ -2390,6 +2518,7 @@ export const ToolsDialog = memo(function ToolsDialog({
             {!isAskUserToolSelected &&
               !isTaskToolsSelected &&
               !isLoadSkillToolSelected &&
+              !isCallAgentToolSelected &&
               !isWebFetchToolSelected && (
                 <Button
                   type="button"

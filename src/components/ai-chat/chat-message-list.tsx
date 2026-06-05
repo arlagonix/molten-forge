@@ -53,6 +53,13 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { getActiveVariant } from "@/lib/ai-chat/chat-utils";
+import {
+  getToolBatchGroupLabel,
+  getVisibleAssistantProcessSteps,
+  groupVisibleAssistantProcessSteps,
+  type VisibleAssistantProcessStep as SharedVisibleAssistantProcessStep,
+  type VisibleAssistantProcessStepGroup as SharedVisibleAssistantProcessStepGroup,
+} from "@/lib/ai-chat/process-step-groups";
 import type {
   AskUserRequest,
   AskUserResponse,
@@ -90,149 +97,8 @@ function MarkdownIcon({ className }: { className?: string }) {
   );
 }
 
-type VisibleAssistantProcessStep = ChatAssistantProcessStep & {
-  sourceStepIds: string[];
-};
-
-type VisibleAssistantProcessStepBaseGroup =
-  | { kind: "single"; step: VisibleAssistantProcessStep }
-  | {
-      kind: "tool_batch";
-      toolBatchId: string;
-      steps: VisibleAssistantProcessStep[];
-    };
-
-type VisibleAssistantProcessStepGroup =
-  | VisibleAssistantProcessStepBaseGroup
-  | {
-      kind: "thinking_tool_group";
-      thinkingStep: VisibleAssistantProcessStep;
-      toolGroups: VisibleAssistantProcessStepBaseGroup[];
-    };
-
-function getVisibleStepToolBatchId(step: VisibleAssistantProcessStep) {
-  return "toolBatchId" in step ? step.toolBatchId : undefined;
-}
-
-function isToolRelatedVisibleStep(step: VisibleAssistantProcessStep) {
-  return (
-    step.type === "tool_building" ||
-    step.type === "tool_execution" ||
-    step.type === "agent_call" ||
-    step.type === "user_input" ||
-    step.type === "approval" ||
-    step.type === "file_approval" ||
-    step.type === "tasks"
-  );
-}
-
-function groupToolRelatedVisibleSteps(
-  steps: VisibleAssistantProcessStep[],
-): VisibleAssistantProcessStepBaseGroup[] {
-  const groups: VisibleAssistantProcessStepBaseGroup[] = [];
-  let index = 0;
-
-  while (index < steps.length) {
-    const step = steps[index];
-    const toolBatchId = getVisibleStepToolBatchId(step);
-
-    if (!toolBatchId) {
-      groups.push({ kind: "single", step });
-      index += 1;
-      continue;
-    }
-
-    const batchSteps: VisibleAssistantProcessStep[] = [];
-    while (
-      index < steps.length &&
-      getVisibleStepToolBatchId(steps[index]) === toolBatchId
-    ) {
-      batchSteps.push(steps[index]);
-      index += 1;
-    }
-
-    if (batchSteps.length > 1) {
-      groups.push({ kind: "tool_batch", toolBatchId, steps: batchSteps });
-    } else {
-      groups.push({ kind: "single", step: batchSteps[0] });
-    }
-  }
-
-  return groups;
-}
-
-function isAssistantTextVisibleStep(step: VisibleAssistantProcessStep) {
-  return step.type === "assistant_message" && step.content.trim().length > 0;
-}
-
-function isThinkingToolGroupBoundary(step: VisibleAssistantProcessStep) {
-  return step.type === "thinking" || isAssistantTextVisibleStep(step);
-}
-
-function groupVisibleAssistantProcessSteps(
-  steps: VisibleAssistantProcessStep[],
-): VisibleAssistantProcessStepGroup[] {
-  const groups: VisibleAssistantProcessStepGroup[] = [];
-  let index = 0;
-
-  while (index < steps.length) {
-    const step = steps[index];
-
-    if (step.type === "thinking") {
-      const toolSteps: VisibleAssistantProcessStep[] = [];
-      let lookaheadIndex = index + 1;
-
-      while (lookaheadIndex < steps.length) {
-        const lookaheadStep = steps[lookaheadIndex];
-
-        if (isThinkingToolGroupBoundary(lookaheadStep)) break;
-
-        if (isToolRelatedVisibleStep(lookaheadStep)) {
-          toolSteps.push(lookaheadStep);
-        }
-
-        lookaheadIndex += 1;
-      }
-
-      if (toolSteps.length > 0) {
-        groups.push({
-          kind: "thinking_tool_group",
-          thinkingStep: step,
-          toolGroups: groupToolRelatedVisibleSteps(toolSteps),
-        });
-        index = lookaheadIndex;
-        continue;
-      }
-    }
-
-    if (isToolRelatedVisibleStep(step)) {
-      const toolBatchId = getVisibleStepToolBatchId(step);
-
-      if (toolBatchId) {
-        const batchSteps: VisibleAssistantProcessStep[] = [];
-        while (
-          index < steps.length &&
-          getVisibleStepToolBatchId(steps[index]) === toolBatchId
-        ) {
-          batchSteps.push(steps[index]);
-          index += 1;
-        }
-
-        if (batchSteps.length > 1) {
-          groups.push({ kind: "tool_batch", toolBatchId, steps: batchSteps });
-        } else {
-          groups.push({ kind: "single", step: batchSteps[0] });
-        }
-        continue;
-      }
-    }
-
-    groups.push({ kind: "single", step });
-    index += 1;
-  }
-
-  return groups;
-}
+type VisibleAssistantProcessStep = SharedVisibleAssistantProcessStep;
+type VisibleAssistantProcessStepGroup = SharedVisibleAssistantProcessStepGroup;
 
 export type MessageContextMenuState = {
   messageId: string;
@@ -330,39 +196,6 @@ type ChatMessageListProps = {
     isStreaming: boolean,
   ) => void;
 };
-
-function keepOnlyLatestTaskListStep<T extends ChatAssistantProcessStep>(
-  processSteps: T[],
-): T[] {
-  return processSteps;
-}
-
-function getVisibleAssistantProcessSteps(
-  processSteps: ChatAssistantProcessStep[],
-): VisibleAssistantProcessStep[] {
-  const visibleSteps: VisibleAssistantProcessStep[] = [];
-
-  for (const step of keepOnlyLatestTaskListStep(processSteps)) {
-    if (step.type === "thinking" && !step.content.trim()) {
-      continue;
-    }
-
-    const previousStep = visibleSteps[visibleSteps.length - 1];
-
-    if (
-      step.type === "assistant_message" &&
-      previousStep?.type === "assistant_message"
-    ) {
-      previousStep.content = `${previousStep.content}${step.content}`;
-      previousStep.sourceStepIds = [...previousStep.sourceStepIds, step.id];
-      continue;
-    }
-
-    visibleSteps.push({ ...step, sourceStepIds: [step.id] });
-  }
-
-  return visibleSteps;
-}
 
 function formatJsonLikeCodeBlock(value: string) {
   const trimmed = value.trim();
@@ -963,7 +796,7 @@ const ChatMessageItem = memo(
                 !insideThinkingToolGroup && "px-1",
               )}
             >
-              Parallel tool calls
+              {getToolBatchGroupLabel(group)}
             </div>
             <div className="grid gap-2">
               {group.steps.map(renderProcessStep)}

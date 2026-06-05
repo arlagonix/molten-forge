@@ -35,6 +35,8 @@ import {
 import {
   ASK_USER_TOOL,
   ASK_USER_TOOL_NAME,
+  CALL_AGENT_TOOL,
+  CALL_AGENT_TOOL_NAME,
   DEFAULT_AGENTS_SETTINGS,
   DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
@@ -581,6 +583,7 @@ export default function Home() {
 
     for (const tool of [
       ASK_USER_TOOL,
+      CALL_AGENT_TOOL,
       ...TASK_TOOLS,
       WEB_FETCH_TOOL,
       FILE_READ_TOOL,
@@ -620,11 +623,13 @@ export default function Home() {
       names.add(FILE_REPLACE_TEXT_TOOL_NAME);
     if (toolsSettings.fileCreateEnabled) names.add(FILE_CREATE_TOOL_NAME);
     if (toolsSettings.fileDeleteEnabled) names.add(FILE_DELETE_TOOL_NAME);
+    if (agentsSettings.enabled) names.add(CALL_AGENT_TOOL_NAME);
 
     for (const tool of loadedTools) {
       if (
         tool.enabled &&
         tool.name !== ASK_USER_TOOL_NAME &&
+        tool.name !== CALL_AGENT_TOOL_NAME &&
         !isTaskToolName(tool.name) &&
         tool.name !== WEB_FETCH_TOOL_NAME &&
         tool.name !== FILE_READ_TOOL_NAME &&
@@ -640,7 +645,7 @@ export default function Home() {
     }
 
     return names;
-  }, [loadedTools, toolsSettings]);
+  }, [agentsSettings.enabled, loadedTools, toolsSettings]);
 
   const activeChatEnabledToolNames = useMemo(() => {
     if (!activeChat) return [];
@@ -771,7 +776,7 @@ export default function Home() {
   const availableAgents = useMemo(() => {
     const byName = new Map<string, LoadedAgentInfo>();
 
-    for (const agent of createBuiltInAgents()) {
+    for (const agent of createBuiltInAgents(agentsSettings.builtInAgentMaxNestingDepths)) {
       byName.set(agent.name, agent);
     }
 
@@ -789,7 +794,7 @@ export default function Home() {
     return [...byName.values()].sort((left, right) =>
       left.name.localeCompare(right.name),
     );
-  }, [loadedAgents]);
+  }, [agentsSettings.builtInAgentMaxNestingDepths, loadedAgents]);
 
   const availableAgentsByName = useMemo(() => {
     return new Map(
@@ -2270,6 +2275,7 @@ export default function Home() {
         onToolsSettingsChange={setToolsSettings}
         loadedTools={loadedTools}
         onLoadedToolsChange={setLoadedTools}
+        callAgentEnabled={agentsSettings.enabled && availableAgents.some((agent) => agent.enabled)}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />

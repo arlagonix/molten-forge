@@ -7,6 +7,7 @@ import {
 import {
   ASK_USER_TOOL,
   ASK_USER_TOOL_NAME,
+  CALL_AGENT_TOOL_NAME,
   TASK_TOOLS,
   isTaskToolName,
   LOAD_SKILL_TOOL_NAME,
@@ -106,6 +107,7 @@ export function getGlobalEnabledTools({
         (tool) =>
           tool.enabled &&
           tool.name !== ASK_USER_TOOL_NAME &&
+          tool.name !== CALL_AGENT_TOOL_NAME &&
           !isTaskToolName(tool.name) &&
           tool.name !== LOAD_SKILL_TOOL_NAME &&
           tool.name !== WEB_FETCH_TOOL_NAME &&

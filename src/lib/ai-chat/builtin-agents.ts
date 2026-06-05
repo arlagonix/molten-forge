@@ -12,7 +12,23 @@ export function isBuiltInAgentName(name: string) {
   return (BUILTIN_AGENT_NAMES as readonly string[]).includes(name);
 }
 
-export function createBuiltInAgents(): LoadedAgentInfo[] {
+function normalizeBuiltInAgentMaxNestingDepth(value: unknown) {
+  const numberValue = Number(value);
+  return Number.isFinite(numberValue)
+    ? Math.min(Math.max(Math.round(numberValue), 1), 8)
+    : 2;
+}
+
+export function createBuiltInAgents(
+  maxNestingDepths: Partial<Record<string, number>> = {},
+): LoadedAgentInfo[] {
+  const generalMaxNestingDepth = normalizeBuiltInAgentMaxNestingDepth(
+    maxNestingDepths[BUILTIN_GENERAL_AGENT_NAME],
+  );
+  const generalFullMaxNestingDepth = normalizeBuiltInAgentMaxNestingDepth(
+    maxNestingDepths[BUILTIN_GENERAL_FULL_AGENT_NAME],
+  );
+
   return [
     {
       id: "builtin-agent-general",
@@ -23,7 +39,7 @@ export function createBuiltInAgents(): LoadedAgentInfo[] {
       instructions:
         "Complete the delegated task directly. Use only the details included in the task unless you need tools to inspect more information.",
       contextMode: "task_only",
-      maxNestingDepth: 2,
+      maxNestingDepth: generalMaxNestingDepth,
       loadedSkillNames: [],
       allowedToolNames: [],
       allowedAgentNames: [],
@@ -37,7 +53,7 @@ export function createBuiltInAgents(): LoadedAgentInfo[] {
       instructions:
         "Complete the delegated task directly. Use the full chat context when it matters, but keep the result focused on the requested subtask.",
       contextMode: "full_chat",
-      maxNestingDepth: 2,
+      maxNestingDepth: generalFullMaxNestingDepth,
       loadedSkillNames: [],
       allowedToolNames: [],
       allowedAgentNames: [],

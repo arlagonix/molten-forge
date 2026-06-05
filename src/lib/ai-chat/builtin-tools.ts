@@ -62,6 +62,7 @@ export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
 
 export const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
   enabled: true,
+  builtInAgentMaxNestingDepths: {},
 };
 
 export const ASK_USER_TOOL_NAME = "ask_user";
@@ -81,6 +82,34 @@ export const LOAD_SKILL_TOOL_NAME = "load_skill";
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
 export const CALL_AGENT_TOOL_NAME = "call_agent";
 export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
+
+export const CALL_AGENT_TOOL: LoadedToolInfo = {
+  id: "builtin-call-agent",
+  name: CALL_AGENT_TOOL_NAME,
+  enabled: true,
+  description:
+    "Delegates a focused subtask to one enabled agent. The runtime schema is rebuilt per chat so agentName is limited to currently available agents.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      agentName: {
+        type: "string",
+        description: "Name of the configured agent to call.",
+      },
+      task: {
+        type: "string",
+        description:
+          "Focused task for the agent. Include all important constraints and what output you need back.",
+      },
+    },
+    required: ["agentName", "task"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
 
 export {
   FILE_READ_TOOL_NAME,
@@ -257,7 +286,7 @@ export const FILE_READ_TOOL: LoadedToolInfo = {
   name: FILE_READ_TOOL_NAME,
   enabled: true,
   description:
-    "Read a UTF-8 text file from one of the chat workspace folders. Returns a 100-line window by default. Use offset to continue reading from a specific 1-based line number. The result includes startLine, endLine, totalLines, and nextOffset; nextOffset is null at the end of the file. The tool cannot read outside approved workspace roots.",
+    "Read a UTF-8 text file from one of the chat workspace folders. By default, reads the whole file. For targeted or large-file reads, provide offset and/or limit. If offset is provided without limit, returns a 100-line window. The result includes startLine, endLine, totalLines, and nextOffset; nextOffset is null at the end of the selected range/file. The tool cannot read outside approved workspace roots.",
   parameters: {
     type: "object",
     additionalProperties: false,
@@ -275,7 +304,12 @@ export const FILE_READ_TOOL: LoadedToolInfo = {
       offset: {
         type: "number",
         description:
-          "Optional 1-based starting line number for the 100-line read window. Defaults to 1. Use nextOffset from the previous result to continue reading.",
+          "Optional 1-based starting line number. When provided without limit, reads 100 lines. Use nextOffset from the previous result to continue reading.",
+      },
+      limit: {
+        type: "number",
+        description:
+          "Optional number of lines to read, up to 10000. Omit offset and limit to read the whole file.",
       },
     },
     required: ["path"],
@@ -569,6 +603,7 @@ export function createLoadSkillTool(
     description: [
       "Load the full instructions for one relevant skill and activate it for this chat.",
       "Use this when a skill would materially improve the answer. Do not load skills unnecessarily. Do not load a skill that is already active.",
+      "If the user explicitly mentions a skill with @skill:name, the app loads that skill before generation starts. Do not call load_skill for that mentioned skill; continue directly using the active skill instructions.",
       "Available skills:",
       skillList,
     ].join("\n"),

@@ -274,7 +274,10 @@ export const AgentsDialog = memo(function AgentsDialog({
   const [agentSearch, setAgentSearch] = useState("");
   const [instructionsEditorOpen, setInstructionsEditorOpen] = useState(false);
 
-  const builtInAgents = useMemo(() => createBuiltInAgents(), []);
+  const builtInAgents = useMemo(
+    () => createBuiltInAgents(agentsSettings.builtInAgentMaxNestingDepths),
+    [agentsSettings.builtInAgentMaxNestingDepths],
+  );
   const displayedAgents = useMemo(
     () => [
       ...builtInAgents,
@@ -338,6 +341,24 @@ export const AgentsDialog = memo(function AgentsDialog({
 
   function updateAgentDraft(patch: Partial<AgentDraft>) {
     setAgentDraft((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  function updateMaxNestingDepth(value: string) {
+    updateAgentDraft({ maxNestingDepth: value });
+
+    if (!selectedAgentIsBuiltIn || !selectedAgent) return;
+
+    const rawDepth = Number(value);
+    if (!Number.isFinite(rawDepth)) return;
+
+    const maxNestingDepth = Math.min(Math.max(Math.round(rawDepth), 1), 8);
+    onAgentsSettingsChange((current) => ({
+      ...current,
+      builtInAgentMaxNestingDepths: {
+        ...(current.builtInAgentMaxNestingDepths ?? {}),
+        [selectedAgent.name]: maxNestingDepth,
+      },
+    }));
   }
 
   const hasAgentDraftChanges = useMemo(() => {
@@ -972,15 +993,14 @@ export const AgentsDialog = memo(function AgentsDialog({
                           max={8}
                           value={agentDraft.maxNestingDepth}
                           onChange={(event) =>
-                            updateAgentDraft({ maxNestingDepth: event.target.value })
+                            updateMaxNestingDepth(event.target.value)
                           }
-                          disabled={selectedAgentIsBuiltIn}
                         />
                       </div>
 
                       {selectedAgentIsBuiltIn ? (
                         <div className="border bg-muted/25 px-3 py-2 text-sm leading-5 text-muted-foreground">
-                          Built-in agents mirror the current chat's effective tools, skills, and allowed agents at runtime, so there is no separate permission list to edit here.
+                          Built-in agents mirror the current chat's effective tools, skills, and allowed agents at runtime, so only their max nesting depth is editable here.
                         </div>
                       ) : (
                         <>

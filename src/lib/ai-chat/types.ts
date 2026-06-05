@@ -174,6 +174,15 @@ export type ChatAgentCall = {
   toolCalls?: ChatToolCall[];
   toolResults?: ChatToolResult[];
   childAgentCalls: ChatAgentCall[];
+  /**
+   * Ordered timeline of this agent run (thinking, tool executions, nested
+   * agent calls, assistant text, interactive steps), mirroring the main
+   * chat's `ChatAssistantVariant.processSteps`. Newer agent calls populate
+   * this so the transcript can faithfully reconstruct interleaving; older
+   * persisted calls may omit it, in which case the transcript falls back to
+   * the flat `reasoning`/`toolCalls`/`output` fields.
+   */
+  processSteps?: ChatAssistantProcessStep[];
 };
 
 export type AskUserOption = {
@@ -587,6 +596,7 @@ export type SkillsSettings = {
 
 export type AgentsSettings = {
   enabled: boolean;
+  builtInAgentMaxNestingDepths?: Record<string, number>;
 };
 
 export type ToolsState = {

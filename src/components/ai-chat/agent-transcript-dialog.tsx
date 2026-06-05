@@ -17,6 +17,13 @@ import {
   ASK_USER_TOOL_NAME,
   parseAskUserRequestFromToolCall,
 } from "@/lib/ai-chat/builtin-tools";
+import {
+  getToolBatchGroupLabel,
+  getVisibleAssistantProcessSteps,
+  groupVisibleAssistantProcessSteps,
+  type VisibleAssistantProcessStep,
+  type VisibleAssistantProcessStepGroup,
+} from "@/lib/ai-chat/process-step-groups";
 import type {
   AgentCallStatus,
   AskUserResponse,
@@ -299,14 +306,28 @@ type AgentTranscriptBodyProps = {
   onOpenChildAgent: (agentCallId: string) => void;
 } & AgentInteractionProps;
 
-function AgentTranscriptBody({
+function AgentTranscriptBody(props: AgentTranscriptBodyProps) {
+  const hasOrderedSteps = (props.agentCall.processSteps?.length ?? 0) > 0;
+
+  return (
+    <div className={cn("grid gap-4", props.nested && "gap-3")}>
+      <MiniChatMessage role="user" content={props.agentCall.task} />
+      {hasOrderedSteps ? (
+        <AgentTranscriptStepsBody {...props} />
+      ) : (
+        <AgentTranscriptFlatBody {...props} />
+      )}
+    </div>
+  );
+}
+
+function AgentTranscriptFlatBody({
   agentCall,
   renderToolExecutionBlock,
   canSubmitAskUserResponse,
   onSubmitAskUserResponse,
   onCancelAskUserRequest,
   onAskUserLayoutChange,
-  nested = false,
   onOpenChildAgent,
 }: AgentTranscriptBodyProps) {
   const visibleToolCalls = agentCall.toolCalls ?? [];
@@ -351,9 +372,7 @@ function AgentTranscriptBody({
     : (thinkingCompletedAt ?? agentCall.completedAt);
 
   return (
-    <div className={cn("grid gap-4", nested && "gap-3")}>
-      <MiniChatMessage role="user" content={agentCall.task} />
-
+    <>
       {agentCall.reasoning?.trim() ? (
         <ThinkingBlock
           id={`${agentCall.id}:thinking`}
@@ -464,7 +483,289 @@ function AgentTranscriptBody({
             : "No runtime output recorded."}
         </div>
       ) : null}
-    </div>
+    </>
+  );
+}
+
+function AgentTranscriptStepsBody({
+  agentCall,
+  renderToolExecutionBlock,
+  canSubmitAskUserResponse,
+  onSubmitAskUserResponse,
+  onCancelAskUserRequest,
+  onAskUserLayoutChange,
+  onOpenChildAgent,
+}: AgentTranscriptBodyProps) {
+  const [collapsedInteractionIds, setCollapsedInteractionIds] = useState<
+    Record<string, boolean>
+  >({});
+  const [thinkingCollapsedIds, setThinkingCollapsedIds] = useState<
+    Record<string, boolean>
+  >({});
+
+  const processSteps = agentCall.processSteps ?? [];
+  const visibleSteps = getVisibleAssistantProcessSteps(processSteps);
+  const groups = groupVisibleAssistantProcessSteps(visibleSteps);
+  const lastStepId = visibleSteps[visibleSteps.length - 1]?.sourceStepIds.at(-1);
+  const agentRunning =
+    agentCall.status === "running" || agentCall.status === "pending";
+
+  const childById = new Map(
+    (agentCall.childAgentCalls ?? []).map((child) => [child.id, child]),
+  );
+
+  const renderStep = (step: VisibleAssistantProcessStep): ReactNode => {
+    if (step.type === "thinking") {
+      if (!step.content.trim()) return null;
+      const isLast = step.sourceStepIds.includes(lastStepId ?? "");
+      const isStreaming = agentRunning && isLast;
+      const manualCollapsed = thinkingCollapsedIds[step.id];
+      const isCollapsed = manualCollapsed ?? !isStreaming;
+      return (
+        <ThinkingBlock
+          key={step.id}
+          id={step.id}
+          content={step.content}
+          status={step.status}
+          startedAt={step.startedAt}
+          completedAt={step.completedAt}
+          isStreaming={isStreaming}
+          isCollapsed={isCollapsed}
+          flushVersion={0}
+          forceInstant
+          onToggleCollapsed={() =>
+            setThinkingCollapsedIds((current) => ({
+              ...current,
+              [step.id]: !isCollapsed,
+            }))
+          }
+        />
+      );
+    }
+
+    if (step.type === "assistant_message") {
+      if (!step.content.trim()) return null;
+      return <MiniChatMessage key={step.id} role="assistant" content={step.content} />;
+    }
+
+    if (step.type === "agent_call") {
+      const liveChild = childById.get(step.agentCall.id) ?? step.agentCall;
+      return (
+        <ChildAgentBlock
+          key={step.id}
+          child={liveChild}
+          canSubmitAskUserResponse={canSubmitAskUserResponse}
+          onOpenChildAgent={onOpenChildAgent}
+        />
+      );
+    }
+
+    if (step.type === "user_input") {
+      const manualCollapsed = collapsedInteractionIds[step.id];
+      const isCollapsed = manualCollapsed ?? step.status !== "waiting";
+      return (
+        <AskUserBlock
+          key={step.id}
+          id={step.id}
+          request={step.request}
+          response={step.response}
+          status={step.status ?? "waiting"}
+          canSubmit={canSubmitAskUserResponse(step.toolCall.id)}
+          isCollapsed={isCollapsed}
+          onToggleCollapsed={() =>
+            setCollapsedInteractionIds((current) => ({
+              ...current,
+              [step.id]: !isCollapsed,
+            }))
+          }
+          onSubmit={(response) =>
+            onSubmitAskUserResponse(step.toolCall, step.request, response)
+          }
+          onCancel={() => onCancelAskUserRequest(step.toolCall.id)}
+          onLayoutChange={onAskUserLayoutChange}
+        />
+      );
+    }
+
+    if (step.type === "tool_execution") {
+      const isAskUser = step.toolCall.function.name === ASK_USER_TOOL_NAME;
+      if (isAskUser) {
+        try {
+          const request = parseAskUserRequestFromToolCall(step.toolCall);
+          const canSubmit = canSubmitAskUserResponse(step.toolCall.id);
+          const status = getAskUserStatus({
+            agentStatus: agentCall.status,
+            canSubmit,
+            toolResult: step.toolResult,
+          });
+          const manualCollapsed = collapsedInteractionIds[step.id];
+          const isCollapsed = manualCollapsed ?? status !== "waiting";
+          return (
+            <AskUserBlock
+              key={step.id}
+              id={step.id}
+              request={request}
+              response={parseAskUserResponseFromToolResult(step.toolResult)}
+              status={status}
+              canSubmit={canSubmit}
+              isCollapsed={isCollapsed}
+              onToggleCollapsed={() =>
+                setCollapsedInteractionIds((current) => ({
+                  ...current,
+                  [step.id]: !isCollapsed,
+                }))
+              }
+              onSubmit={(response) =>
+                onSubmitAskUserResponse(step.toolCall, request, response)
+              }
+              onCancel={() => onCancelAskUserRequest(step.toolCall.id)}
+              onLayoutChange={onAskUserLayoutChange}
+            />
+          );
+        } catch {
+          // Fall through to a normal tool block.
+        }
+      }
+
+      const manualCollapsed = collapsedInteractionIds[step.id];
+      const isCollapsed = manualCollapsed ?? true;
+      return renderToolExecutionBlock ? (
+        renderToolExecutionBlock({
+          id: step.id,
+          toolCall: step.toolCall,
+          toolResult: step.toolResult,
+          status:
+            step.status ??
+            (step.toolResult
+              ? step.toolResult.isError
+                ? "failed"
+                : "complete"
+              : "running"),
+          isCollapsed,
+          onToggleCollapsed: (stepId, nextCollapsed) =>
+            setCollapsedInteractionIds((current) => ({
+              ...current,
+              [stepId]: nextCollapsed,
+            })),
+        })
+      ) : (
+        <FallbackToolCallBlock
+          key={step.id}
+          toolCall={step.toolCall}
+          toolResult={step.toolResult}
+        />
+      );
+    }
+
+    if (step.type === "approval" || step.type === "file_approval") {
+      const manualCollapsed = collapsedInteractionIds[step.id];
+      const isCollapsed = manualCollapsed ?? step.status !== "waiting";
+      // Approval prompts are actioned at the main-chat level; here we show a
+      // read-only collapsed tool block reflecting the call for context.
+      return renderToolExecutionBlock ? (
+        renderToolExecutionBlock({
+          id: step.id,
+          toolCall: step.toolCall,
+          toolResult: step.toolResult,
+          status: step.toolResult
+            ? step.toolResult.isError
+              ? "failed"
+              : "complete"
+            : "running",
+          isCollapsed,
+          onToggleCollapsed: (stepId, nextCollapsed) =>
+            setCollapsedInteractionIds((current) => ({
+              ...current,
+              [stepId]: nextCollapsed,
+            })),
+        })
+      ) : (
+        <FallbackToolCallBlock key={step.id} toolCall={step.toolCall} />
+      );
+    }
+
+    if (step.type === "tasks") {
+      return renderToolExecutionBlock ? (
+        renderToolExecutionBlock({
+          id: step.id,
+          toolCall: step.toolCall,
+          toolResult: step.toolResult,
+          status: step.status === "failed" ? "failed" : "complete",
+          isCollapsed: collapsedInteractionIds[step.id] ?? false,
+          onToggleCollapsed: (stepId, nextCollapsed) =>
+            setCollapsedInteractionIds((current) => ({
+              ...current,
+              [stepId]: nextCollapsed,
+            })),
+        })
+      ) : (
+        <FallbackToolCallBlock key={step.id} toolCall={step.toolCall} />
+      );
+    }
+
+    return null;
+  };
+
+  const renderBaseGroup = (
+    group: VisibleAssistantProcessStepGroup,
+    options?: { insideThinkingToolGroup?: boolean },
+  ): ReactNode => {
+    if (group.kind === "tool_batch") {
+      const insideThinkingToolGroup = Boolean(options?.insideThinkingToolGroup);
+      return (
+        <div
+          key={group.toolBatchId}
+          className={cn(
+            "grid gap-2 bg-transparent",
+            insideThinkingToolGroup
+              ? ""
+              : "border border-dashed px-2 py-2 shadow-xs",
+          )}
+        >
+          <div
+            className={cn(
+              "text-xs font-medium uppercase tracking-wide text-muted-foreground/80",
+              !insideThinkingToolGroup && "px-1",
+            )}
+          >
+            {getToolBatchGroupLabel(group)}
+          </div>
+          <div className="grid gap-2">{group.steps.map(renderStep)}</div>
+        </div>
+      );
+    }
+
+    if (group.kind === "thinking_tool_group") {
+      return (
+        <div
+          key={`${group.thinkingStep.id}:tool-group`}
+          className="grid gap-2 border border-dashed bg-muted/10 px-2 py-2 shadow-xs"
+        >
+          {renderStep(group.thinkingStep)}
+          {group.toolGroups.map((toolGroup) =>
+            renderBaseGroup(toolGroup, { insideThinkingToolGroup: true }),
+          )}
+        </div>
+      );
+    }
+
+    return renderStep(group.step);
+  };
+
+  const hasAnyContent = visibleSteps.length > 0;
+
+  return (
+    <>
+      {groups.map((group) => renderBaseGroup(group))}
+
+      {!hasAnyContent ? (
+        <div className="border bg-muted/35 px-3 py-2 text-base text-muted-foreground">
+          {agentRunning
+            ? "Waiting for agent output..."
+            : "No runtime output recorded."}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -488,8 +789,20 @@ function ChildAgentBlock({
 
   return (
     <article className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden border bg-muted/25 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
-        <div className="flex min-w-0 items-start justify-between gap-3">
+      <div
+        role="button"
+        tabIndex={0}
+        className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+        onClick={() => onOpenChildAgent(child.id)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onOpenChildAgent(child.id);
+          }
+        }}
+        title="Open agent run"
+      >
+        <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
               <Bot className="size-3.5 shrink-0" />
@@ -509,12 +822,16 @@ function ChildAgentBlock({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            className="h-7 shrink-0 px-2 text-xs"
-            onClick={() => onOpenChildAgent(child.id)}
+            size="icon-sm"
+            className="h-7 w-7 shrink-0"
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenChildAgent(child.id);
+            }}
+            title="Open agent run"
+            aria-label="Open agent run"
           >
             <Maximize2 className="size-3.5" />
-            Expand
           </Button>
         </div>
       </div>

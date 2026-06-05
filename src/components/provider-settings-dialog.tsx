@@ -974,7 +974,7 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
                     </Button>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-5">
+                  <div className="grid gap-4">
                     <div className="grid gap-2">
                       <Label htmlFor="generation-temperature">
                         Temperature
@@ -1106,33 +1106,22 @@ export const ProviderSettingsDialog = memo(function ProviderSettingsDialog({
 
                 <Separator />
 
-                <div className="grid gap-3">
-                  <div>
-                    <Label>Context size</Label>
-                    <p className="mt-1 text-sm leading-5 text-muted-foreground">
-                      Set the context limit used by the context counter. Leave
-                      empty when you do not know it.
-                    </p>
-                  </div>
-
-                  <div className="grid max-w-sm gap-2">
-                    <Label htmlFor="manual-context-size">
-                      Manual context size
-                    </Label>
-                    <Input
-                      id="manual-context-size"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={formatOptionalNumber(
-                        selectedModelConfig?.context?.manualContextLength,
-                      )}
-                      onChange={(event) =>
-                        updateSelectedModelManualContext(event.target.value)
-                      }
-                      placeholder="No manual override"
-                    />
-                  </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="manual-context-size">Context size</Label>
+                  <Input
+                    id="manual-context-size"
+                    type="number"
+                    min="1"
+                    step="1"
+                    className="w-full"
+                    value={formatOptionalNumber(
+                      selectedModelConfig?.context?.manualContextLength,
+                    )}
+                    onChange={(event) =>
+                      updateSelectedModelManualContext(event.target.value)
+                    }
+                    placeholder="No manual override"
+                  />
                 </div>
               </div>
             )}
