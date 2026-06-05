@@ -767,3 +767,11 @@
     @apply min-h-[480px];
   }
 }
+
+/* Keep the toast *container* above modal overlays and dialog shadows.
+   Do NOT set z-index on individual [data-sonner-toast] elements: Sonner
+   assigns each toast its own z-index to manage the stack, and forcing them
+   all equal makes new toasts render behind old ones (blank ghost cards). */
+[data-sonner-toaster] {
+  z-index: 2147483647 !important;
+}

@@ -7,8 +7,14 @@
 // cannot escape a root.
 
 import { shell } from "electron";
+import Seven from "node-7z";
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
+import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
+import pdfParse from "pdf-parse";
 
 import {
   FILE_READ_TOOL_NAME,
@@ -17,6 +23,10 @@ import {
   FILE_REPLACE_TEXT_TOOL_NAME,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL_NAME,
+  ARCHIVE_EXTRACT_TOOL_NAME,
+  ARCHIVE_CREATE_TOOL_NAME,
+  DOCUMENT_CONVERT_TOOL_NAME,
+  CHAT_FILE_CREATE_TOOL_NAME,
 } from "../src/lib/ai-chat/file-tool-names";
 import {
   getErrorMessage,
@@ -49,6 +59,18 @@ type FileToolChangePreview = {
   rows: FileToolChangePreviewRow[];
 };
 
+type GeneratedFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  rootId: string;
+  workspacePath: string;
+  storagePath?: string;
+  createdAt: string;
+  description?: string;
+};
+
 type FileToolResult = {
   content: string;
   isError: boolean;
@@ -57,6 +79,7 @@ type FileToolResult = {
   stderr: string;
   timedOut: false;
   changePreview?: FileToolChangePreview;
+  generatedFiles?: GeneratedFile[];
 };
 
 const FILE_TOOL_DEFAULT_READ_WINDOW_LINES = 100;
@@ -79,6 +102,10 @@ const FILE_TOOL_DEFAULT_EXCLUDES = new Set([
   ".turbo",
 ]);
 const FILE_TOOL_TEXT_SAMPLE_BYTES = 64 * 1024;
+const CHAT_WORKSPACE_ROOT_ID = "chat";
+const CHAT_FILE_MAX_TEXT_BYTES = 10_000_000;
+const ARCHIVE_TOOL_MAX_LISTED_FILES = 500;
+const require = createRequire(import.meta.url);
 const FILE_TOOL_TEXT_EXTENSIONS = new Set([
   ".astro",
   ".bash",
@@ -423,6 +450,7 @@ function buildFileToolResult(
   payload: unknown,
   isError = false,
   changePreview?: FileToolChangePreview,
+  generatedFiles?: GeneratedFile[],
 ): FileToolResult {
   const content = stringifyToolResult(payload);
   return {
@@ -433,6 +461,7 @@ function buildFileToolResult(
     stderr: isError ? content : "",
     timedOut: false,
     changePreview,
+    generatedFiles,
   };
 }
 
@@ -1287,6 +1316,457 @@ async function executeFileCreateTool(
   );
 }
 
+function getPathTo7za() {
+  const candidatePaths = [
+    require("7zip-bin").path7za,
+    process.platform === "win32" ? "7z.exe" : "7z",
+  ].filter((item): item is string => typeof item === "string" && item.length > 0);
+  return candidatePaths[0] ?? "7z";
+}
+
+function sanitizeFileNamePart(value: string) {
+  const trimmed = value.trim() || "file";
+  const sanitized = trimmed
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+  return sanitized || "file";
+}
+
+function inferMimeType(fileName: string, fallback = "application/octet-stream") {
+  const ext = path.extname(fileName).toLowerCase();
+  const mapping: Record<string, string> = {
+    ".txt": "text/plain",
+    ".md": "text/markdown",
+    ".markdown": "text/markdown",
+    ".json": "application/json",
+    ".csv": "text/csv",
+    ".html": "text/html",
+    ".htm": "text/html",
+    ".xml": "application/xml",
+    ".yaml": "application/yaml",
+    ".yml": "application/yaml",
+    ".zip": "application/zip",
+    ".pdf": "application/pdf",
+  };
+  return mapping[ext] ?? fallback;
+}
+
+async function safeUniquePath(directory: string, fileName: string) {
+  const parsed = path.parse(sanitizeFileNamePart(fileName));
+  const base = parsed.name || "file";
+  const ext = parsed.ext;
+
+  for (let index = 0; index < 1000; index += 1) {
+    const candidateName = index === 0 ? `${base}${ext}` : `${base}-${index + 1}${ext}`;
+    const candidatePath = path.join(directory, candidateName);
+    try {
+      await fs.lstat(candidatePath);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code === "ENOENT") return candidatePath;
+      throw error;
+    }
+  }
+
+  return path.join(directory, `${base}-${randomUUID()}${ext}`);
+}
+
+async function findChatWorkspaceRoot(context: ToolExecutionContext) {
+  const roots = normalizeWorkspaceRoots(context.workspaceRoots);
+  const chatRoot = roots.find((root) => root.id === CHAT_WORKSPACE_ROOT_ID);
+  if (!chatRoot) {
+    throw new Error("Chat workspace root is not available for this tool.");
+  }
+  return getRealWorkspaceRoot(chatRoot);
+}
+
+async function ensureWorkspaceDirectoryTarget({
+  root,
+  requestedPath,
+  defaultPath,
+}: {
+  root: WorkspaceRoot & { realPath: string };
+  requestedPath?: string;
+  defaultPath: string;
+}) {
+  const effectivePath = requestedPath?.trim() || defaultPath;
+  const targetPath = path.isAbsolute(effectivePath)
+    ? path.resolve(effectivePath)
+    : path.resolve(root.realPath, effectivePath);
+
+  if (!pathIsInside(root.realPath, targetPath)) {
+    throw new Error("The requested output folder is outside the approved workspace root.");
+  }
+
+  if (requestedPath?.trim()) {
+    try {
+      await fs.lstat(targetPath);
+      throw new Error(`Output path already exists: ${requestedPath}`);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code !== "ENOENT") throw error;
+    }
+  }
+
+  await fs.mkdir(targetPath, { recursive: true });
+  const realTargetPath = await fs.realpath(targetPath);
+  if (!pathIsInside(root.realPath, realTargetPath)) {
+    throw new Error("The requested output folder resolves outside the approved workspace root.");
+  }
+
+  return {
+    absolutePath: targetPath,
+    realPath: realTargetPath,
+    relativePath: path.relative(root.realPath, realTargetPath) || ".",
+  };
+}
+
+async function executeArchiveExtractTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
+  const requestedPath = readRequiredString(args, "path");
+  const rootId = readOptionalString(args, "rootId");
+  const outputPath = readOptionalString(args, "outputPath");
+  const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
+  const stats = await fs.stat(target.realPath);
+  if (!stats.isFile()) throw new Error("archive_extract requires a file path.");
+
+  const output = await ensureWorkspaceDirectoryTarget({
+    root: target.root,
+    requestedPath: outputPath,
+    defaultPath: path.join("extracted", randomUUID()),
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    const stream = Seven.extractFull(target.realPath, output.realPath, {
+      $bin: getPathTo7za(),
+      recursive: true,
+    });
+    stream.on("end", () => resolve());
+    stream.on("error", reject);
+  });
+
+  const extractedFiles = await collectWorkspaceFiles({
+    context: { workspaceRoots: [{ ...target.root, path: output.realPath }] },
+    include: [],
+    exclude: [],
+    maxResults: ARCHIVE_TOOL_MAX_LISTED_FILES,
+    includeDirectories: false,
+  });
+
+  return buildFileToolResult({
+    ok: true,
+    rootId: target.root.id,
+    rootName: target.root.name,
+    archivePath: target.relativePath,
+    outputPath: output.relativePath.split(path.sep).join("/"),
+    count: extractedFiles.length,
+    truncated: extractedFiles.length >= ARCHIVE_TOOL_MAX_LISTED_FILES,
+    files: extractedFiles.slice(0, 100).map((file) => path.posix.join(output.relativePath.split(path.sep).join("/"), file.relativePath.split(path.sep).join("/"))),
+  });
+}
+
+async function run7ZipAdd({
+  cwd,
+  archivePath,
+  relativePaths,
+}: {
+  cwd: string;
+  archivePath: string;
+  relativePaths: string[];
+}) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(getPathTo7za(), ["a", "-tzip", archivePath, ...relativePaths], {
+      cwd,
+      windowsHide: true,
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(stderr.trim() || `7zip exited with code ${code}`));
+    });
+  });
+}
+
+async function stageArchiveTargets(
+  targets: Awaited<ReturnType<typeof resolveWorkspaceTarget>>[],
+) {
+  const stagingDirectory = await fs.mkdtemp(
+    path.join(os.tmpdir(), "chat-forge-archive-"),
+  );
+  const stagedNames: string[] = [];
+  const usedNames = new Set<string>();
+
+  try {
+    for (const target of targets) {
+      const baseName = sanitizeFileNamePart(path.basename(target.relativePath));
+      const uniqueName = await uniqueStagingName(stagingDirectory, baseName, usedNames);
+      usedNames.add(uniqueName.toLowerCase());
+      const destination = path.join(stagingDirectory, uniqueName);
+      const stats = await fs.stat(target.realPath);
+
+      if (stats.isDirectory()) {
+        await fs.cp(target.realPath, destination, { recursive: true });
+      } else if (stats.isFile()) {
+        await fs.copyFile(target.realPath, destination);
+      } else {
+        throw new Error(`Unsupported archive source: ${target.relativePath}`);
+      }
+
+      stagedNames.push(uniqueName);
+    }
+
+    return { stagingDirectory, stagedNames };
+  } catch (error) {
+    await fs.rm(stagingDirectory, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+async function pathExists(targetPath: string) {
+  try {
+    await fs.lstat(targetPath);
+    return true;
+  } catch (error) {
+    const code =
+      typeof error === "object" && error && "code" in error
+        ? (error as { code?: string }).code
+        : undefined;
+    if (code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+async function uniqueStagingName(
+  directory: string,
+  baseName: string,
+  usedNames: Set<string>,
+) {
+  const parsed = path.parse(baseName || "file");
+  let candidate = baseName || "file";
+  let index = 1;
+
+  while (
+    usedNames.has(candidate.toLowerCase()) ||
+    (await pathExists(path.join(directory, candidate)))
+  ) {
+    candidate = `${parsed.name || "file"}-${index}${parsed.ext}`;
+    index += 1;
+  }
+
+  return candidate;
+}
+
+async function executeArchiveCreateTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
+  const sourcePaths = readOptionalStringArray(args, "paths");
+  if (!sourcePaths.length) throw new Error("archive_create requires paths.");
+  const rootId = readOptionalString(args, "rootId");
+  const filename = readOptionalString(args, "filename") ?? "generated-files.zip";
+  const safeFilename = sanitizeFileNamePart(
+    filename.toLowerCase().endsWith(".zip") ? filename : `${filename}.zip`,
+  );
+
+  const targets = [] as Awaited<ReturnType<typeof resolveWorkspaceTarget>>[];
+  for (const sourcePath of sourcePaths) {
+    targets.push(await resolveWorkspaceTarget(context, sourcePath, rootId));
+  }
+
+  const chatRoot = await findChatWorkspaceRoot(context);
+  const artifactId = randomUUID();
+  const outputDirectory = path.join(chatRoot.realPath, "generated", artifactId);
+  await fs.mkdir(outputDirectory, { recursive: true });
+  const outputPath = await safeUniquePath(outputDirectory, safeFilename);
+  const staged = await stageArchiveTargets(targets);
+
+  try {
+    await run7ZipAdd({
+      cwd: staged.stagingDirectory,
+      archivePath: outputPath,
+      relativePaths: staged.stagedNames,
+    });
+  } finally {
+    await fs.rm(staged.stagingDirectory, { recursive: true, force: true });
+  }
+
+  const outputStats = await fs.stat(outputPath);
+  const workspacePath = path.relative(chatRoot.realPath, outputPath).split(path.sep).join("/");
+  const generatedFile: GeneratedFile = {
+    id: artifactId,
+    name: path.basename(outputPath),
+    mimeType: "application/zip",
+    sizeBytes: outputStats.size,
+    rootId: chatRoot.id,
+    workspacePath,
+    storagePath: outputPath,
+    createdAt: new Date().toISOString(),
+    description: "Generated ZIP archive",
+  };
+
+  return buildFileToolResult(
+    {
+      ok: true,
+      artifact: generatedFile,
+      sourcePaths: targets.map((target) => ({ rootId: target.root.id, path: target.relativePath })),
+      archivedNames: staged.stagedNames,
+      note: "The ZIP contains only the selected files/folders at the archive root, not their full workspace parent paths.",
+    },
+    false,
+    undefined,
+    [generatedFile],
+  );
+}
+
+async function convertOfficeDocument(filePath: string) {
+  const officeParser = await import("officeparser");
+  const parseOfficeAsync =
+    (officeParser as { parseOfficeAsync?: (filePath: string, config?: unknown) => Promise<unknown> }).parseOfficeAsync ??
+    ((officeParser as { default?: { parseOfficeAsync?: (filePath: string, config?: unknown) => Promise<unknown> } }).default?.parseOfficeAsync);
+
+  if (!parseOfficeAsync) {
+    throw new Error("officeparser is installed but does not expose parseOfficeAsync.");
+  }
+
+  const parsed = await parseOfficeAsync(filePath);
+  return String(parsed ?? "");
+}
+
+async function executeDocumentConvertTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
+  const requestedPath = readRequiredString(args, "path");
+  const rootId = readOptionalString(args, "rootId");
+  const requestedOutputPath = readOptionalString(args, "outputPath");
+  const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
+  const stats = await fs.stat(target.realPath);
+  if (!stats.isFile()) throw new Error("document_convert requires a file path.");
+
+  const extension = path.extname(target.realPath).toLowerCase();
+  let content = "";
+  let outputExtension = ".md";
+
+  if (extension === ".pdf") {
+    const parsed = await pdfParse(await fs.readFile(target.realPath));
+    content = parsed.text ?? "";
+    outputExtension = ".txt";
+  } else if (
+    [".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf"].includes(extension)
+  ) {
+    content = await convertOfficeDocument(target.realPath);
+    outputExtension = ".md";
+  } else {
+    await assertTextFile(target.realPath, FILE_TOOL_MAX_TEXT_FILE_BYTES);
+    content = await fs.readFile(target.realPath, "utf8");
+    outputExtension = [".csv", ".txt"].includes(extension) ? ".txt" : ".md";
+  }
+
+  if (!content.trim()) {
+    throw new Error("No readable text was extracted from this document.");
+  }
+
+  if (Buffer.byteLength(content, "utf8") > CHAT_FILE_MAX_TEXT_BYTES) {
+    content = content.slice(0, CHAT_FILE_MAX_TEXT_BYTES);
+  }
+
+  let outputAbsolutePath: string;
+  let outputRelativePath: string;
+  if (requestedOutputPath) {
+    const outputTarget = await resolveWorkspaceTargetForCreate(
+      context,
+      requestedOutputPath,
+      target.root.id,
+      true,
+    );
+    outputAbsolutePath = outputTarget.absolutePath;
+    outputRelativePath = outputTarget.relativePath;
+  } else {
+    const outputDirectory = path.join(target.root.realPath, "converted");
+    await fs.mkdir(outputDirectory, { recursive: true });
+    outputAbsolutePath = await safeUniquePath(
+      outputDirectory,
+      `${target.relativePath.split(path.sep).join("__")}${outputExtension}`,
+    );
+    outputRelativePath = path.relative(target.root.realPath, outputAbsolutePath);
+  }
+
+  await fs.writeFile(outputAbsolutePath, content, "utf8");
+
+  return buildFileToolResult({
+    ok: true,
+    rootId: target.root.id,
+    rootName: target.root.name,
+    sourcePath: target.relativePath,
+    outputPath: outputRelativePath.split(path.sep).join("/"),
+    bytesBefore: stats.size,
+    bytesAfter: Buffer.byteLength(content, "utf8"),
+    note: "Use file_read on outputPath to inspect the converted text.",
+  });
+}
+
+async function executeChatFileCreateTool(
+  args: unknown,
+  context: ToolExecutionContext,
+) {
+  const filename = readRequiredString(args, "filename");
+  const content = readOptionalString(args, "content") ?? "";
+  const mimeType = readOptionalString(args, "mimeType") ?? inferMimeType(filename, "text/plain");
+  const description = readOptionalString(args, "description");
+
+  if (Buffer.byteLength(content, "utf8") > CHAT_FILE_MAX_TEXT_BYTES) {
+    throw new Error(`Content is too large. Maximum is ${CHAT_FILE_MAX_TEXT_BYTES} bytes.`);
+  }
+
+  const safeFilename = sanitizeFileNamePart(filename);
+  if (!isLikelyTextFile(safeFilename)) {
+    throw new Error("chat_file_create currently supports text-like filenames only.");
+  }
+
+  const chatRoot = await findChatWorkspaceRoot(context);
+  const artifactId = randomUUID();
+  const outputDirectory = path.join(chatRoot.realPath, "generated", artifactId);
+  await fs.mkdir(outputDirectory, { recursive: true });
+  const outputPath = await safeUniquePath(outputDirectory, safeFilename);
+  await fs.writeFile(outputPath, content, "utf8");
+  const outputStats = await fs.stat(outputPath);
+  const workspacePath = path.relative(chatRoot.realPath, outputPath).split(path.sep).join("/");
+  const generatedFile: GeneratedFile = {
+    id: artifactId,
+    name: path.basename(outputPath),
+    mimeType,
+    sizeBytes: outputStats.size,
+    rootId: chatRoot.id,
+    workspacePath,
+    storagePath: outputPath,
+    createdAt: new Date().toISOString(),
+    description,
+  };
+
+  return buildFileToolResult(
+    {
+      ok: true,
+      artifact: generatedFile,
+    },
+    false,
+    undefined,
+    [generatedFile],
+  );
+}
+
 async function executeFileDeleteTool(
   args: unknown,
   context: ToolExecutionContext,
@@ -1355,6 +1835,14 @@ export async function executeFileTool(
       return executeFileCreateTool(args, context);
     if (toolName === FILE_DELETE_TOOL_NAME)
       return executeFileDeleteTool(args, context);
+    if (toolName === ARCHIVE_EXTRACT_TOOL_NAME)
+      return executeArchiveExtractTool(args, context);
+    if (toolName === ARCHIVE_CREATE_TOOL_NAME)
+      return executeArchiveCreateTool(args, context);
+    if (toolName === DOCUMENT_CONVERT_TOOL_NAME)
+      return executeDocumentConvertTool(args, context);
+    if (toolName === CHAT_FILE_CREATE_TOOL_NAME)
+      return executeChatFileCreateTool(args, context);
     throw new Error(`Unknown file tool: ${toolName}`);
   } catch (error) {
     const payload = { ok: false, error: getErrorMessage(error) };

@@ -123,6 +123,18 @@ export type FileToolChangePreview = {
   rows: FileToolChangePreviewRow[];
 };
 
+export type ChatGeneratedFile = {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  rootId: string;
+  workspacePath: string;
+  storagePath?: string;
+  createdAt: string;
+  description?: string;
+};
+
 export type ChatToolResult = {
   toolCallId: string;
   toolName: string;
@@ -133,6 +145,7 @@ export type ChatToolResult = {
   loadedSkillName?: string;
   loadedSkillInstructions?: string;
   loadedSkillRecommendedToolNames?: string[];
+  generatedFiles?: ChatGeneratedFile[];
 };
 
 export type ToolExecutionStatus = "pending" | "running" | "complete" | "failed";
@@ -341,6 +354,8 @@ export type ChatAttachment = {
   mimeType: string;
   sizeBytes: number;
   storagePath?: string;
+  workspaceRootId?: string;
+  workspacePath?: string;
   thumbnailDataUrl?: string;
   extractedText?: string;
   children?: ChatAttachment[];
@@ -383,6 +398,8 @@ export type ChatWorkspaceRoot = {
   name: string;
   path: string;
   createdAt: string;
+  automatic?: boolean;
+  kind?: "chat" | "manual" | "skill";
 };
 
 export type ChatFileToolAutoApproval = {
@@ -452,6 +469,51 @@ export type ToolCommandResult = {
   timedOut: boolean;
   execution?: ToolExecutionPreview;
   changePreview?: FileToolChangePreview;
+  generatedFiles?: ChatGeneratedFile[];
+};
+
+export type McpTransportType = "stdio" | "http";
+
+export type McpToolConfig = {
+  originalName: string;
+  exposedName: string;
+  enabled: boolean;
+  description?: string;
+  inputSchema?: Record<string, unknown>;
+  requireApproval?: boolean;
+  lastSeenAt?: string;
+};
+
+export type McpServerConfig = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  transport: McpTransportType;
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  insecureSkipTlsVerify?: boolean;
+  timeoutMs: number;
+  requireApproval: boolean;
+  tools?: Record<string, McpToolConfig>;
+  lastError?: string;
+  lastConnectedAt?: string;
+};
+
+export type McpSettings = {
+  enabled: boolean;
+  servers: McpServerConfig[];
+};
+
+export type McpToolMetadata = {
+  serverId: string;
+  serverName: string;
+  originalToolName: string;
+  exposedName: string;
+  transport: McpTransportType;
 };
 
 export type ToolDefinition = {
@@ -468,6 +530,9 @@ export type ToolDefinition = {
   maxConcurrentRuns?: number;
   delayBetweenRunsMs?: number;
   requiresApproval?: boolean;
+  source?: "custom" | "mcp";
+  displayName?: string;
+  mcp?: McpToolMetadata;
 };
 
 export type LoadedToolInfo = ToolDefinition;
@@ -585,6 +650,10 @@ export type ToolsSettings = {
   fileReplaceTextEnabled: boolean;
   fileCreateEnabled: boolean;
   fileDeleteEnabled: boolean;
+  archiveExtractEnabled: boolean;
+  archiveCreateEnabled: boolean;
+  documentConvertEnabled: boolean;
+  chatFileCreateEnabled: boolean;
   fileReplaceTextAutoApproveEnabled: boolean;
   fileCreateAutoApproveEnabled: boolean;
   fileDeleteAutoApproveEnabled: boolean;

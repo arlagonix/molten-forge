@@ -6,6 +6,7 @@ import {
   Cpu,
   MessageSquareText,
   Moon,
+  Network,
   SlidersHorizontal,
   Sun,
   Type as TypeIcon,
@@ -28,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import type { ThemePreference } from "@/lib/theme";
 import type {
   AppFontFamily,
   ChatTitleGenerationMode,
@@ -47,7 +49,19 @@ function SettingsSwitchRow({
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 border p-3">
+    <div
+      role="switch"
+      aria-checked={checked}
+      tabIndex={0}
+      onClick={() => onCheckedChange(!checked)}
+      onKeyDown={(event) => {
+        if (event.key === " " || event.key === "Enter") {
+          event.preventDefault();
+          onCheckedChange(!checked);
+        }
+      }}
+      className="flex cursor-pointer select-none items-center justify-between gap-4 border p-3 transition-colors hover:bg-accent/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <div className="flex min-w-0 items-start gap-3">
         <div className="mt-[5px] text-muted-foreground">{icon}</div>
         <div className="min-w-0">
@@ -57,7 +71,8 @@ function SettingsSwitchRow({
           </div>
         </div>
       </div>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      {/* Presentational only — the whole block is the click target. */}
+      <Switch checked={checked} tabIndex={-1} aria-hidden className="pointer-events-none" />
     </div>
   );
 }
@@ -140,14 +155,16 @@ type SettingsDialogProps = {
   onOpenChange: (open: boolean) => void;
   chatTitleGenerationMode: ChatTitleGenerationMode;
   appFontFamily: AppFontFamily;
+  theme: ThemePreference;
   resolvedTheme: "light" | "dark";
   onToggleAiTitleGeneration: (checked: boolean) => void;
-  onSetTheme: (theme: "light" | "dark") => void;
+  onSetTheme: (theme: ThemePreference) => void;
   onSetAppFontFamily: (fontFamily: AppFontFamily) => void;
   onOpenProviders: () => void;
   onOpenTools: () => void;
   onOpenSkills: () => void;
   onOpenAgents: () => void;
+  onOpenMcp: () => void;
   onOpenSystemPrompt: () => void;
 };
 
@@ -156,6 +173,7 @@ export const SettingsDialog = memo(function SettingsDialog({
   onOpenChange,
   chatTitleGenerationMode,
   appFontFamily,
+  theme,
   resolvedTheme,
   onToggleAiTitleGeneration,
   onSetTheme,
@@ -164,6 +182,7 @@ export const SettingsDialog = memo(function SettingsDialog({
   onOpenTools,
   onOpenSkills,
   onOpenAgents,
+  onOpenMcp,
   onOpenSystemPrompt,
 }: SettingsDialogProps) {
   return (
@@ -205,6 +224,12 @@ export const SettingsDialog = memo(function SettingsDialog({
                   onClick={onOpenAgents}
                 />
                 <SettingsActionRow
+                  icon={<Network className="size-4" />}
+                  title="MCP"
+                  description="Connect MCP servers and expose their tools to the model."
+                  onClick={onOpenMcp}
+                />
+                <SettingsActionRow
                   icon={<MessageSquareText className="size-4" />}
                   title="System prompt"
                   description="Edit the global default instructions used by the assistant."
@@ -216,7 +241,7 @@ export const SettingsDialog = memo(function SettingsDialog({
             <section className="grid gap-3">
               <h3 className="text-base font-semibold leading-6">General</h3>
               <div className="grid gap-2">
-                <SettingsSwitchRow
+                <SettingsSelectRow
                   icon={
                     resolvedTheme === "light" ? (
                       <Sun className="size-4" />
@@ -224,12 +249,17 @@ export const SettingsDialog = memo(function SettingsDialog({
                       <Moon className="size-4" />
                     )
                   }
-                  title="Light theme"
-                  description="Use the light appearance instead of the dark appearance."
-                  checked={resolvedTheme === "light"}
-                  onCheckedChange={(checked) =>
-                    onSetTheme(checked ? "light" : "dark")
+                  title="Theme"
+                  description="Choose the app appearance, or follow your system."
+                  value={theme}
+                  onValueChange={(value) =>
+                    onSetTheme(value as ThemePreference)
                   }
+                  options={[
+                    { value: "system", label: "System" },
+                    { value: "light", label: "Light" },
+                    { value: "dark", label: "Dark" },
+                  ]}
                 />
                 <SettingsSelectRow
                   icon={<TypeIcon className="size-4" />}

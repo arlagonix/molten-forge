@@ -94,6 +94,10 @@ const BUILTIN_FILE_SEARCH_TEXT_TOOL_NAME = "file_search_text";
 const BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME = "file_replace_text";
 const BUILTIN_FILE_CREATE_TOOL_NAME = "file_create";
 const BUILTIN_FILE_DELETE_TOOL_NAME = "file_delete";
+const BUILTIN_ARCHIVE_EXTRACT_TOOL_NAME = "archive_extract";
+const BUILTIN_ARCHIVE_CREATE_TOOL_NAME = "archive_create";
+const BUILTIN_DOCUMENT_CONVERT_TOOL_NAME = "document_convert";
+const BUILTIN_CHAT_FILE_CREATE_TOOL_NAME = "chat_file_create";
 const BUILTIN_FILE_TOOL_NAMES = [
   BUILTIN_FILE_READ_TOOL_NAME,
   BUILTIN_FILE_FIND_TOOL_NAME,
@@ -101,6 +105,10 @@ const BUILTIN_FILE_TOOL_NAMES = [
   BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME,
   BUILTIN_FILE_CREATE_TOOL_NAME,
   BUILTIN_FILE_DELETE_TOOL_NAME,
+  BUILTIN_ARCHIVE_EXTRACT_TOOL_NAME,
+  BUILTIN_ARCHIVE_CREATE_TOOL_NAME,
+  BUILTIN_DOCUMENT_CONVERT_TOOL_NAME,
+  BUILTIN_CHAT_FILE_CREATE_TOOL_NAME,
 ];
 const BUILTIN_FILE_TOOL_META = [
   {
@@ -212,6 +220,75 @@ const BUILTIN_FILE_TOOL_META = [
         rootId: { type: "string" },
       },
       required: ["path"],
+    },
+  },
+  {
+    id: "builtin-archive-extract",
+    name: BUILTIN_ARCHIVE_EXTRACT_TOOL_NAME,
+    setting: "archiveExtractEnabled" as const,
+    description:
+      "Extracts an archive inside an approved workspace folder into a collision-safe workspace folder.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        rootId: { type: "string" },
+        outputPath: { type: "string" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    id: "builtin-archive-create",
+    name: BUILTIN_ARCHIVE_CREATE_TOOL_NAME,
+    setting: "archiveCreateEnabled" as const,
+    description:
+      "Creates a downloadable ZIP archive from selected workspace files or folders.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        paths: { type: "array", items: { type: "string" } },
+        rootId: { type: "string" },
+        filename: { type: "string" },
+      },
+      required: ["paths"],
+    },
+  },
+  {
+    id: "builtin-document-convert",
+    name: BUILTIN_DOCUMENT_CONVERT_TOOL_NAME,
+    setting: "documentConvertEnabled" as const,
+    description:
+      "Converts PDFs and common document formats to readable text or Markdown companion files inside the chat workspace.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        path: { type: "string" },
+        rootId: { type: "string" },
+        outputPath: { type: "string" },
+      },
+      required: ["path"],
+    },
+  },
+  {
+    id: "builtin-chat-file-create",
+    name: BUILTIN_CHAT_FILE_CREATE_TOOL_NAME,
+    setting: "chatFileCreateEnabled" as const,
+    description:
+      "Creates a downloadable text file artifact in the chat workspace.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        filename: { type: "string" },
+        content: { type: "string" },
+        description: { type: "string" },
+        mimeType: { type: "string" },
+      },
+      required: ["filename", "content"],
     },
   },
 ];
@@ -897,7 +974,7 @@ export const ToolsDialog = memo(function ToolsDialog({
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 11;
+  const totalToolsCount = loadedTools.length + 15;
   const enabledToolsCount = useMemo(
     () =>
       loadedTools.filter((tool) => tool.enabled).length +
@@ -911,7 +988,11 @@ export const ToolsDialog = memo(function ToolsDialog({
       (toolsSettings.fileSearchTextEnabled ? 1 : 0) +
       (toolsSettings.fileReplaceTextEnabled ? 1 : 0) +
       (toolsSettings.fileCreateEnabled ? 1 : 0) +
-      (toolsSettings.fileDeleteEnabled ? 1 : 0),
+      (toolsSettings.fileDeleteEnabled ? 1 : 0) +
+      (toolsSettings.archiveExtractEnabled ? 1 : 0) +
+      (toolsSettings.archiveCreateEnabled ? 1 : 0) +
+      (toolsSettings.documentConvertEnabled ? 1 : 0) +
+      (toolsSettings.chatFileCreateEnabled ? 1 : 0),
     [
       loadedTools,
       toolsSettings.askUserEnabled,
@@ -925,6 +1006,10 @@ export const ToolsDialog = memo(function ToolsDialog({
       toolsSettings.fileReplaceTextEnabled,
       toolsSettings.fileCreateEnabled,
       toolsSettings.fileDeleteEnabled,
+      toolsSettings.archiveExtractEnabled,
+      toolsSettings.archiveCreateEnabled,
+      toolsSettings.documentConvertEnabled,
+      toolsSettings.chatFileCreateEnabled,
     ],
   );
   const currentToolTestState = toolDraft

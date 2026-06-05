@@ -33,7 +33,15 @@ export default defineConfig({
         vite: {
           build: {
             rollupOptions: {
-              external: ["7zip-bin", "node-7z", "pdf-parse"],
+              external: [
+                "7zip-bin",
+                "node-7z",
+                "pdf-parse",
+                "officeparser",
+                "@modelcontextprotocol/sdk",
+                /^@modelcontextprotocol\/sdk\/.*/,
+                "undici",
+              ],
             },
           },
         },

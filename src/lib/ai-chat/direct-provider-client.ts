@@ -138,44 +138,43 @@ function getActiveAssistantVariant(message: ChatMessage) {
 }
 
 
-function inferFence(name: string) {
-  const extension = name.toLowerCase().split(".").pop() ?? "";
-  const mapping: Record<string, string> = {
-    js: "js",
-    jsx: "jsx",
-    ts: "ts",
-    tsx: "tsx",
-    json: "json",
-    py: "python",
-    java: "java",
-    kt: "kotlin",
-    scala: "scala",
-    rs: "rust",
-    go: "go",
-    c: "c",
-    h: "c",
-    cpp: "cpp",
-    hpp: "cpp",
-    cs: "csharp",
-    html: "html",
-    css: "css",
-    md: "md",
-    xml: "xml",
-    yaml: "yaml",
-    yml: "yaml",
-    sh: "bash",
-    ps1: "powershell",
-    sql: "sql",
-  };
-  return mapping[extension] ?? "";
-}
-
 function getAttachmentDisplayText(attachment: ChatAttachment) {
   const notices = [
     attachment.error ? `[attachment note: ${attachment.error}]` : "",
     attachment.truncated ? "[truncated]" : "",
   ].filter(Boolean);
   return notices.length ? `\n${notices.join("\n")}` : "";
+}
+
+function getAttachmentManifestLine(attachment: ChatAttachment) {
+  const workspaceLocation = attachment.workspacePath
+    ? `workspacePath: ${attachment.workspacePath}`
+    : "workspacePath: unavailable";
+  const rootId = attachment.workspaceRootId
+    ? `rootId: ${attachment.workspaceRootId}`
+    : "rootId: unavailable";
+  const size = `${attachment.sizeBytes} bytes`;
+  const notes = getAttachmentDisplayText(attachment).trim();
+  return `- ${attachment.name} (${attachment.kind}, ${size}; ${rootId}; ${workspaceLocation})${notes ? ` ${notes}` : ""}`;
+}
+
+function buildAttachmentManifestBlock(attachments: ChatAttachment[]) {
+  const lines: string[] = [];
+  const visit = (attachment: ChatAttachment, prefix = "") => {
+    lines.push(`${prefix}${getAttachmentManifestLine(attachment)}`);
+    for (const child of attachment.children ?? []) visit(child, `${prefix}  `);
+  };
+
+  for (const attachment of attachments) visit(attachment);
+  if (!lines.length) return "";
+
+  return [
+    "The user attached files. They are available through the workspace file tools instead of being pasted into context.",
+    "Use rootId \"chat\" with file_find, file_read, file_search_text, document_convert, archive_extract, archive_create, or chat_file_create when needed.",
+    "For archives, do not assume they are already extracted; call archive_extract first if you need their contents.",
+    "Attached files:",
+    ...lines,
+  ].join("\n");
 }
 
 async function buildUserApiContent(
@@ -188,56 +187,35 @@ async function buildUserApiContent(
   const textBlocks: string[] = [];
 
   const visit = async (attachment: ChatAttachment): Promise<void> => {
-    if (attachment.kind === "archive") {
-      if (attachment.error) {
-        textBlocks.push(
-          `\n\n----- Attached archive: ${attachment.name} -----${getAttachmentDisplayText(attachment)}`,
-        );
-      }
-      for (const child of attachment.children ?? []) {
-        await visit(child);
-      }
-      return;
-    }
+    if (attachment.kind !== "image") return;
 
-    if (attachment.kind === "image") {
-      try {
-        if (attachment.storagePath) {
-          const dataUrl = await assertElectronBridge().readAttachmentDataUrl({
-            storagePath: attachment.storagePath,
-            mimeType: attachment.mimeType,
-          });
-          imageParts.push({ type: "image_url", image_url: { url: dataUrl } });
-        } else if (attachment.thumbnailDataUrl) {
-          imageParts.push({
-            type: "image_url",
-            image_url: { url: attachment.thumbnailDataUrl },
-          });
-        } else {
-          textBlocks.push(
-            `\n\n----- Attached image: ${attachment.name} -----\n[attachment missing: image data is unavailable]`,
-          );
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "image file is unavailable";
+    try {
+      if (attachment.storagePath) {
+        const dataUrl = await assertElectronBridge().readAttachmentDataUrl({
+          storagePath: attachment.storagePath,
+          mimeType: attachment.mimeType,
+        });
+        imageParts.push({ type: "image_url", image_url: { url: dataUrl } });
+      } else if (attachment.thumbnailDataUrl) {
+        imageParts.push({
+          type: "image_url",
+          image_url: { url: attachment.thumbnailDataUrl },
+        });
+      } else {
         textBlocks.push(
-          `\n\n----- Attached image: ${attachment.name} -----\n[attachment missing: ${message}]`,
+          `\n\n----- Attached image: ${attachment.name} -----\n[attachment missing: image data is unavailable]`,
         );
       }
-      if (attachment.error) {
-        textBlocks.push(
-          `\n\n----- Attached image: ${attachment.name} -----${getAttachmentDisplayText(attachment)}`,
-        );
-      }
-      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "image file is unavailable";
+      textBlocks.push(
+        `\n\n----- Attached image: ${attachment.name} -----\n[attachment missing: ${message}]`,
+      );
     }
-
-    if (attachment.extractedText || attachment.error || attachment.truncated) {
-      const fence = attachment.kind === "pdf" ? "" : inferFence(attachment.name);
-      const body = attachment.extractedText
-        ? `\n\n----- Attached file: ${attachment.name} -----\n\`\`\`${fence}\n${attachment.extractedText}\n\`\`\`${getAttachmentDisplayText(attachment)}`
-        : `\n\n----- Attached file: ${attachment.name} -----${getAttachmentDisplayText(attachment)}`;
-      textBlocks.push(body);
+    if (attachment.error) {
+      textBlocks.push(
+        `\n\n----- Attached image: ${attachment.name} -----${getAttachmentDisplayText(attachment)}`,
+      );
     }
   };
 
@@ -245,8 +223,14 @@ async function buildUserApiContent(
     await visit(attachment);
   }
 
-  const combinedText = [text, ...textBlocks].filter(Boolean).join("");
-  return [{ type: "text", text: combinedText || "Please analyze the attached files." }, ...imageParts];
+  const manifest = buildAttachmentManifestBlock(attachments);
+  const combinedText = [text, manifest ? `\n\n${manifest}` : "", ...textBlocks]
+    .filter(Boolean)
+    .join("");
+  return [
+    { type: "text", text: combinedText || "Please analyze the attached files." },
+    ...imageParts,
+  ];
 }
 
 async function buildApiMessages({

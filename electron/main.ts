@@ -1,12 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
 import Seven from "node-7z";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import { existsSync, promises as fs } from "node:fs";
+import { existsSync, promises as fs, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { isIP } from "node:net";
 import path from "node:path";
+import tls from "node:tls";
 import { fileURLToPath } from "node:url";
 import pdfParse from "pdf-parse";
 import {
@@ -14,13 +15,21 @@ import {
   estimateAttachmentTokens,
 } from "../src/lib/ai-chat/attachment-limits";
 import { isFileToolName } from "../src/lib/ai-chat/file-tool-names";
-import type { AttachmentKind, ChatAttachment } from "../src/lib/ai-chat/types";
+import type { AttachmentKind, ChatAttachment, ChatWorkspaceRoot } from "../src/lib/ai-chat/types";
 import {
   runChatCompletion,
   streamChatCompletion,
   type AdapterStreamEvent,
 } from "./ai-sdk-client";
 import { executeFileTool } from "./file-tools";
+import {
+  buildLoadedMcpTools,
+  executeMcpTool,
+  normalizeMcpSettings,
+  refreshMcpTools,
+  testMcpServer,
+  type McpSettings,
+} from "./mcp-client";
 import {
   getErrorMessage,
   isPlainObject,
@@ -32,6 +41,35 @@ import {
 } from "./tool-utils";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
+
+/**
+ * Load the OS trust store (Windows/macOS/Linux) into Node's default TLS
+ * context so undici / global fetch / the MCP SDK transports / the AI SDK all
+ * trust the same CAs the system browser does. This is what makes the app work
+ * behind a corporate TLS-inspection proxy whose root CA is installed in the OS
+ * store — without disabling certificate verification. Must run before any
+ * HTTPS connection is made. Requires Node 22.15+/24 (Electron 41 ships Node 24).
+ */
+function trustSystemCertificates() {
+  try {
+    if (
+      typeof tls.getCACertificates !== "function" ||
+      typeof tls.setDefaultCACertificates !== "function"
+    ) {
+      console.warn("[tls] system CA APIs unavailable; skipping system CA trust");
+      return;
+    }
+    const system = tls.getCACertificates("system");
+    if (!system.length) return;
+    // Keep the bundled Mozilla CAs and anything from NODE_EXTRA_CA_CERTS too.
+    const existing = tls.getCACertificates("default");
+    tls.setDefaultCACertificates(Array.from(new Set([...existing, ...system])));
+  } catch (error) {
+    console.warn("[tls] failed to load system CA certificates:", error);
+  }
+}
+
+trustSystemCertificates();
 
 const APP_ROOT = path.join(__dirname, "..");
 process.env.APP_ROOT = APP_ROOT;
@@ -138,6 +176,7 @@ type ToolCommandResult = {
   timedOut: boolean;
   execution?: ToolExecutionPreview;
   changePreview?: unknown;
+  generatedFiles?: unknown;
 };
 
 type ActiveToolExecution = {
@@ -190,7 +229,7 @@ type PublicAgentDefinition = AgentDefinition;
 type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
-  checklistWriteEnabled: boolean;
+  taskToolsEnabled: boolean;
   loadSkillEnabled: boolean;
   webFetchEnabled: boolean;
   fileReadEnabled: boolean;
@@ -199,6 +238,10 @@ type ToolsSettings = {
   fileReplaceTextEnabled: boolean;
   fileCreateEnabled: boolean;
   fileDeleteEnabled: boolean;
+  archiveExtractEnabled: boolean;
+  archiveCreateEnabled: boolean;
+  documentConvertEnabled: boolean;
+  chatFileCreateEnabled: boolean;
   fileReplaceTextAutoApproveEnabled: boolean;
   fileCreateAutoApproveEnabled: boolean;
   fileDeleteAutoApproveEnabled: boolean;
@@ -299,7 +342,7 @@ const activeStreamControllers = new Map<string, AbortController>();
 const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
   askUserEnabled: true,
-  checklistWriteEnabled: true,
+  taskToolsEnabled: true,
   loadSkillEnabled: true,
   webFetchEnabled: false,
   fileReadEnabled: true,
@@ -308,6 +351,10 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   fileReplaceTextEnabled: false,
   fileCreateEnabled: true,
   fileDeleteEnabled: false,
+  archiveExtractEnabled: true,
+  archiveCreateEnabled: true,
+  documentConvertEnabled: true,
+  chatFileCreateEnabled: true,
   fileReplaceTextAutoApproveEnabled: false,
   fileCreateAutoApproveEnabled: false,
   fileDeleteAutoApproveEnabled: false,
@@ -321,6 +368,10 @@ const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
 const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
   fontFamily: "sans",
+};
+const DEFAULT_MCP_SETTINGS: McpSettings = {
+  enabled: true,
+  servers: [],
 };
 const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
 const WEB_FETCH_TOOL_NAME = "web_fetch";
@@ -461,14 +512,18 @@ async function readUpstreamJson(response: Response) {
 function normalizeToolsSettings(value: unknown): ToolsSettings {
   if (!isPlainObject(value)) return DEFAULT_TOOLS_SETTINGS;
 
+  const legacyChecklistWriteEnabled = value.checklistWriteEnabled;
+
   return {
     enabled: typeof value.enabled === "boolean" ? value.enabled : true,
     askUserEnabled:
       typeof value.askUserEnabled === "boolean" ? value.askUserEnabled : true,
-    checklistWriteEnabled:
-      typeof value.checklistWriteEnabled === "boolean"
-        ? value.checklistWriteEnabled
-        : true,
+    taskToolsEnabled:
+      typeof value.taskToolsEnabled === "boolean"
+        ? value.taskToolsEnabled
+        : typeof legacyChecklistWriteEnabled === "boolean"
+          ? legacyChecklistWriteEnabled
+          : true,
     loadSkillEnabled:
       typeof value.loadSkillEnabled === "boolean"
         ? value.loadSkillEnabled
@@ -497,6 +552,22 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
       typeof value.fileDeleteEnabled === "boolean"
         ? value.fileDeleteEnabled
         : false,
+    archiveExtractEnabled:
+      typeof value.archiveExtractEnabled === "boolean"
+        ? value.archiveExtractEnabled
+        : true,
+    archiveCreateEnabled:
+      typeof value.archiveCreateEnabled === "boolean"
+        ? value.archiveCreateEnabled
+        : true,
+    documentConvertEnabled:
+      typeof value.documentConvertEnabled === "boolean"
+        ? value.documentConvertEnabled
+        : true,
+    chatFileCreateEnabled:
+      typeof value.chatFileCreateEnabled === "boolean"
+        ? value.chatFileCreateEnabled
+        : true,
     fileReplaceTextAutoApproveEnabled:
       typeof value.fileReplaceTextAutoApproveEnabled === "boolean"
         ? value.fileReplaceTextAutoApproveEnabled
@@ -1680,6 +1751,7 @@ type StorageSnapshot = {
   activeChatId?: unknown;
   providerModelsCache?: Record<string, unknown>;
   appSettings?: unknown;
+  mcpSettings?: unknown;
   chats?: unknown[];
 };
 
@@ -1704,7 +1776,317 @@ function getStoragePaths() {
     agentsDir: path.join(root, "agents"),
     backupsDir: path.join(root, "backups"),
     attachmentsDir: path.join(root, "attachments"),
+    chatWorkspacesDir: path.join(root, "chat-workspaces"),
   };
+}
+
+const CHAT_WORKSPACE_ROOT_ID = "chat";
+
+function getChatWorkspacePath(chatId: string) {
+  return path.join(getStoragePaths().chatWorkspacesDir, sanitizeFileNamePart(chatId));
+}
+
+async function ensureChatWorkspaceRoot(chatIdValue: unknown): Promise<ChatWorkspaceRoot> {
+  const chatId = safeString(chatIdValue).trim();
+  if (!chatId) throw new Error("Chat id is required.");
+  const workspacePath = getChatWorkspacePath(chatId);
+  await fs.mkdir(workspacePath, { recursive: true });
+  return {
+    id: CHAT_WORKSPACE_ROOT_ID,
+    name: "Chat workspace",
+    path: workspacePath,
+    createdAt: new Date().toISOString(),
+    automatic: true,
+    kind: "chat",
+  };
+}
+
+async function deleteChatWorkspace(chatIdValue: unknown) {
+  const chatId = safeString(chatIdValue).trim();
+  if (!chatId) return;
+  await fs.rm(getChatWorkspacePath(chatId), { recursive: true, force: true });
+}
+
+function normalizeManagedFilePath(storagePath: string) {
+  const roots = [
+    path.resolve(getStoragePaths().attachmentsDir),
+    path.resolve(getStoragePaths().chatWorkspacesDir),
+  ];
+  const resolvedStoragePath = path.resolve(storagePath);
+
+  for (const root of roots) {
+    const relative = path.relative(root, resolvedStoragePath);
+    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+      return resolvedStoragePath;
+    }
+  }
+
+  return undefined;
+}
+
+async function safeUniquePath(directory: string, fileName: string) {
+  const parsed = path.parse(sanitizeFileNamePart(fileName));
+  const base = parsed.name || "file";
+  const ext = parsed.ext;
+
+  for (let index = 0; index < 1000; index += 1) {
+    const candidateName = index === 0 ? `${base}${ext}` : `${base}-${index + 1}${ext}`;
+    const candidatePath = path.join(directory, candidateName);
+    try {
+      await fs.lstat(candidatePath);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code === "ENOENT") return candidatePath;
+      throw error;
+    }
+  }
+
+  return path.join(directory, `${base}-${randomUUID()}${ext}`);
+}
+
+function stripInlineAttachmentContentForWorkspace(attachment: ChatAttachment): ChatAttachment {
+  return {
+    ...attachment,
+    extractedText: undefined,
+    truncated: undefined,
+    tokenEstimate: attachment.kind === "image" ? attachment.tokenEstimate : 0,
+    children: attachment.children?.map(stripInlineAttachmentContentForWorkspace),
+  };
+}
+
+async function copyAttachmentIntoChatWorkspace({
+  chatId,
+  messageId,
+  attachment,
+}: {
+  chatId: string;
+  messageId: string;
+  attachment: ChatAttachment;
+}): Promise<ChatAttachment> {
+  const workspaceRoot = await ensureChatWorkspaceRoot(chatId);
+  const sourcePath = attachment.storagePath
+    ? normalizeManagedFilePath(attachment.storagePath)
+    : undefined;
+  const baseAttachment = stripInlineAttachmentContentForWorkspace(attachment);
+  const nextChildren = attachment.children?.length
+    ? await Promise.all(
+        attachment.children.map((child) =>
+          copyAttachmentIntoChatWorkspace({ chatId, messageId, attachment: child }),
+        ),
+      )
+    : baseAttachment.children;
+
+  if (!sourcePath) {
+    return {
+      ...baseAttachment,
+      ...(nextChildren ? { children: nextChildren } : {}),
+    };
+  }
+
+  const sourceRelativeToWorkspace = path.relative(workspaceRoot.path, sourcePath);
+  const sourceAlreadyInChatWorkspace =
+    sourceRelativeToWorkspace &&
+    !sourceRelativeToWorkspace.startsWith("..") &&
+    !path.isAbsolute(sourceRelativeToWorkspace);
+
+  if (sourceAlreadyInChatWorkspace) {
+    return {
+      ...baseAttachment,
+      storagePath: sourcePath,
+      workspaceRootId: workspaceRoot.id,
+      workspacePath: sourceRelativeToWorkspace.split(path.sep).join("/"),
+      ...(nextChildren ? { children: nextChildren } : {}),
+    };
+  }
+
+  const originalDirectory = path.join(workspaceRoot.path, "incoming", sanitizeFileNamePart(messageId), "original");
+  await fs.mkdir(originalDirectory, { recursive: true });
+  const destinationPath = await safeUniquePath(originalDirectory, attachment.name);
+
+  await fs.copyFile(sourcePath, destinationPath);
+  const oldAttachmentPath = normalizeAttachmentStoragePath(sourcePath);
+  if (oldAttachmentPath) {
+    await deleteTemporaryAttachmentStoragePaths([oldAttachmentPath]);
+  }
+
+  return {
+    ...baseAttachment,
+    storagePath: destinationPath,
+    workspaceRootId: workspaceRoot.id,
+    workspacePath: path.relative(workspaceRoot.path, destinationPath).split(path.sep).join("/"),
+    ...(nextChildren ? { children: nextChildren } : {}),
+  };
+}
+
+function normalizeMaterializeAttachmentsRequest(request: unknown) {
+  const value = isPlainObject(request) ? request : {};
+  const chatId = safeString(value.chatId).trim();
+  const messageId = safeString(value.messageId).trim();
+  const attachments = Array.isArray(value.attachments)
+    ? (value.attachments.filter((item) => isPlainObject(item)) as unknown[] as ChatAttachment[])
+    : [];
+  if (!chatId) throw new Error("chatId is required.");
+  if (!messageId) throw new Error("messageId is required.");
+  return { chatId, messageId, attachments };
+}
+
+async function exportManagedFile(request: unknown) {
+  const value = isPlainObject(request) ? request : {};
+  const storagePath = safeString(value.storagePath).trim();
+  const name = sanitizeFileNamePart(safeString(value.name).trim() || path.basename(storagePath));
+  const sourcePath = storagePath ? normalizeManagedFilePath(storagePath) : undefined;
+  if (!sourcePath) throw new Error("File is outside managed app storage.");
+
+  const browserWindow = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const options = {
+    title: "Download file",
+    defaultPath: name,
+  };
+  const result = browserWindow
+    ? await dialog.showSaveDialog(browserWindow, options)
+    : await dialog.showSaveDialog(options);
+
+  if (result.canceled || !result.filePath) return { cancelled: true as const };
+  await fs.copyFile(sourcePath, result.filePath);
+  return { cancelled: false as const, path: result.filePath };
+}
+
+function parseNullSeparatedClipboardPaths(value: string) {
+  return value
+    .split("\0")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function collectClipboardFilePathCandidates() {
+  const candidates: string[] = [];
+
+  for (const format of clipboard.availableFormats()) {
+    if (format === "FileNameW") {
+      const value = clipboard.readBuffer(format).toString("utf16le");
+      candidates.push(...parseNullSeparatedClipboardPaths(value));
+    } else if (format === "FileName") {
+      const value = clipboard.readBuffer(format).toString("utf8");
+      candidates.push(...parseNullSeparatedClipboardPaths(value));
+    }
+  }
+
+  const text = clipboard.readText().trim();
+  if (text) {
+    candidates.push(
+      ...text
+        .split(/\r?\n/)
+        .map((item) => item.trim().replace(/^file:\/\//i, ""))
+        .filter(Boolean),
+    );
+  }
+
+  return candidates;
+}
+
+function filterExistingFilePathsSync(paths: string[]) {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of paths) {
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved.toLowerCase())) continue;
+
+    try {
+      const stats = statSync(resolved);
+      if (!stats.isFile()) continue;
+      seen.add(resolved.toLowerCase());
+      result.push(resolved);
+    } catch {
+      // Ignore stale clipboard paths.
+    }
+  }
+
+  return result;
+}
+
+async function filterExistingFilePaths(paths: string[]) {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  for (const candidate of paths) {
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved.toLowerCase())) continue;
+
+    try {
+      const stats = await fs.stat(resolved);
+      if (!stats.isFile()) continue;
+      seen.add(resolved.toLowerCase());
+      result.push(resolved);
+    } catch {
+      // Ignore stale clipboard paths.
+    }
+  }
+
+  return result;
+}
+
+function readClipboardFilePathsSync() {
+  return filterExistingFilePathsSync(collectClipboardFilePathCandidates());
+}
+
+async function readClipboardFilePaths() {
+  return filterExistingFilePaths(collectClipboardFilePathCandidates());
+}
+
+async function cleanupChatMessageWorkspace(request: unknown) {
+  const value = isPlainObject(request) ? request : {};
+  const chatId = safeString(value.chatId).trim();
+  const messageId = safeString(value.messageId).trim();
+  const generatedFileStoragePaths = Array.isArray(value.generatedFileStoragePaths)
+    ? value.generatedFileStoragePaths.filter((item): item is string => typeof item === "string")
+    : [];
+
+  if (!chatId || !messageId) return { deleted: 0 };
+
+  const chatWorkspacePath = getChatWorkspacePath(chatId);
+  const workspaceRoot = path.resolve(chatWorkspacePath);
+  let deleted = 0;
+
+  const incomingMessagePath = path.resolve(
+    chatWorkspacePath,
+    "incoming",
+    sanitizeFileNamePart(messageId),
+  );
+  const incomingRelative = path.relative(workspaceRoot, incomingMessagePath);
+  if (!incomingRelative.startsWith("..") && !path.isAbsolute(incomingRelative)) {
+    await fs.rm(incomingMessagePath, { recursive: true, force: true });
+    deleted += 1;
+  }
+
+  const generatedRoot = path.resolve(chatWorkspacePath, "generated");
+  const artifactDirectories = new Set<string>();
+  for (const storagePath of generatedFileStoragePaths) {
+    const managedPath = normalizeManagedFilePath(storagePath);
+    if (!managedPath) continue;
+    const relativeToGeneratedRoot = path.relative(generatedRoot, managedPath);
+    if (
+      relativeToGeneratedRoot.startsWith("..") ||
+      path.isAbsolute(relativeToGeneratedRoot) ||
+      !relativeToGeneratedRoot
+    ) {
+      continue;
+    }
+
+    const [artifactDirectoryName] = relativeToGeneratedRoot.split(path.sep);
+    if (!artifactDirectoryName) continue;
+    artifactDirectories.add(path.join(generatedRoot, artifactDirectoryName));
+  }
+
+  for (const artifactDirectory of artifactDirectories) {
+    await fs.rm(artifactDirectory, { recursive: true, force: true });
+    deleted += 1;
+  }
+
+  return { deleted };
 }
 
 type AttachmentInput =
@@ -2107,12 +2489,57 @@ async function extractArchiveToDirectory(archivePath: string, tmpDir: string) {
   });
 }
 
-async function processArchiveAttachment({
+async function processAttachmentBuffer({
   name,
   buffer,
   sourcePath,
+  mimeType,
   state,
   depth,
+}: {
+  name: string;
+  buffer: Buffer;
+  sourcePath?: string;
+  mimeType?: string;
+  state: AttachmentProcessState;
+  depth: number;
+}): Promise<ChatAttachment> {
+  const kind = classifyAttachment(name, mimeType);
+
+  try {
+    if (kind === "image") {
+      return processImageAttachment({ name, buffer, mimeType });
+    }
+
+    if (kind === "pdf") {
+      return processPdfAttachment({ name, buffer, state });
+    }
+
+    if (kind === "archive") {
+      return processArchiveAttachment({
+        name,
+        buffer,
+        sourcePath,
+        state,
+        depth,
+      });
+    }
+
+    return processTextAttachment({ name, buffer, mimeType, state });
+  } catch (error) {
+    return makeAttachmentError({
+      name,
+      kind: kind === "binary" ? "text" : kind,
+      mimeType: mimeType ?? inferMimeType(name),
+      sizeBytes: buffer.byteLength,
+      error: error instanceof Error ? error.message : "Failed to process attachment",
+    });
+  }
+}
+
+async function processArchiveAttachment({
+  name,
+  buffer,
 }: {
   name: string;
   buffer: Buffer;
@@ -2131,7 +2558,7 @@ async function processArchiveAttachment({
   }
 
   const stored = await storeAttachmentBuffer(buffer, name);
-  const archiveAttachment: ChatAttachment = {
+  return {
     id: stored.id,
     name,
     kind: "archive",
@@ -2139,125 +2566,8 @@ async function processArchiveAttachment({
     sizeBytes: buffer.byteLength,
     storagePath: stored.storagePath,
     children: [],
+    tokenEstimate: 0,
   };
-
-  if (depth >= ATTACHMENT_LIMITS.maxArchiveDepth) {
-    archiveAttachment.error = `Nested archive depth limit reached (${ATTACHMENT_LIMITS.maxArchiveDepth})`;
-    archiveAttachment.tokenEstimate = 0;
-    return archiveAttachment;
-  }
-
-  const tmpDir = path.join(app.getPath("temp"), `chatforge-${randomUUID()}`);
-  const archivePath =
-    sourcePath ?? path.join(tmpDir, sanitizeFileNamePart(name));
-
-  try {
-    await fs.mkdir(tmpDir, { recursive: true });
-    if (!sourcePath) await fs.writeFile(archivePath, buffer);
-    await extractArchiveToDirectory(archivePath, tmpDir);
-
-    const extractedFiles = await walkFiles(tmpDir);
-    if (extractedFiles.length > ATTACHMENT_LIMITS.maxEntriesPerArchive) {
-      archiveAttachment.truncated = true;
-      pushWarning(
-        state,
-        `${name}: archive contains more than ${ATTACHMENT_LIMITS.maxEntriesPerArchive} files; remaining files were skipped.`,
-      );
-    }
-
-    for (const filePath of extractedFiles.slice(
-      0,
-      ATTACHMENT_LIMITS.maxEntriesPerArchive,
-    )) {
-      if (state.totalEntries >= ATTACHMENT_LIMITS.maxEntriesTotal) {
-        archiveAttachment.truncated = true;
-        pushWarning(
-          state,
-          `Attachment extraction reached the ${ATTACHMENT_LIMITS.maxEntriesTotal} file limit.`,
-        );
-        break;
-      }
-
-      const resolvedFilePath = path.resolve(filePath);
-      if (!sourcePath && resolvedFilePath === path.resolve(archivePath))
-        continue;
-      const resolvedTmpDir = path.resolve(tmpDir);
-      const relative = path.relative(resolvedTmpDir, resolvedFilePath);
-      if (relative.startsWith("..") || path.isAbsolute(relative)) {
-        archiveAttachment.children?.push(
-          makeAttachmentError({
-            name: path.basename(filePath),
-            sizeBytes: 0,
-            error: "Unsafe archive path skipped",
-          }),
-        );
-        continue;
-      }
-
-      const childBuffer = await fs.readFile(resolvedFilePath);
-      state.totalExtractedBytes += childBuffer.byteLength;
-      if (
-        state.totalExtractedBytes > ATTACHMENT_LIMITS.maxExtractedBytesTotal
-      ) {
-        archiveAttachment.truncated = true;
-        pushWarning(
-          state,
-          `Attachment extraction reached the ${Math.round(ATTACHMENT_LIMITS.maxExtractedBytesTotal / 1024 / 1024)} MB extracted-size limit.`,
-        );
-        break;
-      }
-      state.totalEntries += 1;
-
-      archiveAttachment.children?.push(
-        await processAttachmentBuffer({
-          name: relative.split(path.sep).join("/"),
-          buffer: childBuffer,
-          sourcePath: resolvedFilePath,
-          state,
-          depth: depth + 1,
-        }),
-      );
-    }
-  } catch (error) {
-    archiveAttachment.error = getErrorMessage(error);
-  } finally {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  }
-
-  archiveAttachment.tokenEstimate = estimateAttachmentTokens(archiveAttachment);
-  return archiveAttachment;
-}
-
-async function processAttachmentBuffer({
-  name,
-  buffer,
-  sourcePath,
-  mimeType,
-  state,
-  depth,
-}: {
-  name: string;
-  buffer: Buffer;
-  sourcePath?: string;
-  mimeType?: string;
-  state: AttachmentProcessState;
-  depth: number;
-}): Promise<ChatAttachment> {
-  const kind = classifyAttachment(name, mimeType);
-
-  if (kind === "image") {
-    return processImageAttachment({ name, buffer, mimeType });
-  }
-
-  if (kind === "pdf") {
-    return processPdfAttachment({ name, buffer, state });
-  }
-
-  if (kind === "archive") {
-    return processArchiveAttachment({ name, buffer, sourcePath, state, depth });
-  }
-
-  return processTextAttachment({ name, buffer, mimeType, state });
 }
 
 async function processAttachmentInput(
@@ -2584,13 +2894,78 @@ async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
   }
 }
 
-async function writeJsonAtomic(filePath: string, value: unknown) {
+/**
+ * Like readJsonFile, but if the primary file is missing or corrupt it tries to
+ * recover from the `.bak` snapshot written by writeJsonAtomic({ backup: true }).
+ * Used for the critical singleton files (providers, settings) so a single bad
+ * write or partial file can never silently turn into "empty defaults".
+ */
+async function readJsonFileWithRecovery<T>(
+  filePath: string,
+  fallback: T,
+): Promise<T> {
+  try {
+    return JSON.parse(await fs.readFile(filePath, "utf8")) as T;
+  } catch (primaryError) {
+    const code =
+      typeof primaryError === "object" && primaryError && "code" in primaryError
+        ? (primaryError as { code?: string }).code
+        : undefined;
+    if (code !== "ENOENT") {
+      console.error(
+        `Corrupt JSON at ${filePath}; attempting backup recovery:`,
+        primaryError,
+      );
+    }
+    try {
+      const recovered = JSON.parse(
+        await fs.readFile(`${filePath}.bak`, "utf8"),
+      ) as T;
+      if (code !== "ENOENT") {
+        console.warn(`Recovered ${filePath} from ${filePath}.bak`);
+      }
+      return recovered;
+    } catch {
+      return fallback;
+    }
+  }
+}
+
+async function writeJsonAtomic(
+  filePath: string,
+  value: unknown,
+  options: { backup?: boolean } = {},
+) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
+
+  // Snapshot the current good file before overwriting it, so a bad write can
+  // be recovered (see readJsonFileWithRecovery).
+  if (options.backup) {
+    try {
+      await fs.copyFile(filePath, `${filePath}.bak`);
+    } catch (error) {
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code !== "ENOENT") {
+        console.warn(`Could not back up ${filePath}:`, error);
+      }
+    }
+  }
 
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
   const json = `${JSON.stringify(value, null, 2)}\n`;
 
-  await fs.writeFile(tempPath, json, "utf8");
+  // Write + fsync the temp file so its bytes are durable before the rename,
+  // then atomically replace the target.
+  const handle = await fs.open(tempPath, "w");
+  try {
+    await handle.writeFile(json, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
   await fs.rename(tempPath, filePath);
 }
 
@@ -2613,6 +2988,7 @@ async function ensureStorageDirectories() {
   await fs.mkdir(paths.skillsDir, { recursive: true });
   await fs.mkdir(paths.agentsDir, { recursive: true });
   await fs.mkdir(paths.attachmentsDir, { recursive: true });
+  await fs.mkdir(paths.chatWorkspacesDir, { recursive: true });
 }
 
 async function isJsonStorageInitialized() {
@@ -2631,6 +3007,7 @@ async function initializeJsonStorageIfNeeded() {
     skillsSettings: DEFAULT_SKILLS_SETTINGS,
     agentsSettings: DEFAULT_AGENTS_SETTINGS,
     appSettings: DEFAULT_APP_SETTINGS,
+    mcpSettings: DEFAULT_MCP_SETTINGS,
   });
   await writeJsonAtomic(getStoragePaths().providers, null);
   await writeJsonAtomic(getStoragePaths().chatsIndex, { chats: [] });
@@ -2664,17 +3041,21 @@ function normalizeChatSummary(chat: unknown) {
 }
 
 async function readSettingsFile() {
-  return readJsonFile<JsonRecord>(getStoragePaths().settings, {});
+  return readJsonFileWithRecovery<JsonRecord>(getStoragePaths().settings, {});
 }
 
 async function writeSettingsPatch(patch: JsonRecord) {
   await queueStorageWrite(async () => {
     await initializeJsonStorageIfNeeded();
     const settings = await readSettingsFile();
-    await writeJsonAtomic(getStoragePaths().settings, {
-      ...settings,
-      ...patch,
-    });
+    await writeJsonAtomic(
+      getStoragePaths().settings,
+      {
+        ...settings,
+        ...patch,
+      },
+      { backup: true },
+    );
   });
 }
 
@@ -2811,6 +3192,7 @@ async function deleteJsonChat(chatId: unknown) {
     const existing = await readChatIndex();
     await writeChatIndexFromChats(existing.filter((item) => item.id !== id));
     await cleanupUnreferencedAttachmentStoragePaths(cleanupCandidates);
+    await deleteChatWorkspace(id);
   });
 }
 
@@ -2833,6 +3215,8 @@ async function deleteAllJsonChats() {
     await writeJsonAtomic(paths.chatsIndex, { chats: [] });
     await fs.rm(paths.attachmentsDir, { recursive: true, force: true });
     await fs.mkdir(paths.attachmentsDir, { recursive: true });
+    await fs.rm(paths.chatWorkspacesDir, { recursive: true, force: true });
+    await fs.mkdir(paths.chatWorkspacesDir, { recursive: true });
   });
 }
 
@@ -2858,6 +3242,7 @@ async function migrateFromIndexedDbSnapshot(snapshot: StorageSnapshot) {
       skillsSettings: DEFAULT_SKILLS_SETTINGS,
       agentsSettings: DEFAULT_AGENTS_SETTINGS,
       appSettings: normalizeAppSettings(snapshot.appSettings),
+      mcpSettings: normalizeMcpSettings(snapshot.mcpSettings),
     };
 
     await writeJsonAtomic(getStoragePaths().settings, settings);
@@ -4318,6 +4703,18 @@ ipcMain.handle("find-in-page:stop", (event, action: unknown) => {
   event.sender.stopFindInPage(normalizeStopFindInPageAction(action));
 });
 
+ipcMain.handle("attachments:clipboard-file-paths", async () =>
+  readClipboardFilePaths(),
+);
+
+ipcMain.on("attachments:clipboard-file-paths-sync", (event) => {
+  event.returnValue = readClipboardFilePathsSync();
+});
+
+ipcMain.handle("attachments:cleanup-message-workspace", async (_event, request: unknown) =>
+  cleanupChatMessageWorkspace(request),
+);
+
 ipcMain.handle("attachments:pick", async () => {
   const browserWindow =
     BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -4382,11 +4779,9 @@ ipcMain.handle(
       throw new Error("Attachment storage path is required.");
     }
 
-    const storageRoot = path.resolve(getStoragePaths().attachmentsDir);
-    const resolvedStoragePath = path.resolve(request.storagePath);
-    const relative = path.relative(storageRoot, resolvedStoragePath);
-    if (relative.startsWith("..") || path.isAbsolute(relative)) {
-      throw new Error("Attachment path is outside the attachments directory.");
+    const resolvedStoragePath = normalizeManagedFilePath(request.storagePath);
+    if (!resolvedStoragePath) {
+      throw new Error("Attachment path is outside managed app storage.");
     }
 
     const buffer = await fs.readFile(resolvedStoragePath);
@@ -4396,6 +4791,23 @@ ipcMain.handle(
         : inferMimeType(resolvedStoragePath);
     return `data:${mimeType};base64,${buffer.toString("base64")}`;
   },
+);
+
+
+ipcMain.handle("attachments:materialize", async (_event, request: unknown) => {
+  await ensureStorageDirectories();
+  const { chatId, messageId, attachments } = normalizeMaterializeAttachmentsRequest(request);
+  const workspaceRoot = await ensureChatWorkspaceRoot(chatId);
+  const materialized = await Promise.all(
+    attachments.map((attachment) =>
+      copyAttachmentIntoChatWorkspace({ chatId, messageId, attachment }),
+    ),
+  );
+  return { attachments: materialized, workspaceRoot };
+});
+
+ipcMain.handle("attachments:export", async (_event, request: unknown) =>
+  exportManagedFile(request),
 );
 
 ipcMain.handle(
@@ -4431,15 +4843,26 @@ ipcMain.handle(
 
 ipcMain.handle("storage:providers-state:load", async () => {
   await initializeJsonStorageIfNeeded();
-  return readJsonFile<unknown>(getStoragePaths().providers, undefined);
+  return readJsonFileWithRecovery<unknown>(getStoragePaths().providers, undefined);
 });
 
 ipcMain.handle(
   "storage:providers-state:save",
   async (_event, value: unknown) => {
+    // Guard against wiping providers with an empty payload. The renderer only
+    // ever sends a populated ProvidersState; null/undefined here means
+    // something went wrong upstream, so refuse rather than clobber the file.
+    if (value === null || value === undefined) {
+      console.warn(
+        "[storage] Ignoring providers-state save with empty value to avoid data loss.",
+      );
+      return;
+    }
     await queueStorageWrite(async () => {
       await initializeJsonStorageIfNeeded();
-      await writeJsonAtomic(getStoragePaths().providers, value);
+      await writeJsonAtomic(getStoragePaths().providers, value, {
+        backup: true,
+      });
     });
   },
 );
@@ -4524,6 +4947,16 @@ ipcMain.handle("storage:app-settings:load", async () => {
 
 ipcMain.handle("storage:app-settings:save", async (_event, value: unknown) => {
   await writeSettingsPatch({ appSettings: normalizeAppSettings(value) });
+});
+
+ipcMain.handle("storage:mcp-settings:load", async () => {
+  await initializeJsonStorageIfNeeded();
+  const settings = await readSettingsFile();
+  return normalizeMcpSettings(settings.mcpSettings);
+});
+
+ipcMain.handle("storage:mcp-settings:save", async (_event, value: unknown) => {
+  await writeSettingsPatch({ mcpSettings: normalizeMcpSettings(value) });
 });
 
 ipcMain.handle("storage:tools:load", async () => loadJsonTools());
@@ -4624,6 +5057,62 @@ ipcMain.handle("tools:execute", async (_event, request: unknown) => {
 });
 
 ipcMain.handle("tools:cancel", async (_event, executionId: unknown) => {
+  const key = safeString(executionId).trim();
+  if (!key) return { cancelled: false };
+  const execution = activeToolExecutions.get(key);
+  if (!execution) return { cancelled: false };
+
+  execution.cancel();
+  activeToolExecutions.delete(key);
+  return { cancelled: true };
+});
+
+ipcMain.handle("mcp:refresh-tools", async (_event, request: unknown) => {
+  const value = isPlainObject(request) ? request : {};
+  const settings = normalizeMcpSettings(value.settings);
+  const serverId = safeString(value.serverId).trim() || undefined;
+  return refreshMcpTools(settings, serverId);
+});
+
+ipcMain.handle("mcp:test-server", async (_event, request: unknown) => {
+  const value = isPlainObject(request) ? request : {};
+  const settings = normalizeMcpSettings({ enabled: true, servers: [value.server] });
+  const server = settings.servers[0];
+  if (!server) throw new Error("MCP server is required.");
+  return testMcpServer(server);
+});
+
+ipcMain.handle("mcp:execute-tool", async (_event, request: unknown) => {
+  const value = isPlainObject(request) ? request : {};
+  const executionId = safeString(value.executionId).trim();
+  const controller = new AbortController();
+
+  if (executionId) {
+    activeToolExecutions.set(executionId, {
+      cancel: () => controller.abort(),
+    });
+  }
+
+  try {
+    await initializeJsonStorageIfNeeded();
+    const settingsFile = await readSettingsFile();
+    const settings = normalizeMcpSettings(settingsFile.mcpSettings);
+    const tool = isPlainObject(value.tool) ? value.tool : {};
+    const toolName = safeString(tool.name).trim() || safeString(value.name).trim();
+    if (!toolName) throw new Error("MCP tool name is required.");
+
+    return await executeMcpTool({
+      settings,
+      toolName,
+      args: value.args,
+      signal: controller.signal,
+    });
+  } finally {
+    if (executionId) activeToolExecutions.delete(executionId);
+  }
+});
+
+ipcMain.handle("mcp:cancel", async (_event, executionId: unknown) => {
   const key = safeString(executionId).trim();
   if (!key) return { cancelled: false };
   const execution = activeToolExecutions.get(key);
@@ -4804,3 +5293,8 @@ app.on("activate", () => {
 });
 
 app.whenReady().then(createWindow);
+
+
+ipcMain.handle("workspace:ensure-chat", async (_event, chatId: unknown) =>
+  ensureChatWorkspaceRoot(chatId),
+);

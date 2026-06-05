@@ -8,6 +8,7 @@ import type {
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
+  McpSettings,
   ChatWorkspaceRoot,
   ChatAttachment,
   ToolCommandResult,
@@ -28,6 +29,11 @@ type AttachmentProcessResult = {
   attachments: ChatAttachment[];
   totalExtractedChars: number;
   warnings: string[];
+};
+
+type AttachmentMaterializeResult = {
+  attachments: ChatAttachment[];
+  workspaceRoot: ChatWorkspaceRoot;
 };
 
 type AiProviderRequest = {
@@ -79,8 +85,13 @@ declare global {
       loadModels: (request: AiProviderRequest) => Promise<unknown>;
       sendChat: (request: AiProviderRequest) => Promise<any>;
       pickAttachments: () => Promise<AttachmentInput[]>;
+      readClipboardFilePaths: () => Promise<string[]>;
+      readClipboardFilePathsSync: () => string[];
+      cleanupChatMessageWorkspace: (request: { chatId: string; messageId: string; generatedFileStoragePaths?: string[] }) => Promise<{ deleted: number }>;
       processAttachments: (request: AttachmentInput[] | { inputs: AttachmentInput[] }) => Promise<AttachmentProcessResult>;
       readAttachmentDataUrl: (request: { storagePath: string; mimeType?: string }) => Promise<string>;
+      materializeAttachments: (request: { chatId: string; messageId: string; attachments: ChatAttachment[] }) => Promise<AttachmentMaterializeResult>;
+      exportAttachment: (request: { storagePath: string; name?: string }) => Promise<{ cancelled: boolean; path?: string }>;
       deleteUnusedAttachments: (request: ChatAttachment[] | { attachments?: ChatAttachment[]; storagePaths?: string[]; storagePath?: string }) => Promise<{ deleted: number }>;
       deleteTemporaryAttachments: (request: ChatAttachment[] | { attachments?: ChatAttachment[]; storagePaths?: string[]; storagePath?: string }) => Promise<{ deleted: number }>;
       getPathForFile: (file: File) => string;
@@ -130,6 +141,8 @@ declare global {
       saveAgentsSettings: (value: AgentsSettings) => Promise<void>;
       loadAppSettings: () => Promise<AppSettings | undefined>;
       saveAppSettings: (value: AppSettings) => Promise<void>;
+      loadMcpSettings: () => Promise<McpSettings | undefined>;
+      saveMcpSettings: (value: McpSettings) => Promise<void>;
       loadTools: () => Promise<LoadedToolInfo[]>;
       saveTool: (tool: LoadedToolInfo) => Promise<LoadedToolInfo>;
       deleteTool: (toolId: string) => Promise<void>;
@@ -163,6 +176,7 @@ declare global {
         | { cancelled: false; path: string; name: string }
       >;
       openFolder: (folderPath: string) => Promise<void>;
+      ensureChatWorkspace: (chatId: string) => Promise<ChatWorkspaceRoot>;
     };
   }
 }
@@ -181,6 +195,17 @@ declare global {
         tool: LoadedToolInfo;
         args: unknown;
       }) => Promise<ToolCommandResult>;
+    };
+  }
+}
+
+declare global {
+  interface Window {
+    chatForgeMcp?: {
+      refreshTools: (request: { settings: McpSettings; serverId?: string }) => Promise<{ settings: McpSettings; tools: LoadedToolInfo[] }>;
+      testServer: (request: { server: McpSettings["servers"][number] }) => Promise<{ ok: boolean; message: string; toolCount?: number }>;
+      executeTool: (request: { executionId?: string; tool: LoadedToolInfo; args: unknown }) => Promise<ToolCommandResult>;
+      cancel: (executionId: string) => Promise<{ cancelled: boolean }>;
     };
   }
 }

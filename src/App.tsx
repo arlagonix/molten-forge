@@ -18,6 +18,7 @@ import { ToolExecutionBlock } from "@/components/ai-chat/tool-execution-block";
 import { WorkspaceRootsControl } from "@/components/ai-chat/workspace-roots-control";
 import { ChatSidebar } from "@/components/chat-sidebar";
 import { SystemPromptDialog } from "@/components/dialogs/system-prompt-dialog";
+import { McpDialog } from "@/components/mcp-dialog";
 import { ProviderSettingsDialog } from "@/components/provider-settings-dialog";
 import { SettingsDialog } from "@/components/settings-dialog";
 import { SkillsDialog } from "@/components/skills-dialog";
@@ -37,6 +38,14 @@ import {
   ASK_USER_TOOL_NAME,
   CALL_AGENT_TOOL,
   CALL_AGENT_TOOL_NAME,
+  ARCHIVE_CREATE_TOOL,
+  ARCHIVE_CREATE_TOOL_NAME,
+  ARCHIVE_EXTRACT_TOOL,
+  ARCHIVE_EXTRACT_TOOL_NAME,
+  CHAT_FILE_CREATE_TOOL,
+  CHAT_FILE_CREATE_TOOL_NAME,
+  DOCUMENT_CONVERT_TOOL,
+  DOCUMENT_CONVERT_TOOL_NAME,
   DEFAULT_AGENTS_SETTINGS,
   DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
@@ -76,6 +85,7 @@ import {
   sortChatsByUpdatedAt,
 } from "@/lib/ai-chat/chat-utils";
 import { estimateAttachmentsTokens } from "@/lib/ai-chat/attachment-limits";
+import { buildLoadedMcpTools, DEFAULT_MCP_SETTINGS } from "@/lib/ai-chat/mcp";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
   getEffectiveWorkspaceRoots,
@@ -89,6 +99,7 @@ import {
   loadAgentsSettings,
   loadAppSettings,
   loadChats,
+  loadMcpSettings,
   loadProvidersState,
   loadSkills,
   loadSkillsSettings,
@@ -99,6 +110,7 @@ import {
   saveAgentsSettings,
   saveAppSettings,
   saveChat,
+  saveMcpSettings,
   saveProvidersState,
   saveSkillsSettings,
   saveSystemPrompt,
@@ -117,6 +129,7 @@ import type {
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
+  McpSettings,
   ProviderConfig,
   ProvidersState,
   SkillsSettings,
@@ -211,6 +224,9 @@ export default function Home() {
     chatTitleGenerationMode: "local",
     fontFamily: "sans",
   });
+  const [mcpSettings, setMcpSettings] = useState<McpSettings>(
+    DEFAULT_MCP_SETTINGS,
+  );
   const [loadedTools, setLoadedTools] = useState<LoadedToolInfo[]>([]);
   const [loadedSkills, setLoadedSkills] = useState<LoadedSkillInfo[]>([]);
   const [loadedAgents, setLoadedAgents] = useState<LoadedAgentInfo[]>([]);
@@ -273,6 +289,7 @@ export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [providerSettingsOpen, setProviderSettingsOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = useState(false);
@@ -311,7 +328,7 @@ export default function Home() {
   const pendingChatSwitchFrameRef = useRef<number | null>(null);
   const finishChatSwitchLoadingFrameRef = useRef<number | null>(null);
 
-  const { resolvedTheme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
 
   useEffect(() => {
     document.title = APP_TITLE;
@@ -335,7 +352,7 @@ export default function Home() {
       const isFindShortcut =
         (event.ctrlKey || event.metaKey) &&
         !event.altKey &&
-        event.key.toLowerCase() === "f";
+        event.code === "KeyF";
 
       if (!isFindShortcut) return;
 
@@ -578,6 +595,16 @@ export default function Home() {
       .filter((group) => group.models.length > 0);
   }, [providers, sidebarModelSearchValue]);
 
+  const loadedMcpTools = useMemo(
+    () => buildLoadedMcpTools(mcpSettings),
+    [mcpSettings],
+  );
+
+  const executableTools = useMemo(
+    () => [...loadedTools, ...loadedMcpTools],
+    [loadedTools, loadedMcpTools],
+  );
+
   const availableTools = useMemo(() => {
     const byName = new Map<string, LoadedToolInfo>();
 
@@ -592,14 +619,19 @@ export default function Home() {
       FILE_REPLACE_TEXT_TOOL,
       FILE_CREATE_TOOL,
       FILE_DELETE_TOOL,
+      ARCHIVE_EXTRACT_TOOL,
+      ARCHIVE_CREATE_TOOL,
+      DOCUMENT_CONVERT_TOOL,
+      CHAT_FILE_CREATE_TOOL,
       ...loadedTools,
+      ...loadedMcpTools,
     ]) {
       if (!isValidToolName(tool.name) || byName.has(tool.name)) continue;
       byName.set(tool.name, tool);
     }
 
     return [...byName.values()].sort(compareToolsByDisplayOrder);
-  }, [loadedTools]);
+  }, [loadedMcpTools, loadedTools]);
 
   const availableToolsByName = useMemo(() => {
     return new Map(availableTools.map((tool) => [tool.name, tool] as const));
@@ -623,9 +655,13 @@ export default function Home() {
       names.add(FILE_REPLACE_TEXT_TOOL_NAME);
     if (toolsSettings.fileCreateEnabled) names.add(FILE_CREATE_TOOL_NAME);
     if (toolsSettings.fileDeleteEnabled) names.add(FILE_DELETE_TOOL_NAME);
+    if (toolsSettings.archiveExtractEnabled) names.add(ARCHIVE_EXTRACT_TOOL_NAME);
+    if (toolsSettings.archiveCreateEnabled) names.add(ARCHIVE_CREATE_TOOL_NAME);
+    if (toolsSettings.documentConvertEnabled) names.add(DOCUMENT_CONVERT_TOOL_NAME);
+    if (toolsSettings.chatFileCreateEnabled) names.add(CHAT_FILE_CREATE_TOOL_NAME);
     if (agentsSettings.enabled) names.add(CALL_AGENT_TOOL_NAME);
 
-    for (const tool of loadedTools) {
+    for (const tool of executableTools) {
       if (
         tool.enabled &&
         tool.name !== ASK_USER_TOOL_NAME &&
@@ -638,6 +674,10 @@ export default function Home() {
         tool.name !== FILE_REPLACE_TEXT_TOOL_NAME &&
         tool.name !== FILE_CREATE_TOOL_NAME &&
         tool.name !== FILE_DELETE_TOOL_NAME &&
+        tool.name !== ARCHIVE_EXTRACT_TOOL_NAME &&
+        tool.name !== ARCHIVE_CREATE_TOOL_NAME &&
+        tool.name !== DOCUMENT_CONVERT_TOOL_NAME &&
+        tool.name !== CHAT_FILE_CREATE_TOOL_NAME &&
         isValidToolName(tool.name)
       ) {
         names.add(tool.name);
@@ -645,7 +685,7 @@ export default function Home() {
     }
 
     return names;
-  }, [agentsSettings.enabled, loadedTools, toolsSettings]);
+  }, [agentsSettings.enabled, executableTools, toolsSettings]);
 
   const activeChatEnabledToolNames = useMemo(() => {
     if (!activeChat) return [];
@@ -722,6 +762,40 @@ export default function Home() {
     isNewChatDraft,
     newChatDraftWorkspaceRoots,
   ]);
+
+  useEffect(() => {
+    if (isNewChatDraft || !activeChat) return;
+    if (activeChat.workspaceRoots?.some((root) => root.id === "chat")) return;
+    if (!window.chatForgeWorkspace?.ensureChatWorkspace) return;
+
+    let cancelled = false;
+
+    window.chatForgeWorkspace
+      .ensureChatWorkspace(activeChat.id)
+      .then((chatWorkspaceRoot) => {
+        if (cancelled) return;
+        updateChat(activeChat.id, (chat) => {
+          if (chat.workspaceRoots?.some((root) => root.id === "chat")) {
+            return chat;
+          }
+
+          return {
+            ...chat,
+            workspaceRoots: [
+              { ...chatWorkspaceRoot, automatic: true, kind: "chat" },
+              ...(chat.workspaceRoots ?? []),
+            ],
+          };
+        });
+      })
+      .catch((error) => {
+        console.error("Failed to ensure chat workspace:", error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChat?.id, activeChat?.workspaceRoots, isNewChatDraft]);
 
   const globallyEnabledSkillNames = useMemo(() => {
     if (!skillsSettings.enabled) return new Set<string>();
@@ -906,6 +980,7 @@ export default function Home() {
           loadedSkillsSettings,
           loadedAgentsSettings,
           loadedAppSettings,
+          loadedMcpSettings,
           loadedToolManifests,
           loadedSkillManifests,
           loadedAgentManifests,
@@ -918,6 +993,7 @@ export default function Home() {
           loadSkillsSettings(),
           loadAgentsSettings(),
           loadAppSettings(),
+          loadMcpSettings(),
           loadTools(),
           loadSkills(),
           loadAgents(),
@@ -960,6 +1036,7 @@ export default function Home() {
         setSkillsSettings(loadedSkillsSettings);
         setAgentsSettings(loadedAgentsSettings);
         setAppSettings(loadedAppSettings);
+        setMcpSettings(loadedMcpSettings);
         setLoadedTools(loadedToolManifests);
         setLoadedSkills(loadedSkillManifests);
         setLoadedAgents(loadedAgentManifests);
@@ -972,7 +1049,7 @@ export default function Home() {
         didHydrateRef.current = true;
         setMounted(true);
       } catch (error) {
-        console.error("Failed to load app data from IndexedDB:", error);
+        console.error("Failed to load app data:", error);
         const fallbackProvider = normalizeProviderForState(defaultProvider);
         savedChatSnapshotsRef.current = {};
         setProvidersState({
@@ -982,9 +1059,17 @@ export default function Home() {
         setChats([]);
         setActiveChatId(undefined);
         setIsNewChatDraft(true);
-        didHydrateRef.current = true;
+        // IMPORTANT: do NOT set didHydrateRef.current = true here. Hydration
+        // failed, so the in-memory state is a placeholder default — enabling
+        // the auto-save effects would persist that default OVER the real
+        // on-disk data (this is what was wiping providers). Leaving it false
+        // keeps the app usable while protecting existing data; a restart will
+        // retry the load.
         setMounted(true);
-        showError("Storage failed", labelForError(error));
+        showError(
+          "Storage failed",
+          `${labelForError(error)} Your saved data was left untouched — restart the app to retry. Avoid reconfiguring providers until it loads correctly.`,
+        );
       }
     }
 
@@ -1068,6 +1153,13 @@ export default function Home() {
       console.error("Failed to save app settings:", error),
     );
   }, [appSettings]);
+
+  useEffect(() => {
+    if (!didHydrateRef.current) return;
+    saveMcpSettings(mcpSettings).catch((error) =>
+      console.error("Failed to save MCP settings:", error),
+    );
+  }, [mcpSettings]);
 
   useEffect(() => {
     if (!didHydrateRef.current || !activeChatId) return;
@@ -1304,7 +1396,7 @@ export default function Home() {
         toolCall={toolCall}
         toolResult={toolResult}
         status={status}
-        loadedTools={loadedTools}
+        loadedTools={executableTools}
         isCollapsed={isCollapsed ?? isToolExecutionCollapsed(id)}
         onToggleCollapsed={onToggleCollapsed ?? toggleToolExecutionCollapsed}
       />
@@ -1403,7 +1495,7 @@ export default function Home() {
     skillsSettings,
     agentsSettings,
     chatTitleGenerationMode: appSettings.chatTitleGenerationMode,
-    loadedTools,
+    loadedTools: executableTools,
     availableToolsByName,
     loadedSkills,
     availableSkillsByName,
@@ -1423,8 +1515,14 @@ export default function Home() {
     isStickyScrollSuppressed,
     syncChatScrollState,
     executeExternalTool: (toolName, args, context) => {
-      const bridge = getToolsBridge();
+      const tool = executableTools.find((candidate) => candidate.name === toolName);
       const executionId = createId();
+      const isMcpTool = tool?.source === "mcp";
+      const bridge = isMcpTool ? window.chatForgeMcp : getToolsBridge();
+
+      if (!bridge) {
+        return Promise.reject(new Error(isMcpTool ? "MCP bridge is unavailable." : "Tools bridge is unavailable."));
+      }
 
       return new Promise<ToolCommandResult>((resolve, reject) => {
         let settled = false;
@@ -1437,7 +1535,7 @@ export default function Home() {
           if (settled) return;
           settled = true;
           cleanup();
-          resolve(value as Awaited<ReturnType<typeof bridge.execute>>);
+          resolve(value as ToolCommandResult);
         };
 
         const settleReject = (error: unknown) => {
@@ -1462,7 +1560,15 @@ export default function Home() {
         context?.signal?.addEventListener("abort", abortHandler, {
           once: true,
         });
-        bridge
+
+        if (isMcpTool) {
+          window.chatForgeMcp
+            ?.executeTool({ executionId, tool, args })
+            .then(settleResolve, settleReject);
+          return;
+        }
+
+        getToolsBridge()
           .execute({
             executionId,
             name: toolName,
@@ -1506,11 +1612,26 @@ export default function Home() {
 
       // Create and persist the real chat now, then queue the send for after
       // the new chat becomes the active chat (see the effect above).
+      const emptyChat = createEmptyChat();
+      let chatWorkspaceRoot: ChatWorkspaceRoot | undefined;
+      try {
+        chatWorkspaceRoot = await window.chatForgeWorkspace?.ensureChatWorkspace?.(
+          emptyChat.id,
+        );
+      } catch (error) {
+        console.error("Failed to create chat workspace:", error);
+      }
+
+      const workspaceRoots = [
+        ...(chatWorkspaceRoot
+          ? [{ ...chatWorkspaceRoot, automatic: true, kind: "chat" as const }]
+          : []),
+        ...newChatDraftWorkspaceRoots.map((root) => ({ ...root })),
+      ];
+
       const chat: ChatSession = {
-        ...createEmptyChat(),
-        workspaceRoots: newChatDraftWorkspaceRoots.length
-          ? newChatDraftWorkspaceRoots.map((root) => ({ ...root }))
-          : undefined,
+        ...emptyChat,
+        workspaceRoots: workspaceRoots.length ? workspaceRoots : undefined,
         fileToolAutoApproval:
           buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
       };
@@ -1875,10 +1996,10 @@ export default function Home() {
   const stableShowError = useStableCallback(showError);
   const toolDisplayKey = useMemo(
     () =>
-      loadedTools
+      executableTools
         .map((tool) => `${tool.name}:${tool.description ?? ""}`)
         .join("\n"),
-    [loadedTools],
+    [executableTools],
   );
   const skillDisplayKey = useMemo(
     () =>
@@ -2207,6 +2328,7 @@ export default function Home() {
         onOpenChange={setSettingsOpen}
         chatTitleGenerationMode={appSettings.chatTitleGenerationMode}
         appFontFamily={appSettings.fontFamily}
+        theme={theme}
         resolvedTheme={resolvedTheme}
         onToggleAiTitleGeneration={(checked) =>
           setAppSettings((currentSettings) => ({
@@ -2225,6 +2347,7 @@ export default function Home() {
         onOpenTools={() => setToolsOpen(true)}
         onOpenSkills={() => setSkillsOpen(true)}
         onOpenAgents={() => setAgentsOpen(true)}
+        onOpenMcp={() => setMcpOpen(true)}
         onOpenSystemPrompt={() => setSystemPromptOpen(true)}
       />
 
@@ -2264,6 +2387,15 @@ export default function Home() {
         availableTools={availableTools}
         availableSkills={availableSkills}
         providers={providers}
+        showSuccess={stableShowSuccess}
+        showError={stableShowError}
+      />
+
+      <McpDialog
+        open={mcpOpen}
+        onOpenChange={setMcpOpen}
+        mcpSettings={mcpSettings}
+        onMcpSettingsChange={setMcpSettings}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />

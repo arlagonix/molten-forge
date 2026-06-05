@@ -18,12 +18,32 @@ contextBridge.exposeInMainWorld("codeForgeAI", {
     return ipcRenderer.invoke("attachments:pick");
   },
 
+  readClipboardFilePaths() {
+    return ipcRenderer.invoke("attachments:clipboard-file-paths");
+  },
+
+  readClipboardFilePathsSync() {
+    return ipcRenderer.sendSync("attachments:clipboard-file-paths-sync");
+  },
+
+  cleanupChatMessageWorkspace(request: unknown) {
+    return ipcRenderer.invoke("attachments:cleanup-message-workspace", request);
+  },
+
   processAttachments(request: unknown) {
     return ipcRenderer.invoke("attachments:process", request);
   },
 
   readAttachmentDataUrl(request: unknown) {
     return ipcRenderer.invoke("attachments:read-data-url", request);
+  },
+
+  materializeAttachments(request: unknown) {
+    return ipcRenderer.invoke("attachments:materialize", request);
+  },
+
+  exportAttachment(request: unknown) {
+    return ipcRenderer.invoke("attachments:export", request);
   },
 
   deleteUnusedAttachments(request: unknown) {
@@ -159,6 +179,14 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
     return ipcRenderer.invoke("storage:app-settings:save", value);
   },
 
+  loadMcpSettings() {
+    return ipcRenderer.invoke("storage:mcp-settings:load");
+  },
+
+  saveMcpSettings(value: unknown) {
+    return ipcRenderer.invoke("storage:mcp-settings:save", value);
+  },
+
   loadTools() {
     return ipcRenderer.invoke("storage:tools:load");
   },
@@ -252,6 +280,10 @@ contextBridge.exposeInMainWorld("chatForgeWorkspace", {
   openFolder(folderPath: unknown) {
     return ipcRenderer.invoke("workspace:open-folder", folderPath);
   },
+
+  ensureChatWorkspace(chatId: unknown) {
+    return ipcRenderer.invoke("workspace:ensure-chat", chatId);
+  },
 });
 
 contextBridge.exposeInMainWorld("chatForgeTools", {
@@ -287,5 +319,23 @@ contextBridge.exposeInMainWorld("chatForgeFind", {
     return () => {
       ipcRenderer.removeListener("find-in-page:result", listener);
     };
+  },
+});
+
+contextBridge.exposeInMainWorld("chatForgeMcp", {
+  refreshTools(request: unknown) {
+    return ipcRenderer.invoke("mcp:refresh-tools", request);
+  },
+
+  testServer(request: unknown) {
+    return ipcRenderer.invoke("mcp:test-server", request);
+  },
+
+  executeTool(request: unknown) {
+    return ipcRenderer.invoke("mcp:execute-tool", request);
+  },
+
+  cancel(executionId: unknown) {
+    return ipcRenderer.invoke("mcp:cancel", executionId);
   },
 });

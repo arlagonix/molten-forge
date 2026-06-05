@@ -186,6 +186,20 @@ function pruneActiveSkillNamesForRegeneration({
   ];
 }
 
+
+const CHAT_WORKSPACE_ROOT_ID = "chat";
+
+function mergeChatWorkspaceRoot(
+  workspaceRoots: ChatWorkspaceRoot[] | undefined,
+  root: ChatWorkspaceRoot,
+) {
+  const existingRoots = workspaceRoots ?? [];
+  const withoutChatRoot = existingRoots.filter(
+    (candidate) => candidate.id !== CHAT_WORKSPACE_ROOT_ID,
+  );
+  return [{ ...root, automatic: true, kind: "chat" as const }, ...withoutChatRoot];
+}
+
 export function useChatGeneration({
   activeChat,
   activeChatId,
@@ -2437,6 +2451,72 @@ export function useChatGeneration({
     }
   }
 
+  async function prepareChatWorkspaceForRun(
+    chat: ChatSession,
+    messageId: string,
+    attachments: ChatAttachment[],
+  ): Promise<{ chatForRun: ChatSession; attachmentsForRun: ChatAttachment[] }> {
+    let chatForRun = chat;
+    let attachmentsForRun = attachments;
+
+    try {
+      const chatWorkspaceRoot = await window.chatForgeWorkspace?.ensureChatWorkspace?.(chat.id);
+      if (chatWorkspaceRoot) {
+        chatForRun = {
+          ...chatForRun,
+          workspaceRoots: mergeChatWorkspaceRoot(
+            chatForRun.workspaceRoots,
+            chatWorkspaceRoot,
+          ),
+        };
+      }
+    } catch (error) {
+      console.error("Failed to ensure chat workspace:", error);
+      showError("Chat workspace failed", labelForError(error));
+    }
+
+    if (attachmentsForRun.length && window.codeForgeAI?.materializeAttachments) {
+      try {
+        const result = await window.codeForgeAI.materializeAttachments({
+          chatId: chat.id,
+          messageId,
+          attachments: attachmentsForRun,
+        });
+
+        attachmentsForRun = result.attachments;
+        chatForRun = {
+          ...chatForRun,
+          workspaceRoots: mergeChatWorkspaceRoot(
+            chatForRun.workspaceRoots,
+            result.workspaceRoot,
+          ),
+          messages: chatForRun.messages.map((message) =>
+            message.id === messageId && message.role === "user"
+              ? { ...message, attachments: attachmentsForRun }
+              : message,
+          ),
+        };
+      } catch (error) {
+        console.error("Failed to copy attachments into chat workspace:", error);
+        showError("Attachment workspace failed", labelForError(error));
+      }
+    }
+
+    if (chatForRun !== chat) {
+      updateChat(chat.id, (currentChat) => ({
+        ...currentChat,
+        workspaceRoots: chatForRun.workspaceRoots,
+        messages: currentChat.messages.map((message) =>
+          message.id === messageId && message.role === "user"
+            ? { ...message, attachments: attachmentsForRun }
+            : message,
+        ),
+      }));
+    }
+
+    return { chatForRun, attachmentsForRun };
+  }
+
   async function runAssistantVariant({
     chatId,
     contextMessages,
@@ -3381,22 +3461,29 @@ export function useChatGeneration({
     const oneShotAgentNames = validateAgentMentions(userMessage);
     if (!oneShotAgentNames) return false;
 
-    const activeSkillNamesForRun = getActiveSkillNamesForRun(
+    const userMessageId = createId();
+    const { chatForRun, attachmentsForRun } = await prepareChatWorkspaceForRun(
       activeChat,
+      userMessageId,
+      attachments,
+    );
+
+    const activeSkillNamesForRun = getActiveSkillNamesForRun(
+      chatForRun,
       oneShotSkillNames,
     );
     const toolsForRun = getToolsForChat(
-      activeChat,
+      chatForRun,
       oneShotToolNames,
       activeSkillNamesForRun,
     );
 
     const userChatMessage: ChatMessage = {
-      id: createId(),
+      id: userMessageId,
       role: "user",
       content: userMessage,
       createdAt: new Date().toISOString(),
-      ...(attachments.length ? { attachments } : {}),
+      ...(attachmentsForRun.length ? { attachments: attachmentsForRun } : {}),
     };
 
     const assistantMessageId = createId();
@@ -3409,19 +3496,20 @@ export function useChatGeneration({
       responseStartedAt,
     });
 
-    const contextMessages = activeChat.messages;
+    const contextMessages = chatForRun.messages;
     const nextMessages = [
-      ...activeChat.messages,
+      ...chatForRun.messages,
       userChatMessage,
       assistantMessage,
     ];
 
     armStickyScrollToBottom();
-    updateChat(activeChat.id, (chat) => ({
+    updateChat(chatForRun.id, (chat) => ({
       ...chat,
+      workspaceRoots: chatForRun.workspaceRoots,
       title:
         chat.messages.length === 0 && isAutoTitledChat(chat)
-          ? titleFromMessage(userMessage || attachments[0]?.name || "Attached files")
+          ? titleFromMessage(userMessage || attachmentsForRun[0]?.name || "Attached files")
           : chat.title,
       titleMode:
         chat.messages.length === 0 && isAutoTitledChat(chat)
@@ -3433,10 +3521,10 @@ export function useChatGeneration({
     }));
 
     void runAssistantVariant({
-      chatId: activeChat.id,
+      chatId: chatForRun.id,
       contextMessages,
       userMessage,
-      userAttachments: attachments,
+      userAttachments: attachmentsForRun,
       assistantMessageId,
       variantId,
       responseStartedAtMs,
@@ -3488,17 +3576,23 @@ export function useChatGeneration({
     const oneShotAgentNames = validateAgentMentions(userMessage);
     if (!oneShotAgentNames) return;
 
-    const contextMessages = activeChat.messages.slice(0, userIndex);
-    const retainedMessages = activeChat.messages.slice(0, userIndex + 1);
-    const discardedMessages = activeChat.messages.slice(userIndex + 1);
+    const { chatForRun, attachmentsForRun } = await prepareChatWorkspaceForRun(
+      activeChat,
+      userMessageSource.id,
+      userAttachments,
+    );
+
+    const contextMessages = chatForRun.messages.slice(0, userIndex);
+    const retainedMessages = chatForRun.messages.slice(0, userIndex + 1);
+    const discardedMessages = chatForRun.messages.slice(userIndex + 1);
     const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
-      activeSkillNames: activeChat.activeSkillNames ?? [],
+      activeSkillNames: chatForRun.activeSkillNames ?? [],
       retainedMessages,
       discardedMessages,
       oneShotSkillNames,
     });
     const toolsForRun = getToolsForChat(
-      activeChat,
+      chatForRun,
       oneShotToolNames,
       activeSkillNamesForRun,
     );
@@ -3508,8 +3602,9 @@ export function useChatGeneration({
 
     armStickyScrollToBottom();
 
-    updateChat(activeChat.id, (chat) => ({
+    updateChat(chatForRun.id, (chat) => ({
       ...chat,
+      workspaceRoots: chatForRun.workspaceRoots,
       messages: chat.messages.slice(0, assistantIndex + 1).map((message) => {
         if (message.id !== assistantMessageId || message.role !== "assistant") {
           return message;
@@ -3531,10 +3626,10 @@ export function useChatGeneration({
     armStickyScrollToBottom();
 
     await runAssistantVariant({
-      chatId: activeChat.id,
+      chatId: chatForRun.id,
       contextMessages,
       userMessage,
-      userAttachments,
+      userAttachments: attachmentsForRun,
       assistantMessageId,
       variantId,
       responseStartedAtMs,
@@ -3576,15 +3671,20 @@ export function useChatGeneration({
       return;
     }
 
-    const contextMessages = activeChat.messages.slice(0, assistantIndex + 1);
-    const discardedMessages = activeChat.messages.slice(assistantIndex + 1);
+    const { chatForRun } = await prepareChatWorkspaceForRun(
+      activeChat,
+      assistantMessageId,
+      [],
+    );
+    const contextMessages = chatForRun.messages.slice(0, assistantIndex + 1);
+    const discardedMessages = chatForRun.messages.slice(assistantIndex + 1);
     const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
-      activeSkillNames: activeChat.activeSkillNames ?? [],
+      activeSkillNames: chatForRun.activeSkillNames ?? [],
       retainedMessages: contextMessages,
       discardedMessages,
       oneShotSkillNames: [],
     });
-    const toolsForRun = getToolsForChat(activeChat, [], activeSkillNamesForRun);
+    const toolsForRun = getToolsForChat(chatForRun, [], activeSkillNamesForRun);
     const userMessage =
       "Continue generating from where the previous assistant message stopped. Do not repeat already generated content.";
 
@@ -3600,8 +3700,9 @@ export function useChatGeneration({
 
     armStickyScrollToBottom();
 
-    updateChat(activeChat.id, (chat) => ({
+    updateChat(chatForRun.id, (chat) => ({
       ...chat,
+      workspaceRoots: chatForRun.workspaceRoots,
       messages: [
         ...chat.messages.slice(0, assistantIndex + 1),
         assistantMessage,
@@ -3611,7 +3712,7 @@ export function useChatGeneration({
     }));
 
     await runAssistantVariant({
-      chatId: activeChat.id,
+      chatId: chatForRun.id,
       contextMessages,
       userMessage,
       assistantMessageId: nextAssistantMessageId,
@@ -3661,15 +3762,21 @@ export function useChatGeneration({
       return;
     }
 
-    const contextMessages = activeChat.messages.slice(0, userIndex);
+    const { chatForRun, attachmentsForRun } = await prepareChatWorkspaceForRun(
+      activeChat,
+      currentMessage.id,
+      finalAttachments,
+    );
+
+    const contextMessages = chatForRun.messages.slice(0, userIndex);
     const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
-      activeSkillNames: activeChat.activeSkillNames ?? [],
+      activeSkillNames: chatForRun.activeSkillNames ?? [],
       retainedMessages: contextMessages,
-      discardedMessages: activeChat.messages.slice(userIndex + 1),
+      discardedMessages: chatForRun.messages.slice(userIndex + 1),
       oneShotSkillNames,
     });
     const toolsForRun = getToolsForChat(
-      activeChat,
+      chatForRun,
       oneShotToolNames,
       activeSkillNamesForRun,
     );
@@ -3681,7 +3788,7 @@ export function useChatGeneration({
     const editedUserMessage: ChatMessage = {
       ...currentMessage,
       content: userMessage,
-      ...(finalAttachments.length ? { attachments: finalAttachments } : { attachments: undefined }),
+      ...(attachmentsForRun.length ? { attachments: attachmentsForRun } : { attachments: undefined }),
     };
     const assistantMessage = createStreamingAssistantMessage({
       assistantMessageId,
@@ -3697,11 +3804,12 @@ export function useChatGeneration({
     armStickyScrollToBottom();
     setEditingMessageId(null);
 
-    updateChat(activeChat.id, (chat) => ({
+    updateChat(chatForRun.id, (chat) => ({
       ...chat,
+      workspaceRoots: chatForRun.workspaceRoots,
       title:
         userIndex === 0 && isAutoTitledChat(chat)
-          ? titleFromMessage(userMessage || finalAttachments[0]?.name || "Attached files")
+          ? titleFromMessage(userMessage || attachmentsForRun[0]?.name || "Attached files")
           : chat.title,
       titleMode:
         userIndex === 0 && isAutoTitledChat(chat) ? "auto" : chat.titleMode,
@@ -3711,10 +3819,10 @@ export function useChatGeneration({
     }));
 
     await runAssistantVariant({
-      chatId: activeChat.id,
+      chatId: chatForRun.id,
       contextMessages,
       userMessage,
-      userAttachments: finalAttachments,
+      userAttachments: attachmentsForRun,
       assistantMessageId,
       variantId,
       responseStartedAtMs,

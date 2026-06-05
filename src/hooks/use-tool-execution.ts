@@ -423,6 +423,7 @@ export function useToolExecution({
       isError: result.timedOut || result.exitCode !== 0,
       execution: result.execution,
       changePreview: result.changePreview,
+      generatedFiles: result.generatedFiles,
     };
   }
 
@@ -562,6 +563,7 @@ export function useToolExecution({
           isError: execution.timedOut || execution.exitCode !== 0,
           execution: execution.execution,
           changePreview: execution.changePreview,
+          generatedFiles: execution.generatedFiles,
         };
       }
 

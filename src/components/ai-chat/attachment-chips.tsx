@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Download,
   FileArchive,
   FileCode,
   FileText,
@@ -83,7 +84,7 @@ function AttachmentIcon({
     return (
       <button
         type="button"
-        className="size-9 shrink-0 overflow-hidden border bg-background focus:outline-none focus-visible:ring-0"
+        className="size-9 shrink-0 overflow-hidden border bg-transparent focus:outline-none focus-visible:ring-0"
         onClick={(event) => {
           event.stopPropagation();
           onPreview(attachment);
@@ -112,19 +113,23 @@ function AttachmentIcon({
     return (
       <button
         type="button"
-        className="flex size-9 shrink-0 items-center justify-center border bg-background focus:outline-none focus-visible:ring-0"
+        className="flex size-8 shrink-0 items-center justify-center focus:outline-none focus-visible:ring-0"
         onClick={(event) => {
           event.stopPropagation();
           onPreview(attachment);
         }}
         title="Preview image"
       >
-        <Icon className="size-4 text-muted-foreground" />
+        <Icon className="size-5 text-muted-foreground" />
       </button>
     );
   }
 
-  return <Icon className="size-4 shrink-0 text-muted-foreground" />;
+  return (
+    <span className="flex size-8 shrink-0 items-center justify-center">
+      <Icon className="size-5 text-muted-foreground" />
+    </span>
+  );
 }
 
 export function AttachmentChips({
@@ -230,6 +235,28 @@ export function AttachmentChips({
 
     return () => window.cancelAnimationFrame(frameId);
   }, [fitPreviewToViewport, previewImage?.dataUrl]);
+
+  async function handleDownloadAttachment(attachment: ChatAttachment) {
+    if (!attachment.storagePath) {
+      toast.error("Attachment file is not available for download.");
+      return;
+    }
+
+    try {
+      const result = await window.codeForgeAI?.exportAttachment?.({
+        storagePath: attachment.storagePath,
+        name: attachment.name,
+      });
+
+      if (!result || result.cancelled) return;
+      toast.success("File downloaded", { description: result.path });
+    } catch (error) {
+      toast.error("Failed to download file", {
+        description:
+          error instanceof Error ? error.message : "Unknown download error.",
+      });
+    }
+  }
 
   async function handlePreviewImage(attachment: ChatAttachment) {
     if (attachment.kind !== "image") return;
@@ -385,7 +412,7 @@ export function AttachmentChips({
               <div
                 key={attachment.id}
                 className={cn(
-                  "flex max-w-full items-center gap-2 border bg-muted/40 px-2 py-1 text-xs",
+                  "flex min-h-12 min-w-0 max-w-[15rem] items-center gap-2 border bg-muted/25 px-2 py-1.5 text-xs",
                   attachment.error && "border-destructive/40 bg-destructive/10",
                 )}
                 title={attachment.error ?? attachment.name}
@@ -394,13 +421,13 @@ export function AttachmentChips({
                   attachment={attachment}
                   onPreview={handlePreviewImage}
                 />
-                <span className="min-w-0 max-w-[14rem] truncate font-medium">
-                  {attachment.name}
-                </span>
-                <span className="shrink-0 text-muted-foreground">
-                  {attachment.kind === "archive" && childCount
-                    ? `${childCount} files`
-                    : formatAttachmentSize(attachment.sizeBytes)}
+                <span className="grid min-w-0 flex-1 gap-0.5">
+                  <span className="truncate font-medium">{attachment.name}</span>
+                  <span className="truncate text-muted-foreground">
+                    {attachment.kind === "archive" && childCount
+                      ? `${childCount} files · ${formatAttachmentSize(attachment.sizeBytes)}`
+                      : formatAttachmentSize(attachment.sizeBytes)}
+                  </span>
                 </span>
                 {attachment.truncated && (
                   <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
@@ -410,18 +437,35 @@ export function AttachmentChips({
                 {attachment.error && (
                   <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
                 )}
-                {!readOnly && onRemove && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="h-5 w-5 shrink-0"
-                    onClick={() => onRemove(attachment.id)}
-                    title="Remove attachment"
-                  >
-                    <X className="size-3" />
-                  </Button>
-                )}
+                <span className="ml-auto flex shrink-0 items-center gap-1">
+                  {attachment.storagePath && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-7 w-7 shrink-0 bg-muted/40 hover:bg-muted"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void handleDownloadAttachment(attachment);
+                      }}
+                      title="Download attachment"
+                    >
+                      <Download className="size-3.5" />
+                    </Button>
+                  )}
+                  {!readOnly && onRemove && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-7 w-7 shrink-0 bg-muted/40 hover:bg-muted"
+                      onClick={() => onRemove(attachment.id)}
+                      title="Remove attachment"
+                    >
+                      <X className="size-3.5" />
+                    </Button>
+                  )}
+                </span>
               </div>
             );
           })}

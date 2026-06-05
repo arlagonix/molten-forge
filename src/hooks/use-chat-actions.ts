@@ -25,6 +25,40 @@ import type {
   LoadedToolInfo,
 } from "@/lib/ai-chat/types";
 
+function collectGeneratedFileStoragePathsFromMessage(message: ChatMessage) {
+  if (message.role !== "assistant") return [];
+
+  const paths = new Set<string>();
+  for (const variant of message.variants) {
+    for (const toolResult of variant.toolResults ?? []) {
+      for (const generatedFile of toolResult.generatedFiles ?? []) {
+        if (generatedFile.storagePath) paths.add(generatedFile.storagePath);
+      }
+    }
+
+    for (const step of variant.processSteps ?? []) {
+      if (!("toolResult" in step) || !step.toolResult) continue;
+      for (const generatedFile of step.toolResult.generatedFiles ?? []) {
+        if (generatedFile.storagePath) paths.add(generatedFile.storagePath);
+      }
+    }
+  }
+
+  return Array.from(paths);
+}
+
+function cleanupDeletedMessageWorkspace(chatId: string, message: ChatMessage) {
+  void window.codeForgeAI
+    ?.cleanupChatMessageWorkspace?.({
+      chatId,
+      messageId: message.id,
+      generatedFileStoragePaths: collectGeneratedFileStoragePathsFromMessage(message),
+    })
+    .catch((error) => {
+      console.error("Failed to clean up deleted message workspace files:", error);
+    });
+}
+
 export function useChatActions({
   activeChat,
   activeChatId,
@@ -122,6 +156,11 @@ export function useChatActions({
       showInfo("Wait until generation finishes before deleting messages.");
       return;
     }
+
+    const deletedMessage = activeChat.messages.find(
+      (message) => message.id === messageId,
+    );
+    if (deletedMessage) cleanupDeletedMessageWorkspace(activeChat.id, deletedMessage);
 
     updateActiveChatMessages((currentMessages) =>
       currentMessages.filter((message) => message.id !== messageId),

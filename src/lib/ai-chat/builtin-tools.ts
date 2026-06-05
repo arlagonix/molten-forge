@@ -5,6 +5,10 @@ import {
   FILE_REPLACE_TEXT_TOOL_NAME,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL_NAME,
+  ARCHIVE_EXTRACT_TOOL_NAME,
+  ARCHIVE_CREATE_TOOL_NAME,
+  DOCUMENT_CONVERT_TOOL_NAME,
+  CHAT_FILE_CREATE_TOOL_NAME,
   FILE_TOOL_NAMES,
   isFileToolName,
   requiresFileToolApproval,
@@ -41,6 +45,10 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   fileReplaceTextEnabled: false,
   fileCreateEnabled: true,
   fileDeleteEnabled: false,
+  archiveExtractEnabled: true,
+  archiveCreateEnabled: true,
+  documentConvertEnabled: true,
+  chatFileCreateEnabled: true,
   fileReplaceTextAutoApproveEnabled: false,
   fileCreateAutoApproveEnabled: false,
   fileDeleteAutoApproveEnabled: false,
@@ -118,6 +126,10 @@ export {
   FILE_REPLACE_TEXT_TOOL_NAME,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL_NAME,
+  ARCHIVE_EXTRACT_TOOL_NAME,
+  ARCHIVE_CREATE_TOOL_NAME,
+  DOCUMENT_CONVERT_TOOL_NAME,
+  CHAT_FILE_CREATE_TOOL_NAME,
   FILE_TOOL_NAMES,
   isFileToolName,
   requiresFileToolApproval,
@@ -508,6 +520,106 @@ export const FILE_CREATE_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
+export const ARCHIVE_EXTRACT_TOOL: LoadedToolInfo = {
+  id: "builtin-archive-extract",
+  name: ARCHIVE_EXTRACT_TOOL_NAME,
+  enabled: true,
+  description:
+    "Extract an archive file from an approved workspace root into a collision-safe folder inside that workspace. Use this only when archive contents are needed.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: { type: "string", description: "Archive file path to extract." },
+      rootId: { type: "string", description: "Optional workspace root id." },
+      outputPath: {
+        type: "string",
+        description:
+          "Optional output folder path inside the same workspace root. Omit to use a generated folder.",
+      },
+    },
+    required: ["path"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const ARCHIVE_CREATE_TOOL: LoadedToolInfo = {
+  id: "builtin-archive-create",
+  name: ARCHIVE_CREATE_TOOL_NAME,
+  enabled: true,
+  description:
+    "Create a downloadable ZIP archive from selected workspace files or folders. Use this to return multiple generated files to the user as one artifact.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      paths: {
+        type: "array",
+        items: { type: "string" },
+        description: "Workspace-relative files or folders to add to the ZIP.",
+      },
+      rootId: { type: "string", description: "Optional workspace root id." },
+      filename: { type: "string", description: "Optional ZIP filename." },
+    },
+    required: ["paths"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const DOCUMENT_CONVERT_TOOL: LoadedToolInfo = {
+  id: "builtin-document-convert",
+  name: DOCUMENT_CONVERT_TOOL_NAME,
+  enabled: true,
+  description:
+    "Convert a PDF, Office document, CSV, or text-like file into a readable text/Markdown companion file inside the workspace. Use file_read on the returned outputPath.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: { type: "string", description: "Document path to convert." },
+      rootId: { type: "string", description: "Optional workspace root id." },
+      outputPath: {
+        type: "string",
+        description: "Optional output file path inside the same workspace root.",
+      },
+    },
+    required: ["path"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
+export const CHAT_FILE_CREATE_TOOL: LoadedToolInfo = {
+  id: "builtin-chat-file-create",
+  name: CHAT_FILE_CREATE_TOOL_NAME,
+  enabled: true,
+  description:
+    "Create a downloadable text file that appears in the chat for the user. IMPORTANT: whenever the user asks you to generate, create, write, export, prepare, save, or return a file in the chat (for example a .md, .txt, .json, .csv, .html, or other text file), use chat_file_create. Do not use file_create for user-downloadable chat outputs; file_create is only for normal workspace/source-code files.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      filename: { type: "string", description: "Download filename." },
+      content: { type: "string", description: "UTF-8 text file content." },
+      description: { type: "string" },
+      mimeType: { type: "string" },
+    },
+    required: ["filename", "content"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+};
+
 export const FILE_DELETE_TOOL: LoadedToolInfo = {
   id: "builtin-file-delete",
   name: FILE_DELETE_TOOL_NAME,
@@ -643,6 +755,10 @@ export function isBuiltInToolName(toolName: string) {
     toolName === FILE_REPLACE_TEXT_TOOL_NAME ||
     toolName === FILE_CREATE_TOOL_NAME ||
     toolName === FILE_DELETE_TOOL_NAME ||
+    toolName === ARCHIVE_EXTRACT_TOOL_NAME ||
+    toolName === ARCHIVE_CREATE_TOOL_NAME ||
+    toolName === DOCUMENT_CONVERT_TOOL_NAME ||
+    toolName === CHAT_FILE_CREATE_TOOL_NAME ||
     toolName === CALL_AGENT_TOOL_NAME
   );
 }
@@ -718,17 +834,20 @@ function buildCustomToolApprovalCommand(
 
 export function createToolApprovalRequest(
   toolCall: ChatToolCall,
-  tool?: Pick<LoadedToolInfo, "name" | "description" | "command" | "args">,
+  tool?: Pick<LoadedToolInfo, "name" | "description" | "command" | "args" | "source" | "displayName" | "mcp">,
 ): FileToolApprovalRequest {
   const description = tool?.description?.trim();
   const command = buildCustomToolApprovalCommand(toolCall, tool);
+  const sourceLabel = tool?.source === "mcp" ? "MCP tool" : "custom tool";
 
   return {
     title: "Approve tool execution",
-    description: `The model wants to run a custom tool \`${toolCall.function.name}\`.`,
+    description: `The model wants to run a ${sourceLabel} \`${toolCall.function.name}\`.`,
     toolName: toolCall.function.name,
     action: "operation",
     details: [
+      ...(tool?.displayName ? [{ label: "Tool", value: tool.displayName }] : []),
+      ...(tool?.mcp?.serverName ? [{ label: "MCP server", value: tool.mcp.serverName }] : []),
       ...(description ? [{ label: "Description", value: description }] : []),
       ...(command ? [{ label: "Command", value: command }] : []),
       { label: "Approval mode", value: "Manual user approval required" },

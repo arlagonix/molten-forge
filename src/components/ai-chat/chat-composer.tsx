@@ -507,13 +507,43 @@ export const ChatComposer = memo(
 
     async function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
       const files = getUniqueClipboardFiles(event);
-      if (!files.length) return;
+      const hasFileClipboardHint = Array.from(event.clipboardData.types).some(
+        (type) => type.toLowerCase().includes("file"),
+      );
+
+      const clipboardFilePaths = !files.length
+        ? (window.codeForgeAI?.readClipboardFilePathsSync?.() ?? [])
+        : [];
+
+      if (!files.length && !clipboardFilePaths.length && !hasFileClipboardHint) return;
 
       event.preventDefault();
-      const inputs = await Promise.all(
-        files.map((file) => fileToAttachmentInput(file, "pasted")),
-      );
-      void addFiles(inputs);
+      if (files.length) {
+        const inputs = await Promise.all(
+          files.map((file) => fileToAttachmentInput(file, "pasted")),
+        );
+        void addFiles(inputs);
+        return;
+      }
+
+      try {
+        const paths = clipboardFilePaths.length
+          ? clipboardFilePaths
+          : ((await window.codeForgeAI?.readClipboardFilePaths?.()) ?? []);
+        if (!paths.length) return;
+        await addFiles(
+          paths.map((filePath) => ({
+            name: filePath.split(/[\\/]/).pop() || "pasted-file",
+            path: filePath,
+          })),
+        );
+      } catch (error) {
+        toast.error(
+          error instanceof Error
+            ? error.message
+            : "Failed to read files from clipboard.",
+        );
+      }
     }
 
     async function getDroppedFileInputs(event: DragEvent<HTMLElement>) {

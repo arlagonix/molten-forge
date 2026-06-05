@@ -39,8 +39,17 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <ThemeProvider>
       <RadixThemeBridge>
         <App />
-        <Toaster position="bottom-right" />
       </RadixThemeBridge>
+      {/*
+        Toaster MUST live outside <RadixThemeBridge>. Radix Themes renders
+        `.radix-themes` with `isolation: isolate` (a stacking context). Any
+        toast inside it is trapped in that context, so its z-index can never
+        rise above the Radix Dialog overlay, which portals to document.body.
+        Mounting it here (inside ThemeProvider, which is context-only, but
+        outside `.radix-themes`) puts the toast in the body root stacking
+        context where its z-index actually wins.
+      */}
+      <Toaster position="bottom-right" />
     </ThemeProvider>
   </React.StrictMode>,
 );

@@ -27,8 +27,8 @@ type WorkspaceRootsControlProps = {
   onOpenRoot: (root: ChatWorkspaceRoot) => void;
 };
 
-function isAutomaticSkillRoot(root: ChatWorkspaceRoot) {
-  return root.id.startsWith("skill:");
+function isAutomaticRoot(root: ChatWorkspaceRoot) {
+  return root.automatic === true || root.id === "chat" || root.id.startsWith("skill:");
 }
 
 export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
@@ -92,7 +92,7 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
                 </div>
               ) : (
                 roots.map((root) => {
-                  const isSkillRoot = isAutomaticSkillRoot(root);
+                  const isAutomatic = isAutomaticRoot(root);
 
                   return (
                     <CommandItem
@@ -106,7 +106,7 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-center gap-2">
                           <div className="truncate font-medium">{root.name}</div>
-                          {isSkillRoot ? (
+                          {isAutomatic ? (
                             <span className="shrink-0 rounded border px-1.5 py-0.5 text-[0.65rem] uppercase tracking-wide text-muted-foreground">
                               Auto
                             </span>
@@ -128,7 +128,7 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
                       >
                         <ExternalLink className="size-3.5" />
                       </Button>
-                      {!isSkillRoot ? (
+                      {!isAutomatic ? (
                         <Button
                           type="button"
                           variant="ghost"

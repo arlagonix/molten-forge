@@ -1,5 +1,6 @@
-import { Check, Maximize2, Wrench, X } from "lucide-react";
+import { Check, Download, FileArchive, FileText, Maximize2, Wrench, X } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { MarkdownMessage } from "@/components/ai-chat/markdown-message";
 import { Button } from "@/components/ui/button";
@@ -12,7 +13,15 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import {
   ASK_USER_TOOL,
+  ARCHIVE_CREATE_TOOL,
+  ARCHIVE_CREATE_TOOL_NAME,
+  ARCHIVE_EXTRACT_TOOL,
+  ARCHIVE_EXTRACT_TOOL_NAME,
   CALL_AGENT_TOOL_NAME,
+  CHAT_FILE_CREATE_TOOL,
+  CHAT_FILE_CREATE_TOOL_NAME,
+  DOCUMENT_CONVERT_TOOL,
+  DOCUMENT_CONVERT_TOOL_NAME,
   FILE_CREATE_TOOL,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL,
@@ -57,6 +66,10 @@ const BUILTIN_TOOL_DESCRIPTIONS: Record<string, string> = {
   [FILE_REPLACE_TEXT_TOOL.name]: FILE_REPLACE_TEXT_TOOL.description,
   [FILE_CREATE_TOOL.name]: FILE_CREATE_TOOL.description,
   [FILE_DELETE_TOOL.name]: FILE_DELETE_TOOL.description,
+  [ARCHIVE_EXTRACT_TOOL.name]: ARCHIVE_EXTRACT_TOOL.description,
+  [ARCHIVE_CREATE_TOOL.name]: ARCHIVE_CREATE_TOOL.description,
+  [DOCUMENT_CONVERT_TOOL.name]: DOCUMENT_CONVERT_TOOL.description,
+  [CHAT_FILE_CREATE_TOOL.name]: CHAT_FILE_CREATE_TOOL.description,
   [LOAD_SKILL_TOOL_NAME]:
     "Load the full instructions for one relevant skill and activate it for this chat.",
   [CALL_AGENT_TOOL_NAME]:
@@ -172,6 +185,67 @@ function renderToolExecutionPreview(execution?: ToolExecutionPreview) {
         </div>
       )}
     </>
+  );
+}
+
+function formatFileSize(sizeBytes: number) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) return "";
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${(sizeBytes / 1024).toFixed(1)} KB`;
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+
+type GeneratedFileArtifact = NonNullable<ChatToolResult["generatedFiles"]>[number];
+
+function getGeneratedFileIcon(fileName: string) {
+  const lowerName = fileName.toLowerCase();
+  return lowerName.endsWith(".zip") ||
+    lowerName.endsWith(".7z") ||
+    lowerName.endsWith(".rar") ||
+    lowerName.endsWith(".tar") ||
+    lowerName.endsWith(".gz")
+    ? FileArchive
+    : FileText;
+}
+
+function GeneratedFileChip({
+  file,
+  onDownload,
+}: {
+  file: GeneratedFileArtifact;
+  onDownload: (file: GeneratedFileArtifact) => void;
+}) {
+  const Icon = getGeneratedFileIcon(file.name);
+
+  return (
+    <div
+      className="flex min-h-12 min-w-0 max-w-[15rem] items-center gap-2 border bg-muted/25 px-2 py-1.5 text-xs"
+      title={file.name}
+    >
+      <span className="flex size-8 shrink-0 items-center justify-center">
+        <Icon className="size-5 text-muted-foreground" />
+      </span>
+      <span className="grid min-w-0 flex-1 gap-0.5 text-left">
+        <span className="truncate font-medium">{file.name}</span>
+        <span className="truncate text-muted-foreground">
+          {formatFileSize(file.sizeBytes)}
+        </span>
+      </span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="ml-auto h-7 w-7 shrink-0 bg-muted/40 hover:bg-muted"
+        onClick={(event) => {
+          event.stopPropagation();
+          onDownload(file);
+        }}
+        title={`Download ${file.name}`}
+      >
+        <Download className="size-3.5" />
+      </Button>
+    </div>
   );
 }
 
@@ -363,9 +437,20 @@ function getToolHeaderDetail(toolCall: ChatToolCall) {
   if (
     toolCall.function.name === FILE_CREATE_TOOL_NAME ||
     toolCall.function.name === FILE_REPLACE_TEXT_TOOL_NAME ||
-    toolCall.function.name === FILE_DELETE_TOOL_NAME
+    toolCall.function.name === FILE_DELETE_TOOL_NAME ||
+    toolCall.function.name === ARCHIVE_EXTRACT_TOOL_NAME ||
+    toolCall.function.name === DOCUMENT_CONVERT_TOOL_NAME
   ) {
     return getStringArgument(args, "path");
+  }
+
+  if (toolCall.function.name === ARCHIVE_CREATE_TOOL_NAME) {
+    const paths = args.paths;
+    return Array.isArray(paths) ? `${paths.length} paths` : "";
+  }
+
+  if (toolCall.function.name === CHAT_FILE_CREATE_TOOL_NAME) {
+    return getStringArgument(args, "filename");
   }
 
   if (toolCall.function.name === WEB_FETCH_TOOL_NAME) {
@@ -411,6 +496,32 @@ export function ToolExecutionBlock({
   const toolHeaderDetail = isLoadSkillTool
     ? loadedSkillName
     : getToolHeaderDetail(toolCall);
+  const generatedFiles = toolResult?.generatedFiles ?? [];
+
+  async function handleDownloadGeneratedFile(
+    file: NonNullable<ChatToolResult["generatedFiles"]>[number],
+  ) {
+    const storagePath = file.storagePath ?? file.workspacePath;
+    if (!storagePath) {
+      toast.error("Generated file is not available for download.");
+      return;
+    }
+
+    try {
+      const result = await window.codeForgeAI?.exportAttachment?.({
+        storagePath,
+        name: file.name,
+      });
+
+      if (!result || result.cancelled) return;
+      toast.success("File downloaded", { description: result.path });
+    } catch (error) {
+      toast.error("Failed to download file", {
+        description:
+          error instanceof Error ? error.message : "Unknown download error.",
+      });
+    }
+  }
 
   return (
     <>
@@ -460,6 +571,22 @@ export function ToolExecutionBlock({
               <Maximize2 className="size-3.5" />
             </Button>
           </div>
+          {generatedFiles.length > 0 ? (
+            <div
+              className="mt-3 flex flex-wrap gap-2 border-t pt-3 normal-case tracking-normal"
+              onClick={(event) => event.stopPropagation()}
+            >
+              {generatedFiles.map((file) => (
+                <GeneratedFileChip
+                  key={file.id}
+                  file={file}
+                  onDownload={(downloadFile) => {
+                    void handleDownloadGeneratedFile(downloadFile);
+                  }}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
       </article>
 
@@ -506,6 +633,24 @@ export function ToolExecutionBlock({
                   {renderJsonCodeBlock(toolCall.function.arguments || "{}")}
                 </div>
               )}
+              {generatedFiles.length > 0 ? (
+                <div className="grid gap-1.5">
+                  <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                    Generated files
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {generatedFiles.map((file) => (
+                      <GeneratedFileChip
+                        key={file.id}
+                        file={file}
+                        onDownload={(downloadFile) => {
+                          void handleDownloadGeneratedFile(downloadFile);
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : null}
               {toolResult?.content.trim() && (
                 <div className="grid gap-1.5">
                   <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">

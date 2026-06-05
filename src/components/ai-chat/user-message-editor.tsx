@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import {
+  type ClipboardEvent,
   memo,
   useEffect,
   useLayoutEffect,
@@ -315,6 +316,93 @@ export const UserMessageEditor = memo(function UserMessageEditor({
     }
   }
 
+  function getFileSystemPath(file: File) {
+    return (
+      window.codeForgeAI?.getPathForFile?.(file) ||
+      (file as File & { path?: string }).path ||
+      ""
+    );
+  }
+
+  async function fileToAttachmentInput(
+    file: File,
+    fallbackPrefix: string,
+  ): Promise<AttachmentInput> {
+    const filePath = getFileSystemPath(file);
+    const name = file.name || `${fallbackPrefix}-${Date.now()}`;
+    if (filePath) return { name, path: filePath, mimeType: file.type };
+
+    const buffer = await file.arrayBuffer();
+    return {
+      name,
+      bytes: new Uint8Array(buffer),
+      mimeType: file.type,
+    };
+  }
+
+  function getUniqueClipboardFiles(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const items = Array.from(event.clipboardData.items).filter(
+      (item) => item.kind === "file",
+    );
+    const rawFiles = items.length
+      ? items.map((item) => item.getAsFile())
+      : Array.from(event.clipboardData.files);
+    const files: File[] = [];
+    const seen = new Set<string>();
+
+    for (const file of rawFiles) {
+      if (!file) continue;
+      const key = `${file.name}:${file.size}:${file.type}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      files.push(file);
+    }
+
+    return files;
+  }
+
+  async function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
+    const files = getUniqueClipboardFiles(event);
+    const hasFileClipboardHint = Array.from(event.clipboardData.types).some(
+      (type) => type.toLowerCase().includes("file"),
+    );
+
+    const clipboardFilePaths = !files.length
+      ? (window.codeForgeAI?.readClipboardFilePathsSync?.() ?? [])
+      : [];
+
+    if (!files.length && !clipboardFilePaths.length && !hasFileClipboardHint) return;
+
+    event.preventDefault();
+    if (files.length) {
+      await addFiles(
+        await Promise.all(
+          files.map((file) => fileToAttachmentInput(file, "pasted")),
+        ),
+      );
+      return;
+    }
+
+    try {
+      const paths = clipboardFilePaths.length
+        ? clipboardFilePaths
+        : ((await window.codeForgeAI?.readClipboardFilePaths?.()) ?? []);
+      if (!paths.length) return;
+      await addFiles(
+        paths.map((filePath) => ({
+          name: filePath.split(/[\\/]/).pop() || "pasted-file",
+          path: filePath,
+        })),
+      );
+    } catch (error) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : "Failed to read files from clipboard.",
+      );
+    }
+  }
+
   async function handlePickAttachments() {
     if (!window.codeForgeAI?.pickAttachments) {
       toast.error("File picker is not available.");
@@ -431,6 +519,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
           <Textarea
             ref={textareaRef}
             value={content}
+            onPaste={handlePaste}
             onChange={(event) => {
               const nextContent = event.target.value;
               setContent(nextContent);

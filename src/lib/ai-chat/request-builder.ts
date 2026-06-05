@@ -25,6 +25,14 @@ import {
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL,
   FILE_DELETE_TOOL_NAME,
+  ARCHIVE_EXTRACT_TOOL,
+  ARCHIVE_EXTRACT_TOOL_NAME,
+  ARCHIVE_CREATE_TOOL,
+  ARCHIVE_CREATE_TOOL_NAME,
+  DOCUMENT_CONVERT_TOOL,
+  DOCUMENT_CONVERT_TOOL_NAME,
+  CHAT_FILE_CREATE_TOOL,
+  CHAT_FILE_CREATE_TOOL_NAME,
   createLoadSkillTool,
   isValidToolName,
   parseAgentMentionNames,
@@ -116,7 +124,11 @@ export function getGlobalEnabledTools({
           tool.name !== FILE_SEARCH_TEXT_TOOL_NAME &&
           tool.name !== FILE_REPLACE_TEXT_TOOL_NAME &&
           tool.name !== FILE_CREATE_TOOL_NAME &&
-          tool.name !== FILE_DELETE_TOOL_NAME,
+          tool.name !== FILE_DELETE_TOOL_NAME &&
+          tool.name !== ARCHIVE_EXTRACT_TOOL_NAME &&
+          tool.name !== ARCHIVE_CREATE_TOOL_NAME &&
+          tool.name !== DOCUMENT_CONVERT_TOOL_NAME &&
+          tool.name !== CHAT_FILE_CREATE_TOOL_NAME,
       )
     : [];
 
@@ -132,6 +144,10 @@ export function getGlobalEnabledTools({
     ...(toolsSettings.fileReplaceTextEnabled ? [FILE_REPLACE_TEXT_TOOL] : []),
     ...(toolsSettings.fileCreateEnabled ? [FILE_CREATE_TOOL] : []),
     ...(toolsSettings.fileDeleteEnabled ? [FILE_DELETE_TOOL] : []),
+    ...(toolsSettings.archiveExtractEnabled ? [ARCHIVE_EXTRACT_TOOL] : []),
+    ...(toolsSettings.archiveCreateEnabled ? [ARCHIVE_CREATE_TOOL] : []),
+    ...(toolsSettings.documentConvertEnabled ? [DOCUMENT_CONVERT_TOOL] : []),
+    ...(toolsSettings.chatFileCreateEnabled ? [CHAT_FILE_CREATE_TOOL] : []),
     ...enabledCommandTools,
   ];
 }
@@ -236,6 +252,10 @@ export function getEnabledToolsForChat({
     byName.delete(FILE_REPLACE_TEXT_TOOL_NAME);
     byName.delete(FILE_CREATE_TOOL_NAME);
     byName.delete(FILE_DELETE_TOOL_NAME);
+    byName.delete(ARCHIVE_EXTRACT_TOOL_NAME);
+    byName.delete(ARCHIVE_CREATE_TOOL_NAME);
+    byName.delete(DOCUMENT_CONVERT_TOOL_NAME);
+    byName.delete(CHAT_FILE_CREATE_TOOL_NAME);
   }
 
   return [...byName.values()];

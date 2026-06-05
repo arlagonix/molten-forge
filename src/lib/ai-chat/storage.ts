@@ -9,6 +9,7 @@ import type {
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
+  McpSettings,
   ProviderConfig,
   ProvidersState,
   SkillExportResult,
@@ -33,10 +34,16 @@ const TOOLS_SETTINGS_KEY = "tools-settings";
 const SKILLS_SETTINGS_KEY = "skills-settings";
 const AGENTS_SETTINGS_KEY = "agents-settings";
 const APP_SETTINGS_KEY = "app-settings";
+const MCP_SETTINGS_KEY = "mcp-settings";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
   fontFamily: "sans",
+};
+
+export const DEFAULT_MCP_SETTINGS: McpSettings = {
+  enabled: true,
+  servers: [],
 };
 
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
@@ -72,6 +79,8 @@ type ChatForgeStorageApi = {
   saveAgentsSettings: (value: AgentsSettings) => Promise<void>;
   loadAppSettings: () => Promise<AppSettings | undefined>;
   saveAppSettings: (value: AppSettings) => Promise<void>;
+  loadMcpSettings: () => Promise<McpSettings | undefined>;
+  saveMcpSettings: (value: McpSettings) => Promise<void>;
   loadTools: () => Promise<LoadedToolInfo[]>;
   saveTool: (tool: LoadedToolInfo) => Promise<LoadedToolInfo>;
   deleteTool: (toolId: string) => Promise<void>;
@@ -227,6 +236,22 @@ function normalizeToolsSettings(
       typeof value?.fileDeleteEnabled === "boolean"
         ? value.fileDeleteEnabled
         : false,
+    archiveExtractEnabled:
+      typeof value?.archiveExtractEnabled === "boolean"
+        ? value.archiveExtractEnabled
+        : true,
+    archiveCreateEnabled:
+      typeof value?.archiveCreateEnabled === "boolean"
+        ? value.archiveCreateEnabled
+        : true,
+    documentConvertEnabled:
+      typeof value?.documentConvertEnabled === "boolean"
+        ? value.documentConvertEnabled
+        : true,
+    chatFileCreateEnabled:
+      typeof value?.chatFileCreateEnabled === "boolean"
+        ? value.chatFileCreateEnabled
+        : true,
     fileReplaceTextAutoApproveEnabled:
       typeof value?.fileReplaceTextAutoApproveEnabled === "boolean"
         ? value.fileReplaceTextAutoApproveEnabled
@@ -280,6 +305,84 @@ export function normalizeAppSettings(
     chatTitleGenerationMode:
       value?.chatTitleGenerationMode === "ai" ? "ai" : "local",
     fontFamily: value?.fontFamily === "mono" ? "mono" : "sans",
+  };
+}
+
+function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+
+  const entries = Object.entries(value)
+    .map(([key, rawValue]) => [key.trim(), typeof rawValue === "string" ? rawValue : ""] as const)
+    .filter(([key, rawValue]) => key && rawValue.length > 0);
+
+  return entries.length ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeMcpSettings(value: Partial<McpSettings> | undefined): McpSettings {
+  const servers = Array.isArray(value?.servers) ? value.servers : [];
+
+  return {
+    enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
+    servers: servers
+      .filter((server) => server && typeof server === "object" && !Array.isArray(server))
+      .map((server) => {
+        const source = server as Record<string, unknown>;
+        const id = typeof source.id === "string" && source.id.trim()
+          ? source.id.trim()
+          : `mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const name = typeof source.name === "string" && source.name.trim()
+          ? source.name.trim()
+          : id;
+        const transport = source.transport === "http" ? "http" : "stdio";
+        const rawTools = source.tools && typeof source.tools === "object" && !Array.isArray(source.tools)
+          ? source.tools as Record<string, unknown>
+          : {};
+        const tools = Object.fromEntries(
+          Object.entries(rawTools)
+            .filter(([, value]) => value && typeof value === "object" && !Array.isArray(value))
+            .map(([toolName, value]) => {
+              const rawTool = value as Record<string, unknown>;
+              const originalName = typeof rawTool.originalName === "string" && rawTool.originalName.trim()
+                ? rawTool.originalName.trim()
+                : toolName;
+              const exposedName = typeof rawTool.exposedName === "string" ? rawTool.exposedName.trim() : "";
+              const description = typeof rawTool.description === "string" ? rawTool.description : undefined;
+              const inputSchema = rawTool.inputSchema && typeof rawTool.inputSchema === "object" && !Array.isArray(rawTool.inputSchema)
+                ? rawTool.inputSchema as Record<string, unknown>
+                : undefined;
+
+              return [originalName, {
+                originalName,
+                exposedName,
+                enabled: typeof rawTool.enabled === "boolean" ? rawTool.enabled : false,
+                ...(description ? { description } : {}),
+                ...(inputSchema ? { inputSchema } : {}),
+                ...(typeof rawTool.requireApproval === "boolean" ? { requireApproval: rawTool.requireApproval } : {}),
+                ...(typeof rawTool.lastSeenAt === "string" ? { lastSeenAt: rawTool.lastSeenAt } : {}),
+              }];
+            }),
+        );
+
+        return {
+          id,
+          name,
+          enabled: typeof source.enabled === "boolean" ? source.enabled : true,
+          transport,
+          command: typeof source.command === "string" ? source.command : undefined,
+          args: Array.isArray(source.args) ? source.args.filter((arg): arg is string => typeof arg === "string") : [],
+          cwd: typeof source.cwd === "string" ? source.cwd : undefined,
+          env: normalizeStringRecord(source.env),
+          url: typeof source.url === "string" ? source.url : undefined,
+          headers: normalizeStringRecord(source.headers),
+          timeoutMs: typeof source.timeoutMs === "number" && Number.isFinite(source.timeoutMs) && source.timeoutMs > 0
+            ? Math.min(Math.round(source.timeoutMs), 10 * 60_000)
+            : 60_000,
+          requireApproval: typeof source.requireApproval === "boolean" ? source.requireApproval : true,
+          tools,
+          lastError: typeof source.lastError === "string" ? source.lastError : undefined,
+          lastConnectedAt: typeof source.lastConnectedAt === "string" ? source.lastConnectedAt : undefined,
+        };
+      }),
   };
 }
 
@@ -714,6 +817,33 @@ export async function saveAppSettings(value: AppSettings): Promise<void> {
   }
 
   await legacySetSetting(APP_SETTINGS_KEY, normalized);
+}
+
+export async function loadMcpSettings(): Promise<McpSettings> {
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    return normalizeMcpSettings(await api.loadMcpSettings());
+  }
+
+  return normalizeMcpSettings(
+    await legacyGetSetting<McpSettings | undefined>(
+      MCP_SETTINGS_KEY,
+      undefined,
+    ),
+  );
+}
+
+export async function saveMcpSettings(value: McpSettings): Promise<void> {
+  const normalized = normalizeMcpSettings(value);
+  const api = await ensureJsonStorageReady();
+
+  if (api) {
+    await api.saveMcpSettings(normalized);
+    return;
+  }
+
+  await legacySetSetting(MCP_SETTINGS_KEY, normalized);
 }
 
 export async function loadTools(): Promise<LoadedToolInfo[]> {
