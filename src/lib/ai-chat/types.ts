@@ -123,6 +123,48 @@ export type FileToolChangePreview = {
   rows: FileToolChangePreviewRow[];
 };
 
+export type TerminalExecutionResult = {
+  command: string;
+  shell: string;
+  requestedShell?: string;
+  cwd: string;
+  rootId?: string;
+  rootName?: string;
+  rootPath?: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  cancelled: boolean;
+  durationMs: number;
+  outputTruncated?: boolean;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+  warnings?: string[];
+};
+
+export type TerminalStreamEvent =
+  | {
+      type: "started";
+      executionId?: string;
+      command: string;
+      shell: string;
+      cwd: string;
+      timeoutMs: number;
+      warnings?: string[];
+    }
+  | { type: "stdout"; executionId?: string; text: string }
+  | { type: "stderr"; executionId?: string; text: string }
+  | {
+      type: "finished";
+      executionId?: string;
+      exitCode: number | null;
+      timedOut: boolean;
+      cancelled: boolean;
+      durationMs: number;
+      outputTruncated?: boolean;
+    };
+
 export type ChatGeneratedFile = {
   id: string;
   name: string;
@@ -146,6 +188,7 @@ export type ChatToolResult = {
   loadedSkillInstructions?: string;
   loadedSkillRecommendedToolNames?: string[];
   generatedFiles?: ChatGeneratedFile[];
+  terminal?: TerminalExecutionResult;
 };
 
 export type ToolExecutionStatus = "pending" | "running" | "complete" | "failed";
@@ -503,6 +546,7 @@ export type ToolCommandResult = {
   execution?: ToolExecutionPreview;
   changePreview?: FileToolChangePreview;
   generatedFiles?: ChatGeneratedFile[];
+  terminal?: TerminalExecutionResult;
 };
 
 export type McpTransportType = "stdio" | "http";
@@ -677,6 +721,7 @@ export type ToolsSettings = {
   taskToolsEnabled: boolean;
   loadSkillEnabled: boolean;
   webFetchEnabled: boolean;
+  terminalExecEnabled: boolean;
   fileReadEnabled: boolean;
   fileFindEnabled: boolean;
   fileSearchTextEnabled: boolean;

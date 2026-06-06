@@ -220,6 +220,10 @@ function normalizeToolsSettings(
       typeof value?.webFetchEnabled === "boolean"
         ? value.webFetchEnabled
         : false,
+    terminalExecEnabled:
+      typeof value?.terminalExecEnabled === "boolean"
+        ? value.terminalExecEnabled
+        : false,
     fileReadEnabled:
       typeof value?.fileReadEnabled === "boolean"
         ? value.fileReadEnabled

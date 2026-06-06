@@ -39,6 +39,8 @@ import {
   type JsonRecord,
   type ToolExecutionContext,
 } from "./tool-utils";
+import { executeTerminalExecTool } from "./terminal-tool";
+import { TERMINAL_EXEC_TOOL_NAME } from "../src/lib/ai-chat/terminal-tool";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
@@ -177,6 +179,7 @@ type ToolCommandResult = {
   execution?: ToolExecutionPreview;
   changePreview?: unknown;
   generatedFiles?: unknown;
+  terminal?: unknown;
 };
 
 type ActiveToolExecution = {
@@ -232,6 +235,7 @@ type ToolsSettings = {
   taskToolsEnabled: boolean;
   loadSkillEnabled: boolean;
   webFetchEnabled: boolean;
+  terminalExecEnabled: boolean;
   fileReadEnabled: boolean;
   fileFindEnabled: boolean;
   fileSearchTextEnabled: boolean;
@@ -346,6 +350,7 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   taskToolsEnabled: true,
   loadSkillEnabled: true,
   webFetchEnabled: false,
+  terminalExecEnabled: false,
   fileReadEnabled: true,
   fileFindEnabled: true,
   fileSearchTextEnabled: true,
@@ -533,6 +538,10 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
     webFetchEnabled:
       typeof value.webFetchEnabled === "boolean"
         ? value.webFetchEnabled
+        : false,
+    terminalExecEnabled:
+      typeof value.terminalExecEnabled === "boolean"
+        ? value.terminalExecEnabled
         : false,
     fileReadEnabled:
       typeof value.fileReadEnabled === "boolean" ? value.fileReadEnabled : true,
@@ -1663,6 +1672,10 @@ async function executeToolManifest(
 
   if (toolName === WEB_FETCH_TOOL_NAME) {
     return executeWebFetchTool(args, context.signal);
+  }
+
+  if (toolName === TERMINAL_EXEC_TOOL_NAME) {
+    return executeTerminalExecTool(args, context);
   }
 
   if (isFileToolName(toolName)) {
@@ -5089,6 +5102,39 @@ ipcMain.handle("storage:agents:export", async (_event, agents: unknown) =>
 ipcMain.handle("storage:agents:open-folder", async () =>
   openJsonAgentsFolder(),
 );
+
+ipcMain.handle("tools:execute-stream", async (event, request: unknown) => {
+  const value = isPlainObject(request) ? request : {};
+  const executionId = safeString(value.executionId).trim() || randomUUID();
+  const controller = new AbortController();
+
+  activeToolExecutions.set(executionId, {
+    cancel: () => controller.abort(),
+  });
+
+  try {
+    const toolName = safeString(value.name).trim();
+    if (toolName !== TERMINAL_EXEC_TOOL_NAME) {
+      throw new Error(`Streaming execution is not supported for tool: ${toolName}`);
+    }
+
+    return await executeTerminalExecTool(
+      value.args,
+      {
+        workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
+        signal: controller.signal,
+      },
+      (streamEvent) => {
+        event.sender.send("tools:stream-event", {
+          executionId,
+          ...streamEvent,
+        });
+      },
+    );
+  } finally {
+    activeToolExecutions.delete(executionId);
+  }
+});
 
 ipcMain.handle("tools:execute", async (_event, request: unknown) => {
   const value = isPlainObject(request) ? request : {};

@@ -13,6 +13,7 @@ import {
   LOAD_SKILL_TOOL_NAME,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
+  TERMINAL_EXEC_TOOL,
   FILE_READ_TOOL,
   FILE_READ_TOOL_NAME,
   FILE_FIND_TOOL,
@@ -39,6 +40,7 @@ import {
   parseSkillMentionNames,
   parseToolMentionNames,
 } from "@/lib/ai-chat/builtin-tools";
+import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import { getModeCapabilityNames, getModeInstructionsBlock } from "@/lib/ai-chat/modes";
 import type {
   AgentsSettings,
@@ -121,6 +123,7 @@ export function getGlobalEnabledTools({
           !isTaskToolName(tool.name) &&
           tool.name !== LOAD_SKILL_TOOL_NAME &&
           tool.name !== WEB_FETCH_TOOL_NAME &&
+          tool.name !== TERMINAL_EXEC_TOOL_NAME &&
           tool.name !== FILE_READ_TOOL_NAME &&
           tool.name !== FILE_FIND_TOOL_NAME &&
           tool.name !== FILE_SEARCH_TEXT_TOOL_NAME &&
@@ -140,6 +143,7 @@ export function getGlobalEnabledTools({
     ...(toolsSettings.askUserEnabled ? [ASK_USER_TOOL] : []),
     ...(toolsSettings.taskToolsEnabled ? TASK_TOOLS : []),
     ...(toolsSettings.webFetchEnabled ? [WEB_FETCH_TOOL] : []),
+    ...(toolsSettings.terminalExecEnabled ? [TERMINAL_EXEC_TOOL] : []),
     ...(toolsSettings.fileReadEnabled ? [FILE_READ_TOOL] : []),
     ...(toolsSettings.fileFindEnabled ? [FILE_FIND_TOOL] : []),
     ...(toolsSettings.fileSearchTextEnabled ? [FILE_SEARCH_TEXT_TOOL] : []),
@@ -272,6 +276,7 @@ export function getEnabledToolsForChat({
   }
 
   if (!effectiveWorkspaceRoots.length) {
+    byName.delete(TERMINAL_EXEC_TOOL_NAME);
     byName.delete(FILE_READ_TOOL_NAME);
     byName.delete(FILE_FIND_TOOL_NAME);
     byName.delete(FILE_SEARCH_TEXT_TOOL_NAME);

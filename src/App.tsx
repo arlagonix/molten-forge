@@ -63,6 +63,7 @@ import {
   FILE_SEARCH_TEXT_TOOL,
   FILE_SEARCH_TEXT_TOOL_NAME,
   TASK_TOOLS,
+  TERMINAL_EXEC_TOOL,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
   buildFileToolAutoApprovalFromToolsSettings,
@@ -71,6 +72,7 @@ import {
   isTaskToolName,
   isValidToolName,
 } from "@/lib/ai-chat/builtin-tools";
+import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import {
   createId,
   createNewProvider,
@@ -145,6 +147,7 @@ import type {
   ProvidersState,
   SkillsSettings,
   ToolCommandResult,
+  TerminalStreamEvent,
   ToolExecutionStatus,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
@@ -650,6 +653,7 @@ export default function Home() {
       CALL_AGENT_TOOL,
       ...TASK_TOOLS,
       WEB_FETCH_TOOL,
+      TERMINAL_EXEC_TOOL,
       FILE_READ_TOOL,
       FILE_FIND_TOOL,
       FILE_SEARCH_TEXT_TOOL,
@@ -684,6 +688,7 @@ export default function Home() {
       for (const tool of TASK_TOOLS) names.add(tool.name);
     }
     if (toolsSettings.webFetchEnabled) names.add(WEB_FETCH_TOOL_NAME);
+    if (toolsSettings.terminalExecEnabled) names.add(TERMINAL_EXEC_TOOL_NAME);
     if (toolsSettings.fileReadEnabled) names.add(FILE_READ_TOOL_NAME);
     if (toolsSettings.fileFindEnabled) names.add(FILE_FIND_TOOL_NAME);
     if (toolsSettings.fileSearchTextEnabled)
@@ -705,6 +710,7 @@ export default function Home() {
         tool.name !== CALL_AGENT_TOOL_NAME &&
         !isTaskToolName(tool.name) &&
         tool.name !== WEB_FETCH_TOOL_NAME &&
+        tool.name !== TERMINAL_EXEC_TOOL_NAME &&
         tool.name !== FILE_READ_TOOL_NAME &&
         tool.name !== FILE_FIND_TOOL_NAME &&
         tool.name !== FILE_SEARCH_TEXT_TOOL_NAME &&
@@ -1650,7 +1656,7 @@ export default function Home() {
       return new Promise<ToolCommandResult>((resolve, reject) => {
         let settled = false;
 
-        const cleanup = () => {
+        let cleanup = () => {
           context?.signal?.removeEventListener("abort", abortHandler);
         };
 
@@ -1687,6 +1693,30 @@ export default function Home() {
         if (isMcpTool) {
           window.chatForgeMcp
             ?.executeTool({ executionId, tool, args })
+            .then(settleResolve, settleReject);
+          return;
+        }
+
+        if (toolName === TERMINAL_EXEC_TOOL_NAME) {
+          const toolsBridge = getToolsBridge();
+          const unsubscribe = toolsBridge.onStreamEvent?.((event: TerminalStreamEvent) => {
+            if (event.executionId !== executionId) return;
+            context?.onTerminalStreamEvent?.(event);
+          });
+          const originalCleanup = cleanup;
+          const cleanupWithStream = () => {
+            unsubscribe?.();
+            originalCleanup();
+          };
+          cleanup = cleanupWithStream;
+
+          toolsBridge
+            .executeStream({
+              executionId,
+              name: toolName,
+              args,
+              workspaceRoots: context?.workspaceRoots,
+            })
             .then(settleResolve, settleReject);
           return;
         }

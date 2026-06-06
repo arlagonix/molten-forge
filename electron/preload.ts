@@ -299,6 +299,22 @@ contextBridge.exposeInMainWorld("chatForgeTools", {
     return ipcRenderer.invoke("tools:execute", request);
   },
 
+  executeStream(request: unknown) {
+    return ipcRenderer.invoke("tools:execute-stream", request);
+  },
+
+  onStreamEvent(callback: (event: unknown) => void) {
+    const listener = (_event: IpcRendererEvent, streamEvent: unknown) => {
+      callback(streamEvent);
+    };
+
+    ipcRenderer.on("tools:stream-event", listener);
+
+    return () => {
+      ipcRenderer.removeListener("tools:stream-event", listener);
+    };
+  },
+
   cancel(executionId: unknown) {
     return ipcRenderer.invoke("tools:cancel", executionId);
   },

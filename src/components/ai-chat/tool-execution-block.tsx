@@ -4,6 +4,7 @@ import {
   FileArchive,
   FileText,
   Maximize2,
+  Terminal,
   Wrench,
   X,
 } from "lucide-react";
@@ -44,10 +45,12 @@ import {
   FILE_SEARCH_TEXT_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
   TASK_TOOLS,
+  TERMINAL_EXEC_TOOL,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
   isTaskToolName,
 } from "@/lib/ai-chat/builtin-tools";
+import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import { buildToolExecutionPreviewForCall } from "@/lib/ai-chat/tool-preview";
 import type {
   ChatToolCall,
@@ -68,6 +71,7 @@ const BUILTIN_TOOL_DESCRIPTIONS: Record<string, string> = {
     TASK_TOOLS.map((tool) => [tool.name, tool.description]),
   ),
   [WEB_FETCH_TOOL.name]: WEB_FETCH_TOOL.description,
+  [TERMINAL_EXEC_TOOL.name]: TERMINAL_EXEC_TOOL.description,
   [FILE_READ_TOOL.name]: FILE_READ_TOOL.description,
   [FILE_FIND_TOOL.name]: FILE_FIND_TOOL.description,
   [FILE_SEARCH_TEXT_TOOL.name]: FILE_SEARCH_TEXT_TOOL.description,
@@ -192,6 +196,54 @@ function renderToolExecutionPreview(execution?: ToolExecutionPreview) {
         </div>
       )}
     </>
+  );
+}
+
+function renderTerminalTextBlock(value: string, emptyLabel = "No output yet.") {
+  const text = value.length ? value : emptyLabel;
+
+  return (
+    <pre className="max-h-[min(22rem,45dvh)] overflow-auto border bg-background/80 px-3 py-2 font-mono text-xs leading-5 text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+      {text}
+    </pre>
+  );
+}
+
+function renderTerminalOutput(toolResult?: ChatToolResult) {
+  const terminal = toolResult?.terminal;
+  if (!terminal) return null;
+
+  return (
+    <div className="grid gap-2">
+      {terminal.warnings?.length ? (
+        <div className="grid gap-1 border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          {terminal.warnings.map((warning) => (
+            <div key={warning}>{warning}</div>
+          ))}
+        </div>
+      ) : null}
+      <div className="grid gap-1.5">
+        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+          Stdout
+        </div>
+        {renderTerminalTextBlock(terminal.stdout)}
+      </div>
+      <div className="grid gap-1.5">
+        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+          Stderr
+        </div>
+        {renderTerminalTextBlock(terminal.stderr)}
+      </div>
+      <div className="grid gap-1.5 text-xs text-muted-foreground">
+        <div>
+          Exit code: {terminal.exitCode === null ? "—" : terminal.exitCode} · Duration: {terminal.durationMs ? `${(terminal.durationMs / 1000).toFixed(1)}s` : "—"}
+          {terminal.timedOut ? " · Timed out" : ""}
+          {terminal.cancelled ? " · Cancelled" : ""}
+          {terminal.outputTruncated ? " · Output truncated" : ""}
+        </div>
+        {terminal.cwd ? <div className="truncate">CWD: {terminal.cwd}</div> : null}
+      </div>
+    </div>
   );
 }
 
@@ -465,6 +517,11 @@ function getToolHeaderDetail(toolCall: ChatToolCall) {
     return getStringArgument(args, "url");
   }
 
+  if (toolCall.function.name === TERMINAL_EXEC_TOOL_NAME) {
+    const command = getStringArgument(args, "command");
+    return command.length > 80 ? `${command.slice(0, 77)}...` : command;
+  }
+
   return "";
 }
 
@@ -494,6 +551,8 @@ export function ToolExecutionBlock({
   const loadSkillDetails = getLoadSkillDetails(toolResult);
   const isLoadSkillTool = toolCall.function.name === LOAD_SKILL_TOOL_NAME;
   const isTaskTool = isTaskToolName(toolCall.function.name);
+  const isTerminalTool = toolCall.function.name === TERMINAL_EXEC_TOOL_NAME;
+  const ToolIcon = isTerminalTool ? Terminal : Wrench;
   const toolDescription = getToolDescription(
     toolCall.function.name,
     loadedTools,
@@ -549,7 +608,7 @@ export function ToolExecutionBlock({
         >
           <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
             <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-              <Wrench className="size-3.5 shrink-0" />
+              <ToolIcon className="size-3.5 shrink-0" />
               <span className="shrink-0 truncate">
                 {toolCall.function.name}
               </span>
@@ -579,6 +638,11 @@ export function ToolExecutionBlock({
               <Maximize2 className="size-3.5" />
             </Button>
           </div>
+          {isTerminalTool && toolResult?.terminal ? (
+            <div className="mt-3 border-t pt-3 normal-case tracking-normal">
+              {renderTerminalOutput(toolResult)}
+            </div>
+          ) : null}
           {generatedFiles.length > 0 ? (
             <div
               className="mt-3 flex flex-wrap gap-2 border-t pt-3 normal-case tracking-normal"
@@ -606,7 +670,7 @@ export function ToolExecutionBlock({
         >
           <DialogHeader className="border-b px-5 py-4">
             <DialogTitle className="flex min-w-0 items-center gap-2 pr-8 text-sm font-medium uppercase tracking-wide text-muted-foreground">
-              <Wrench className="size-4 shrink-0" />
+              <ToolIcon className="size-4 shrink-0" />
               <span className="min-w-0 truncate shrink-0">
                 {toolCall.function.name}
               </span>
@@ -659,7 +723,15 @@ export function ToolExecutionBlock({
                   </div>
                 </div>
               ) : null}
-              {toolResult?.content.trim() && (
+              {isTerminalTool && toolResult?.terminal ? (
+                <div className="grid gap-1.5">
+                  <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                    Terminal output
+                  </div>
+                  {renderTerminalOutput(toolResult)}
+                </div>
+              ) : null}
+              {!isTerminalTool && toolResult?.content.trim() && (
                 <div className="grid gap-1.5">
                   <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
                     Output

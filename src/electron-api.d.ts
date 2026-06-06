@@ -13,6 +13,7 @@ import type {
   ChatWorkspaceRoot,
   ChatAttachment,
   ToolCommandResult,
+  TerminalStreamEvent,
   SkillExportResult,
   SkillImportResult,
   ToolExportResult,
@@ -193,6 +194,15 @@ declare global {
         args: unknown;
         workspaceRoots?: ChatWorkspaceRoot[];
       }) => Promise<ToolCommandResult>;
+      executeStream: (request: {
+        executionId?: string;
+        name: string;
+        args: unknown;
+        workspaceRoots?: ChatWorkspaceRoot[];
+      }) => Promise<ToolCommandResult>;
+      onStreamEvent: (
+        callback: (event: TerminalStreamEvent) => void,
+      ) => () => void;
       cancel: (executionId: string) => Promise<{ cancelled: boolean }>;
       test: (request: {
         tool: LoadedToolInfo;

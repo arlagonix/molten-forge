@@ -98,6 +98,7 @@ import type {
   ModesState,
   SkillsSettings,
   ToolCommandResult,
+  TerminalStreamEvent,
   ToolExecutionStatus,
   ToolsSettings,
   UserInputStatus,
@@ -284,7 +285,11 @@ export function useChatGeneration({
   executeExternalTool: (
     toolName: string,
     args: unknown,
-    context?: { workspaceRoots?: ChatWorkspaceRoot[]; signal?: AbortSignal },
+    context?: {
+      workspaceRoots?: ChatWorkspaceRoot[];
+      signal?: AbortSignal;
+      onTerminalStreamEvent?: (event: TerminalStreamEvent) => void;
+    },
   ) => Promise<ToolCommandResult>;
   onChatGenerationFinished?: (
     chatId: string,
@@ -525,6 +530,30 @@ export function useChatGeneration({
     );
   }
 
+  function updateAssistantToolCallPartialResult(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    toolCallId: string,
+    toolResult: ChatToolResult,
+    status: ToolExecutionStatus,
+  ) {
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: (variant.processSteps ?? []).map((step) =>
+          step.type === "tool_execution" && step.toolCall.id === toolCallId
+            ? { ...step, status, toolResult }
+            : step,
+        ),
+      }),
+      { touch: false },
+    );
+  }
+
   function updateAssistantUserInputStepStatus(
     chatId: string,
     assistantMessageId: string,
@@ -718,6 +747,7 @@ export function useChatGeneration({
     completeAssistantUserInputStep,
     completeAssistantFileApprovalStep,
     updateAssistantToolStepStatus,
+    updateAssistantToolCallPartialResult,
     updateAssistantUserInputStepStatus,
     updateAssistantFileApprovalStepStatus,
     scheduleStickyScrollToBottom,

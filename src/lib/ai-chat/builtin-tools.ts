@@ -13,6 +13,7 @@ import {
   isFileToolName,
   requiresFileToolApproval,
 } from "@/lib/ai-chat/file-tool-names";
+import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import type {
   AskUserQuestion,
   AskUserQuestionType,
@@ -39,6 +40,7 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   taskToolsEnabled: true,
   loadSkillEnabled: true,
   webFetchEnabled: false,
+  terminalExecEnabled: false,
   fileReadEnabled: true,
   fileFindEnabled: true,
   fileSearchTextEnabled: true,
@@ -291,6 +293,57 @@ export const WEB_FETCH_TOOL: LoadedToolInfo = {
   args: [],
   input: "none",
   timeoutMs: 0,
+};
+
+export const TERMINAL_EXEC_TOOL: LoadedToolInfo = {
+  id: "builtin-terminal-exec",
+  name: TERMINAL_EXEC_TOOL_NAME,
+  enabled: true,
+  description:
+    "Run a foreground terminal command inside one approved workspace root. Requires user approval by default. Use this for project-local coding workflows such as checking files, running tests, building the project, or inspecting tool output. Prefer web_fetch for simple web reads instead of curl/wget. The command streams stdout/stderr, has a timeout, returns an exit code, and cannot choose a cwd outside the selected workspace root.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      command: {
+        type: "string",
+        description:
+          "Exact shell command to run. Keep it focused and non-interactive. The user sees and approves this exact command before execution.",
+      },
+      rootId: {
+        type: "string",
+        description:
+          "Optional workspace root id. Required when the chat has multiple workspace roots.",
+      },
+      cwd: {
+        type: "string",
+        description:
+          "Optional working directory inside the selected workspace root. Defaults to the root. Use a relative path when possible.",
+      },
+      shell: {
+        type: "string",
+        enum: ["auto", "powershell", "cmd", "bash", "sh"],
+        description:
+          "Shell to use. Defaults to auto. On Windows auto uses PowerShell; on macOS/Linux auto uses sh. cmd is Windows-only. bash requires bash to be installed.",
+      },
+      timeoutMs: {
+        type: "number",
+        description:
+          "Optional timeout in milliseconds. Defaults to 120000 and is capped by the app.",
+      },
+      maxOutputChars: {
+        type: "number",
+        description:
+          "Optional maximum stdout/stderr characters returned to the model context using head+tail truncation. Defaults to 20000.",
+      },
+    },
+    required: ["command"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+  requiresApproval: true,
 };
 
 export const FILE_READ_TOOL: LoadedToolInfo = {
@@ -749,6 +802,7 @@ export function isBuiltInToolName(toolName: string) {
     isTaskToolName(toolName) ||
     toolName === LOAD_SKILL_TOOL_NAME ||
     toolName === WEB_FETCH_TOOL_NAME ||
+    toolName === TERMINAL_EXEC_TOOL_NAME ||
     toolName === FILE_READ_TOOL_NAME ||
     toolName === FILE_FIND_TOOL_NAME ||
     toolName === FILE_SEARCH_TEXT_TOOL_NAME ||
@@ -807,7 +861,7 @@ function materializeCommandArgs(templateArgs: string[], modelArgs: unknown) {
 function quoteCommandPreviewPart(value: string) {
   if (!value) return '""';
   if (/^[A-Za-z0-9_@%+=:,./\\-]+$/.test(value)) return value;
-  return `"${value.replace(/"/g, '\\\"')}"`;
+  return `"${value.replace(/"/g, '\\"')}"`;
 }
 
 function formatCommandPreview(command: string, args: string[]) {
@@ -840,6 +894,43 @@ export function createToolApprovalRequest(
   const command = buildCustomToolApprovalCommand(toolCall, tool);
   const sourceLabel = tool?.source === "mcp" ? "MCP tool" : "custom tool";
 
+  if (toolCall.function.name === TERMINAL_EXEC_TOOL_NAME) {
+    const args = parseToolArgumentsText(toolCall.function.arguments || "{}");
+    const source = args && typeof args === "object" && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : {};
+    const commandValue = typeof source.command === "string" ? source.command.trim() : "";
+    const shellValue = typeof source.shell === "string" && source.shell.trim()
+      ? source.shell.trim()
+      : "auto";
+    const cwdValue = typeof source.cwd === "string" && source.cwd.trim()
+      ? source.cwd.trim()
+      : ".";
+    const rootIdValue = typeof source.rootId === "string" && source.rootId.trim()
+      ? source.rootId.trim()
+      : "auto / required for multiple roots";
+    const timeoutValue = typeof source.timeoutMs === "number" && Number.isFinite(source.timeoutMs)
+      ? `${Math.round(source.timeoutMs)} ms`
+      : "Default";
+
+    return {
+      title: "Approve terminal command",
+      description:
+        "The model wants to run a foreground command inside an approved workspace folder.",
+      toolName: toolCall.function.name,
+      action: "operation",
+      details: [
+        { label: "Command", value: commandValue || "Missing command" },
+        { label: "Shell", value: shellValue },
+        { label: "Workspace root", value: rootIdValue },
+        { label: "Working directory", value: cwdValue },
+        { label: "Timeout", value: timeoutValue },
+        { label: "Scope", value: "Approved workspace folders only" },
+        { label: "Approval mode", value: "Manual user approval required" },
+      ],
+    };
+  }
+
   return {
     title: "Approve tool execution",
     description: `The model wants to run a ${sourceLabel} \`${toolCall.function.name}\`.`,
@@ -859,7 +950,11 @@ export function requiresToolApproval(
   toolName: string,
   tool?: Pick<LoadedToolInfo, "requiresApproval">,
 ) {
-  return requiresFileToolApproval(toolName) || tool?.requiresApproval === true;
+  return (
+    toolName === TERMINAL_EXEC_TOOL_NAME ||
+    requiresFileToolApproval(toolName) ||
+    tool?.requiresApproval === true
+  );
 }
 
 export function getFileToolApprovalAction(toolName: string) {

@@ -17,6 +17,7 @@ import {
   parseAskUserRequestFromToolCall,
   parseFileToolApprovalRequestFromToolCall,
 } from "@/lib/ai-chat/builtin-tools";
+import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import type {
   AskUserRequest,
@@ -29,6 +30,8 @@ import type {
   LoadedSkillInfo,
   LoadedToolInfo,
   ToolCommandResult,
+  TerminalExecutionResult,
+  TerminalStreamEvent,
   ToolExecutionStatus,
   UserInputStatus,
 } from "@/lib/ai-chat/types";
@@ -62,6 +65,7 @@ export function useToolExecution({
   completeAssistantUserInputStep,
   completeAssistantFileApprovalStep,
   updateAssistantToolStepStatus,
+  updateAssistantToolCallPartialResult,
   updateAssistantUserInputStepStatus,
   updateAssistantFileApprovalStepStatus,
   scheduleStickyScrollToBottom,
@@ -80,7 +84,11 @@ export function useToolExecution({
   executeExternalTool: (
     toolName: string,
     args: unknown,
-    context?: { workspaceRoots?: ChatWorkspaceRoot[]; signal?: AbortSignal },
+    context?: {
+      workspaceRoots?: ChatWorkspaceRoot[];
+      signal?: AbortSignal;
+      onTerminalStreamEvent?: (event: TerminalStreamEvent) => void;
+    },
   ) => Promise<ToolCommandResult>;
   executeTaskTool: (toolCall: ChatToolCall, chatId: string) => ChatToolResult;
   abortChatGeneration: (chatId: string) => void;
@@ -105,6 +113,14 @@ export function useToolExecution({
     assistantMessageId: string,
     variantId: string,
     stepId: string,
+    status: ToolExecutionStatus,
+  ) => void;
+  updateAssistantToolCallPartialResult: (
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    toolCallId: string,
+    toolResult: ChatToolResult,
     status: ToolExecutionStatus,
   ) => void;
   updateAssistantUserInputStepStatus: (
@@ -375,6 +391,112 @@ export function useToolExecution({
     return false;
   }
 
+  function appendTerminalOutput(value: string, delta: string) {
+    const maxChars = 100_000;
+    const next = value + delta;
+    if (next.length <= maxChars) return next;
+    return next.slice(next.length - maxChars);
+  }
+
+  function createTerminalStreamHandler(
+    toolCall: ChatToolCall,
+    options: {
+      chatId: string;
+      assistantMessageId: string;
+      variantId: string;
+    },
+  ) {
+    const terminal: TerminalExecutionResult = {
+      command: "",
+      shell: "",
+      cwd: "",
+      stdout: "",
+      stderr: "",
+      exitCode: null,
+      timedOut: false,
+      cancelled: false,
+      durationMs: 0,
+      warnings: [],
+    };
+
+    const publish = (status: ToolExecutionStatus) => {
+      const content = JSON.stringify(
+        {
+          ok: status !== "failed",
+          status,
+          command: terminal.command,
+          shell: terminal.shell,
+          cwd: terminal.cwd,
+          stdout: terminal.stdout,
+          stderr: terminal.stderr,
+          exitCode: terminal.exitCode,
+          timedOut: terminal.timedOut,
+          cancelled: terminal.cancelled,
+          durationMs: terminal.durationMs,
+          outputTruncated: terminal.outputTruncated,
+          warnings: terminal.warnings,
+        },
+        null,
+        2,
+      );
+
+      updateAssistantToolCallPartialResult(
+        options.chatId,
+        options.assistantMessageId,
+        options.variantId,
+        toolCall.id,
+        {
+          toolCallId: toolCall.id,
+          toolName: toolCall.function.name,
+          content,
+          isError: status === "failed",
+          terminal: { ...terminal },
+        },
+        status,
+      );
+
+      if (options.chatId === activeChatId) {
+        scheduleStickyScrollToBottom({ settleFrames: 2 });
+      }
+    };
+
+    return (event: TerminalStreamEvent) => {
+      if (event.type === "started") {
+        terminal.command = event.command;
+        terminal.shell = event.shell;
+        terminal.cwd = event.cwd;
+        terminal.warnings = event.warnings ?? [];
+        publish("running");
+        return;
+      }
+
+      if (event.type === "stdout") {
+        terminal.stdout = appendTerminalOutput(terminal.stdout, event.text);
+        publish("running");
+        return;
+      }
+
+      if (event.type === "stderr") {
+        terminal.stderr = appendTerminalOutput(terminal.stderr, event.text);
+        publish("running");
+        return;
+      }
+
+      if (event.type === "finished") {
+        terminal.exitCode = event.exitCode;
+        terminal.timedOut = event.timedOut;
+        terminal.cancelled = event.cancelled;
+        terminal.durationMs = event.durationMs;
+        terminal.outputTruncated = event.outputTruncated;
+        publish(
+          event.timedOut || event.cancelled || event.exitCode !== 0
+            ? "failed"
+            : "complete",
+        );
+      }
+    };
+  }
+
   async function executeExternalToolCall(
     toolCall: ChatToolCall,
     options: {
@@ -398,12 +520,18 @@ export function useToolExecution({
         executeExternalTool(
           toolName,
           args,
-          isFileToolName(toolName)
+          toolName === TERMINAL_EXEC_TOOL_NAME
             ? {
                 workspaceRoots: options.workspaceRoots ?? workspaceRoots,
                 signal: options.signal,
+                onTerminalStreamEvent: createTerminalStreamHandler(toolCall, options),
               }
-            : { signal: options.signal },
+            : isFileToolName(toolName)
+              ? {
+                  workspaceRoots: options.workspaceRoots ?? workspaceRoots,
+                  signal: options.signal,
+                }
+              : { signal: options.signal },
         ),
       (status) =>
         updateAssistantToolStepStatus(
@@ -424,6 +552,7 @@ export function useToolExecution({
       execution: result.execution,
       changePreview: result.changePreview,
       generatedFiles: result.generatedFiles,
+      terminal: result.terminal,
     };
   }
 
@@ -554,6 +683,15 @@ export function useToolExecution({
         const execution = await executeExternalTool(toolCall.function.name, args, {
           workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,
           signal: pendingRequest.signal,
+          ...(toolCall.function.name === TERMINAL_EXEC_TOOL_NAME
+            ? {
+                onTerminalStreamEvent: createTerminalStreamHandler(toolCall, {
+                  chatId: pendingRequest.chatId,
+                  assistantMessageId: pendingRequest.assistantMessageId,
+                  variantId: pendingRequest.variantId,
+                }),
+              }
+            : {}),
         });
 
         toolResult = {
@@ -564,6 +702,7 @@ export function useToolExecution({
           execution: execution.execution,
           changePreview: execution.changePreview,
           generatedFiles: execution.generatedFiles,
+          terminal: execution.terminal,
         };
       }
 
