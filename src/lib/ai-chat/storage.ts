@@ -6,7 +6,9 @@ import type {
   AgentExportResult,
   AgentImportResult,
   AppSettings,
+  ChatFolder,
   ChatSession,
+  ChatWorkspaceRoot,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
@@ -42,6 +44,7 @@ const MODES_STATE_KEY = "modes-state";
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
   fontFamily: "sans",
+  chatFolders: [],
 };
 
 export const DEFAULT_MCP_SETTINGS: McpSettings = {
@@ -303,6 +306,87 @@ function normalizeAgentsSettings(
   };
 }
 
+function normalizeChatFolderWorkspaceRoots(
+  value: unknown,
+): ChatFolder["workspaceRoots"] {
+  if (!Array.isArray(value)) return undefined;
+
+  const roots = value
+    .filter((root): root is Record<string, unknown> =>
+      Boolean(root && typeof root === "object" && !Array.isArray(root)),
+    )
+    .map((root) => {
+      const id = typeof root.id === "string" && root.id.trim()
+        ? root.id.trim()
+        : `workspace-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const path = typeof root.path === "string" ? root.path.trim() : "";
+      if (!path) return undefined;
+
+      const kind: ChatWorkspaceRoot["kind"] =
+        root.kind === "chat" || root.kind === "manual" || root.kind === "skill"
+          ? root.kind
+          : undefined;
+
+      return {
+        id,
+        name:
+          typeof root.name === "string" && root.name.trim()
+            ? root.name.trim()
+            : path,
+        path,
+        createdAt:
+          typeof root.createdAt === "string" && root.createdAt.trim()
+            ? root.createdAt
+            : new Date().toISOString(),
+        automatic: typeof root.automatic === "boolean" ? root.automatic : undefined,
+        kind,
+      } satisfies ChatWorkspaceRoot;
+    })
+    .filter((root): root is NonNullable<typeof root> => Boolean(root));
+
+  return roots.length ? roots : undefined;
+}
+
+function normalizeChatFolders(value: unknown): ChatFolder[] {
+  if (!Array.isArray(value)) return [];
+
+  const seenIds = new Set<string>();
+  const now = new Date().toISOString();
+
+  return value
+    .filter((folder): folder is Record<string, unknown> =>
+      Boolean(folder && typeof folder === "object" && !Array.isArray(folder)),
+    )
+    .map((folder) => {
+      const rawId = typeof folder.id === "string" ? folder.id.trim() : "";
+      const id = rawId || `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      if (seenIds.has(id)) return undefined;
+      seenIds.add(id);
+
+      const createdAt =
+        typeof folder.createdAt === "string" && folder.createdAt.trim()
+          ? folder.createdAt
+          : now;
+
+      const workspaceRoots = normalizeChatFolderWorkspaceRoots(folder.workspaceRoots);
+
+      return {
+        id,
+        name:
+          typeof folder.name === "string" && folder.name.trim()
+            ? folder.name.trim()
+            : "New folder",
+        createdAt,
+        updatedAt:
+          typeof folder.updatedAt === "string" && folder.updatedAt.trim()
+            ? folder.updatedAt
+            : createdAt,
+        ...(workspaceRoots ? { workspaceRoots } : {}),
+      } satisfies ChatFolder;
+    })
+    .filter((folder): folder is ChatFolder => folder !== undefined);
+}
+
 export function normalizeAppSettings(
   value: Partial<AppSettings> | undefined,
 ): AppSettings {
@@ -310,6 +394,7 @@ export function normalizeAppSettings(
     chatTitleGenerationMode:
       value?.chatTitleGenerationMode === "ai" ? "ai" : "local",
     fontFamily: value?.fontFamily === "mono" ? "mono" : "sans",
+    chatFolders: normalizeChatFolders(value?.chatFolders),
   };
 }
 

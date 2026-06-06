@@ -15,12 +15,12 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import type {
+  AgentTask,
   AskUserOption,
   AskUserQuestion,
   AskUserQuestionType,
   AskUserRequest,
   AskUserResponse,
-  AgentTask,
   ChatToolCall,
   ChatToolResult,
   ToolApprovalRequest,
@@ -278,10 +278,10 @@ export const AskUserBlock = memo(function AskUserBlock({
           <dl className="grid gap-2 text-sm leading-5 normal-case tracking-normal">
             {request.questions.map((question) => (
               <div key={question.id} className="grid">
-                <dt className="text-muted-foreground">
-                  Q: {question.question}
+                <dt className="font-medium text-muted-foreground">
+                  <span className="font-normal">Q:</span> {question.question}
                 </dt>
-                <dd className="font-medium text-foreground/85">
+                <dd className="text-foreground/85">
                   <span className="font-normal">A:</span>{" "}
                   {getAnswerSummary(question)}
                 </dd>
@@ -815,7 +815,7 @@ export const AskUserBlock = memo(function AskUserBlock({
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground [overflow-wrap:anywhere]">
         <button
           type="button"
           className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1028,7 +1028,7 @@ export const ToolApprovalBlock = memo(function ToolApprovalBlock({
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground [overflow-wrap:anywhere]">
         <button
           type="button"
           className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -1168,8 +1168,7 @@ function parseTaskToolResult(toolResult?: ChatToolResult): AgentTask[] {
         return false;
       const source = task as Record<string, unknown>;
       return (
-        typeof source.subject === "string" &&
-        typeof source.done === "boolean"
+        typeof source.subject === "string" && typeof source.done === "boolean"
       );
     });
   } catch {
@@ -1214,7 +1213,7 @@ export const TaskListBlock = memo(function TaskListBlock({
 
   return (
     <article key={id} className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground [overflow-wrap:anywhere]">
         <button
           type="button"
           className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"

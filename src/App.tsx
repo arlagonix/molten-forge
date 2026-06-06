@@ -79,7 +79,6 @@ import {
   getEnabledProviderModels,
   getProviderFallbackModel,
   modelSupportsVision,
-  groupChatsByPinnedAndActivityDate,
   labelForError,
   normalizeProviderForState,
   providerDisplayName,
@@ -101,6 +100,7 @@ import {
 } from "@/lib/ai-chat/request-builder";
 import {
   createEmptyChat,
+  deleteChat,
   loadActiveChatId,
   loadAgents,
   loadAgentsSettings,
@@ -130,6 +130,7 @@ import type {
   AgentsSettings,
   AppSettings,
   ChatAttachment,
+  ChatFolder,
   ChatMessage,
   ChatSession,
   ChatToolCall,
@@ -233,6 +234,7 @@ export default function Home() {
   const [appSettings, setAppSettings] = useState<AppSettings>({
     chatTitleGenerationMode: "local",
     fontFamily: "sans",
+    chatFolders: [],
   });
   const [mcpSettings, setMcpSettings] = useState<McpSettings>(
     DEFAULT_MCP_SETTINGS,
@@ -269,6 +271,7 @@ export default function Home() {
   const [newChatDraftWorkspaceRoots, setNewChatDraftWorkspaceRoots] = useState<
     ChatWorkspaceRoot[]
   >([]);
+  const [newChatDraftFolderId, setNewChatDraftFolderId] = useState<string | undefined>();
   const [newChatDraftModeId, setNewChatDraftModeId] = useState(DEFAULT_MODE_ID);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
@@ -522,10 +525,6 @@ export default function Home() {
   }
 
   const sortedChats = useMemo(() => sortChatsByUpdatedAt(chats), [chats]);
-  const groupedChatList = useMemo(
-    () => groupChatsByPinnedAndActivityDate(sortedChats),
-    [sortedChats],
-  );
 
   const activeChat = useMemo(() => {
     if (isNewChatDraft) return undefined;
@@ -1753,9 +1752,16 @@ export default function Home() {
         ...newChatDraftWorkspaceRoots.map((root) => ({ ...root })),
       ];
 
+      const draftFolderId = appSettings.chatFolders.some(
+        (folder) => folder.id === newChatDraftFolderId,
+      )
+        ? newChatDraftFolderId
+        : undefined;
+
       const chat: ChatSession = {
         ...emptyChat,
         modeId: activeMode.id,
+        folderId: draftFolderId,
         workspaceRoots: workspaceRoots.length ? workspaceRoots : undefined,
         fileToolAutoApproval:
           buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
@@ -1779,6 +1785,7 @@ export default function Home() {
         return next;
       });
       setNewChatDraftWorkspaceRoots([]);
+      setNewChatDraftFolderId(undefined);
 
       pendingDraftSendRef.current = {
         chatId: chat.id,
@@ -1801,6 +1808,8 @@ export default function Home() {
       sendMessage,
       toolsSettings,
       newChatDraftWorkspaceRoots,
+      newChatDraftFolderId,
+      appSettings.chatFolders,
       saveCurrentChatScrollSnapshot,
       resetChatScrollState,
       showError,
@@ -1990,6 +1999,7 @@ export default function Home() {
 
   function createNewChatWithEmptyDraftState() {
     setNewChatDraftWorkspaceRoots([]);
+    setNewChatDraftFolderId(undefined);
     setNewChatDraftModeId(DEFAULT_MODE_ID);
     createNewChat();
   }
@@ -1998,10 +2008,211 @@ export default function Home() {
     const willOpenNewChatDraft = chats.every((chat) => chat.id === chatId);
     if (willOpenNewChatDraft) {
       setNewChatDraftWorkspaceRoots([]);
+      setNewChatDraftFolderId(undefined);
       setNewChatDraftModeId(DEFAULT_MODE_ID);
     }
 
     await removeChat(chatId);
+  }
+
+  function cloneWorkspaceRoots(roots?: ChatWorkspaceRoot[]) {
+    return roots?.map((root) => ({ ...root })) ?? [];
+  }
+
+  function updateChatFolders(updater: (folders: ChatFolder[]) => ChatFolder[]) {
+    setAppSettings((currentSettings) => ({
+      ...currentSettings,
+      chatFolders: updater(currentSettings.chatFolders),
+    }));
+  }
+
+  function createFolder(name: string) {
+    const requestedName = name.trim();
+    if (!requestedName) return;
+
+    const now = new Date().toISOString();
+
+    updateChatFolders((folders) => {
+      const existingNames = new Set(folders.map((folder) => folder.name));
+      let uniqueName = requestedName;
+      let index = 2;
+
+      while (existingNames.has(uniqueName)) {
+        uniqueName = `${requestedName} ${index}`;
+        index += 1;
+      }
+
+      const folder: ChatFolder = {
+        id: `folder-${createId()}`,
+        name: uniqueName,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      return [folder, ...folders];
+    });
+    showSuccess("Folder created.");
+  }
+
+  function renameFolder(folderId: string, name: string) {
+    const nextName = name.trim();
+    if (!nextName) return;
+
+    const now = new Date().toISOString();
+    updateChatFolders((folders) =>
+      folders.map((folder) =>
+        folder.id === folderId
+          ? { ...folder, name: nextName, updatedAt: now }
+          : folder,
+      ),
+    );
+  }
+
+  async function addFolderWorkspace(folderId: string) {
+    try {
+      const result = await getWorkspaceBridge().selectFolder();
+      if (result.cancelled) return;
+
+      const now = new Date().toISOString();
+      const root: ChatWorkspaceRoot = {
+        id: createId(),
+        name: result.name || result.path,
+        path: result.path,
+        createdAt: now,
+        kind: "manual",
+      };
+
+      updateChatFolders((folders) =>
+        folders.map((folder) => {
+          if (folder.id !== folderId) return folder;
+          const existingRoots = folder.workspaceRoots ?? [];
+          if (existingRoots.some((item) => item.path === root.path)) return folder;
+
+          return {
+            ...folder,
+            workspaceRoots: [...existingRoots, root],
+            updatedAt: now,
+          };
+        }),
+      );
+      showSuccess("Default workspace added to folder.");
+    } catch (error) {
+      console.error("Failed to add folder workspace:", error);
+      showError("Failed to add folder workspace.", labelForError(error));
+    }
+  }
+
+  function clearFolderWorkspaces(folderId: string) {
+    const now = new Date().toISOString();
+    updateChatFolders((folders) =>
+      folders.map((folder) =>
+        folder.id === folderId
+          ? { ...folder, workspaceRoots: undefined, updatedAt: now }
+          : folder,
+      ),
+    );
+    showSuccess("Default workspaces cleared.");
+  }
+
+  function createNewChatInFolder(folderId: string) {
+    const folder = appSettings.chatFolders.find((item) => item.id === folderId);
+    if (!folder) return;
+
+    setNewChatDraftWorkspaceRoots(cloneWorkspaceRoots(folder.workspaceRoots));
+    setNewChatDraftFolderId(folder.id);
+    setNewChatDraftModeId(DEFAULT_MODE_ID);
+    createNewChat();
+  }
+
+  function moveChatToFolder(chatId: string, folderId: string) {
+    const folderExists = appSettings.chatFolders.some((folder) => folder.id === folderId);
+    if (!folderExists) return;
+
+    updateChat(chatId, (chat) => ({
+      ...chat,
+      folderId,
+      isPinned: false,
+    }));
+  }
+
+  function removeChatFromFolder(chatId: string) {
+    updateChat(chatId, (chat) => ({
+      ...chat,
+      folderId: undefined,
+    }));
+  }
+
+  async function deleteFolder(folderId: string, mode: "move" | "delete") {
+    const folder = appSettings.chatFolders.find((item) => item.id === folderId);
+    if (!folder) return;
+
+    updateChatFolders((folders) => folders.filter((item) => item.id !== folderId));
+
+    if (newChatDraftFolderId === folderId) {
+      setNewChatDraftFolderId(undefined);
+      setNewChatDraftWorkspaceRoots([]);
+    }
+
+    if (mode === "move") {
+      setChats((currentChats) =>
+        currentChats.map((chat) =>
+          chat.folderId === folderId ? { ...chat, folderId: undefined } : chat,
+        ),
+      );
+      showSuccess("Folder deleted. Chats moved to Chats.");
+      return;
+    }
+
+    const deletingChatIds = chats
+      .filter((chat) => chat.folderId === folderId)
+      .map((chat) => chat.id);
+    const deletingChatIdSet = new Set(deletingChatIds);
+
+    for (const chatId of deletingChatIds) {
+      if (isChatGenerating(chatId)) stopChatGeneration(chatId);
+      forgetChatScrollSnapshot(chatId);
+    }
+
+    setCompletedGenerationChatIds((currentChatIds) =>
+      currentChatIds.filter((chatId) => !deletingChatIdSet.has(chatId)),
+    );
+
+    const remainingChats = sortChatsByUpdatedAt(
+      chats.filter((chat) => !deletingChatIdSet.has(chat.id)),
+    );
+    const activeChatWasDeleted = activeChatId
+      ? deletingChatIdSet.has(activeChatId)
+      : false;
+
+    setChats(remainingChats);
+
+    if (activeChatWasDeleted) {
+      resetChatScrollState();
+      if (remainingChats.length > 0) {
+        setActiveChatId(remainingChats[0].id);
+        setIsNewChatDraft(false);
+        try {
+          await saveActiveChatId(remainingChats[0].id);
+        } catch (error) {
+          console.error("Failed to save active chat id:", error);
+        }
+      } else {
+        setActiveChatId(undefined);
+        setIsNewChatDraft(true);
+      }
+    }
+
+    try {
+      await Promise.all(deletingChatIds.map((chatId) => deleteChat(chatId)));
+      showSuccess(
+        deletingChatIds.length > 0
+          ? "Folder and chats deleted."
+          : "Folder deleted.",
+      );
+    } catch (error) {
+      console.error("Failed to delete folder chats:", error);
+      showError("Failed to delete some folder chats.", labelForError(error));
+    }
   }
 
   function cancelPendingChatSwitchFrames() {
@@ -2229,8 +2440,8 @@ export default function Home() {
       <ChatSidebar
         appName={APP_NAME}
         appVersionLabel={APP_VERSION_LABEL}
-        pinnedChats={groupedChatList.pinnedChats}
-        groupedChats={groupedChatList.groups}
+        chats={sortedChats}
+        folders={appSettings.chatFolders}
         activeChatId={activeChat?.id}
         isCollapsed={isSidebarCollapsed}
         generatingChatIds={generatingChatIds}
@@ -2253,8 +2464,16 @@ export default function Home() {
           void removeChatAndResetDraftState(chatId);
         }}
         onCreateNewChat={createNewChatWithEmptyDraftState}
+        onCreateChatInFolder={createNewChatInFolder}
         onCreateChatWithSameSettings={createChatWithSameSettings}
         onOpenSettings={() => setSettingsOpen(true)}
+        onCreateFolder={createFolder}
+        onRenameFolder={renameFolder}
+        onDeleteFolder={deleteFolder}
+        onAddFolderWorkspace={addFolderWorkspace}
+        onClearFolderWorkspaces={clearFolderWorkspaces}
+        onMoveChatToFolder={moveChatToFolder}
+        onRemoveChatFromFolder={removeChatFromFolder}
         onClearChat={(chatId) => {
           setCompletedGenerationChatIds((currentChatIds) =>
             currentChatIds.filter((currentChatId) => currentChatId !== chatId),

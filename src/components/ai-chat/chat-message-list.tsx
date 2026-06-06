@@ -63,7 +63,6 @@ import {
 import type {
   AskUserRequest,
   AskUserResponse,
-  ChatAssistantProcessStep,
   ChatAssistantVariant,
   ChatAttachment,
   ChatMessage,
@@ -598,7 +597,7 @@ const ChatMessageItem = memo(
             >
               <div
                 className={cn(
-                  "w-full min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground shadow-xs [overflow-wrap:anywhere]",
+                  "w-full min-w-0 max-w-full overflow-visible  px-0 py-1 text-base leading-6 text-card-foreground [overflow-wrap:anywhere]",
                 )}
                 data-message-content
                 data-message-view-mode={isSourceView ? "source" : "rendered"}
@@ -644,7 +643,7 @@ const ChatMessageItem = memo(
             key={step.id}
             className="flex w-full min-w-0 max-w-full justify-start"
           >
-            <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+            <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground [overflow-wrap:anywhere]">
               <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
                 <div className="flex min-w-0 items-center gap-2">
                   <Wrench className="size-3.5 shrink-0" />

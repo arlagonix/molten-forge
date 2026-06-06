@@ -410,9 +410,18 @@ export type ModesState = {
 
 export type AppFontFamily = "sans" | "mono";
 
+export type ChatFolder = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  workspaceRoots?: ChatWorkspaceRoot[];
+};
+
 export type AppSettings = {
   chatTitleGenerationMode: ChatTitleGenerationMode;
   fontFamily: AppFontFamily;
+  chatFolders: ChatFolder[];
 };
 
 export type ChatWorkspaceRoot = {
@@ -435,6 +444,7 @@ export type ChatSession = {
   title: string;
   titleMode?: ChatTitleMode;
   isPinned?: boolean;
+  folderId?: string;
   messages: ChatMessage[];
   createdAt: string;
   updatedAt: string;

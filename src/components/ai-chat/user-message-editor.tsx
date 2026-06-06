@@ -34,7 +34,11 @@ import { TooltipIconButton } from "./tooltip-icon-button";
 
 type AttachmentInput =
   | { name: string; path: string; mimeType?: string }
-  | { name: string; bytes: Uint8Array | number[] | ArrayBuffer; mimeType?: string };
+  | {
+      name: string;
+      bytes: Uint8Array | number[] | ArrayBuffer;
+      mimeType?: string;
+    };
 
 type ActiveMention = {
   type: "tool" | "skill" | "agent";
@@ -194,8 +198,14 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   skillMentionOptions?: ToolMentionOption[];
   agentMentionOptions?: ToolMentionOption[];
   onCancel: () => void;
-  onSave: (content: string, attachments: ChatAttachment[]) => void | Promise<void>;
-  onSubmit: (content: string, attachments: ChatAttachment[]) => void | Promise<void>;
+  onSave: (
+    content: string,
+    attachments: ChatAttachment[],
+  ) => void | Promise<void>;
+  onSubmit: (
+    content: string,
+    attachments: ChatAttachment[],
+  ) => void | Promise<void>;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const mentionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -211,7 +221,8 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   const [isProcessingAttachments, setIsProcessingAttachments] = useState(false);
   const trimmedContent = content.trim();
   const canSaveOrSubmit =
-    !disabled && !isProcessingAttachments &&
+    !disabled &&
+    !isProcessingAttachments &&
     (trimmedContent.length > 0 || attachments.length > 0);
 
   const mentionSuggestions = useMemo<ToolMentionOption[]>(() => {
@@ -230,7 +241,13 @@ export const UserMessageEditor = memo(function UserMessageEditor({
         query ? option.name.toLowerCase().includes(query) : true,
       )
       .slice(0, 12);
-  }, [activeMention, agentMentionOptions, disabled, skillMentionOptions, toolMentionOptions]);
+  }, [
+    activeMention,
+    agentMentionOptions,
+    disabled,
+    skillMentionOptions,
+    toolMentionOptions,
+  ]);
 
   const isMentionMenuOpen = Boolean(activeMention && mentionSuggestions.length);
 
@@ -309,7 +326,9 @@ export const UserMessageEditor = memo(function UserMessageEditor({
       for (const warning of result.warnings ?? []) toast.warning(warning);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to process attachments.",
+        error instanceof Error
+          ? error.message
+          : "Failed to process attachments.",
       );
     } finally {
       setIsProcessingAttachments(false);
@@ -371,7 +390,8 @@ export const UserMessageEditor = memo(function UserMessageEditor({
       ? (window.codeForgeAI?.readClipboardFilePathsSync?.() ?? [])
       : [];
 
-    if (!files.length && !clipboardFilePaths.length && !hasFileClipboardHint) return;
+    if (!files.length && !clipboardFilePaths.length && !hasFileClipboardHint)
+      return;
 
     event.preventDefault();
     if (files.length) {
@@ -452,7 +472,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   return (
     <div className="grid min-w-0 max-w-full gap-2">
       <article className="flex justify-end">
-        <div className="relative min-w-0 w-full overflow-visible bg-primary px-4 py-3 text-base leading-6 text-primary-foreground shadow-xs [overflow-wrap:anywhere]">
+        <div className="relative min-w-0 w-full overflow-visible bg-primary px-4 py-3 text-base leading-6 text-primary-foreground [overflow-wrap:anywhere]">
           {isMentionMenuOpen && mentionMenuPosition && (
             <div
               ref={mentionMenuRef}

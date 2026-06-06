@@ -15,7 +15,7 @@ import {
   estimateAttachmentTokens,
 } from "../src/lib/ai-chat/attachment-limits";
 import { isFileToolName } from "../src/lib/ai-chat/file-tool-names";
-import type { AttachmentKind, ChatAttachment, ChatWorkspaceRoot } from "../src/lib/ai-chat/types";
+import type { AttachmentKind, ChatAttachment, ChatFolder, ChatWorkspaceRoot } from "../src/lib/ai-chat/types";
 import {
   runChatCompletion,
   streamChatCompletion,
@@ -258,6 +258,7 @@ type AgentsSettings = {
 type AppSettings = {
   chatTitleGenerationMode: "local" | "ai";
   fontFamily: "sans" | "mono";
+  chatFolders: ChatFolder[];
 };
 
 type ToolLoadError = {
@@ -368,6 +369,7 @@ const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
 const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
   fontFamily: "sans",
+  chatFolders: [],
 };
 const DEFAULT_MCP_SETTINGS: McpSettings = {
   enabled: true,
@@ -599,6 +601,44 @@ function normalizeAgentsSettings(value: unknown): AgentsSettings {
   };
 }
 
+function normalizeChatFolderWorkspaceRoots(
+  value: unknown,
+): ChatWorkspaceRoot[] | undefined {
+  const roots = normalizeWorkspaceRoots(value).map((root) => ({
+    ...root,
+    createdAt: root.createdAt ?? new Date().toISOString(),
+  } satisfies ChatWorkspaceRoot));
+  return roots.length ? roots : undefined;
+}
+
+function normalizeChatFolders(value: unknown): ChatFolder[] {
+  if (!Array.isArray(value)) return [];
+
+  const seenIds = new Set<string>();
+  const now = new Date().toISOString();
+
+  return value
+    .filter((folder): folder is JsonRecord => isPlainObject(folder))
+    .map((folder) => {
+      const rawId = safeString(folder.id).trim();
+      const id = rawId || `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      if (seenIds.has(id)) return undefined;
+      seenIds.add(id);
+
+      const createdAt = safeString(folder.createdAt).trim() || now;
+      const workspaceRoots = normalizeChatFolderWorkspaceRoots(folder.workspaceRoots);
+
+      return {
+        id,
+        name: safeString(folder.name).trim() || "New folder",
+        createdAt,
+        updatedAt: safeString(folder.updatedAt).trim() || createdAt,
+        ...(workspaceRoots ? { workspaceRoots } : {}),
+      } satisfies ChatFolder;
+    })
+    .filter((folder): folder is ChatFolder => folder !== undefined);
+}
+
 function normalizeAppSettings(value: unknown): AppSettings {
   if (!isPlainObject(value)) return DEFAULT_APP_SETTINGS;
 
@@ -606,6 +646,7 @@ function normalizeAppSettings(value: unknown): AppSettings {
     chatTitleGenerationMode:
       value.chatTitleGenerationMode === "ai" ? "ai" : "local",
     fontFamily: value.fontFamily === "mono" ? "mono" : "sans",
+    chatFolders: normalizeChatFolders(value.chatFolders),
   };
 }
 
@@ -3039,6 +3080,7 @@ function normalizeChatSummary(chat: unknown) {
         ? chat.titleMode
         : undefined,
     isPinned: chat.isPinned === true,
+    folderId: typeof chat.folderId === "string" ? chat.folderId : undefined,
   };
 }
 

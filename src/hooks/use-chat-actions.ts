@@ -634,10 +634,14 @@ export function useChatActions({
   }
 
   function toggleChatPinned(chatId: string) {
-    updateChat(chatId, (chat) => ({
-      ...chat,
-      isPinned: chat.isPinned !== true,
-    }));
+    updateChat(chatId, (chat) => {
+      if (chat.folderId) return chat;
+
+      return {
+        ...chat,
+        isPinned: chat.isPinned !== true,
+      };
+    });
   }
 
   return {

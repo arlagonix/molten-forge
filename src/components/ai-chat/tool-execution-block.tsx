@@ -1,4 +1,12 @@
-import { Check, Download, FileArchive, FileText, Maximize2, Wrench, X } from "lucide-react";
+import {
+  Check,
+  Download,
+  FileArchive,
+  FileText,
+  Maximize2,
+  Wrench,
+  X,
+} from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -12,11 +20,11 @@ import {
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import {
-  ASK_USER_TOOL,
   ARCHIVE_CREATE_TOOL,
   ARCHIVE_CREATE_TOOL_NAME,
   ARCHIVE_EXTRACT_TOOL,
   ARCHIVE_EXTRACT_TOOL_NAME,
+  ASK_USER_TOOL,
   CALL_AGENT_TOOL_NAME,
   CHAT_FILE_CREATE_TOOL,
   CHAT_FILE_CREATE_TOOL_NAME,
@@ -41,7 +49,6 @@ import {
   isTaskToolName,
 } from "@/lib/ai-chat/builtin-tools";
 import { buildToolExecutionPreviewForCall } from "@/lib/ai-chat/tool-preview";
-import { cn } from "@/lib/utils";
 import type {
   ChatToolCall,
   ChatToolResult,
@@ -50,6 +57,7 @@ import type {
   ToolExecutionPreview,
   ToolExecutionStatus,
 } from "@/lib/ai-chat/types";
+import { cn } from "@/lib/utils";
 
 const TOOL_INFO_CODE_BLOCK_CLASS_NAME =
   "chat-markdown-compact chat-tool-info-codeblock";
@@ -116,7 +124,6 @@ function renderCodeBlock(
 function renderCommandCodeBlock(value: string) {
   return renderCodeBlock(value, "bash");
 }
-
 
 function getChangePreviewTitle(preview: FileToolChangePreview) {
   if (preview.title?.trim()) return preview.title.trim();
@@ -195,8 +202,9 @@ function formatFileSize(sizeBytes: number) {
   return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-
-type GeneratedFileArtifact = NonNullable<ChatToolResult["generatedFiles"]>[number];
+type GeneratedFileArtifact = NonNullable<
+  ChatToolResult["generatedFiles"]
+>[number];
 
 function getGeneratedFileIcon(fileName: string) {
   const lowerName = fileName.toLowerCase();
@@ -529,7 +537,7 @@ export function ToolExecutionBlock({
         <div
           role="button"
           tabIndex={0}
-          className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           onClick={() => setIsDetailsOpen(true)}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {

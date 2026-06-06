@@ -622,6 +622,41 @@ export function isEditableShortcutTarget(target: EventTarget | null) {
   );
 }
 
+export function formatRelativeChatActivityDate(value: string, nowMs = Date.now()) {
+  const time = getValidDateTime(value);
+  if (time === undefined) return "";
+
+  const elapsedMs = Math.max(0, nowMs - time);
+  const minuteMs = 60_000;
+  const hourMs = 60 * minuteMs;
+  const dayMs = 24 * hourMs;
+  const weekMs = 7 * dayMs;
+  const monthMs = 30 * dayMs;
+  const yearMs = 365 * dayMs;
+
+  if (elapsedMs < hourMs) {
+    return `${Math.max(1, Math.floor(elapsedMs / minuteMs))}m`;
+  }
+
+  if (elapsedMs < dayMs) {
+    return `${Math.floor(elapsedMs / hourMs)}h`;
+  }
+
+  if (elapsedMs < weekMs) {
+    return `${Math.floor(elapsedMs / dayMs)}d`;
+  }
+
+  if (elapsedMs < monthMs) {
+    return `${Math.floor(elapsedMs / weekMs)}w`;
+  }
+
+  if (elapsedMs < yearMs) {
+    return `${Math.max(1, Math.floor(elapsedMs / monthMs))}mo`;
+  }
+
+  return `${Math.max(1, Math.floor(elapsedMs / yearMs))}y`;
+}
+
 export function formatChatActivityDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown date";

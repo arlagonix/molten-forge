@@ -1,5 +1,13 @@
 import { Bot, Maximize2 } from "lucide-react";
-import { Fragment, memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  memo,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type { RenderAgentToolExecutionBlock } from "@/components/ai-chat/agent-call-utils";
 import { AgentStatusInline } from "@/components/ai-chat/agent-status-inline";
@@ -506,7 +514,8 @@ function AgentTranscriptStepsBody({
   const processSteps = agentCall.processSteps ?? [];
   const visibleSteps = getVisibleAssistantProcessSteps(processSteps);
   const groups = groupVisibleAssistantProcessSteps(visibleSteps);
-  const lastStepId = visibleSteps[visibleSteps.length - 1]?.sourceStepIds.at(-1);
+  const lastStepId =
+    visibleSteps[visibleSteps.length - 1]?.sourceStepIds.at(-1);
   const agentRunning =
     agentCall.status === "running" || agentCall.status === "pending";
 
@@ -545,7 +554,13 @@ function AgentTranscriptStepsBody({
 
     if (step.type === "assistant_message") {
       if (!step.content.trim()) return null;
-      return <MiniChatMessage key={step.id} role="assistant" content={step.content} />;
+      return (
+        <MiniChatMessage
+          key={step.id}
+          role="assistant"
+          content={step.content}
+        />
+      );
     }
 
     if (step.type === "agent_call") {
@@ -878,19 +893,19 @@ export const AgentTranscriptDialog = memo(function AgentTranscriptDialog({
           overlayStyle={{ zIndex: modalZIndex }}
           style={{ zIndex: modalZIndex + 1 }}
         >
-        <AgentModalHeader agentCall={agentCall} />
+          <AgentModalHeader agentCall={agentCall} />
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-base leading-6 chat-message-scrollbar">
-          <AgentTranscriptBody
-            agentCall={agentCall}
-            renderToolExecutionBlock={renderToolExecutionBlock}
-            canSubmitAskUserResponse={canSubmitAskUserResponse}
-            onSubmitAskUserResponse={onSubmitAskUserResponse}
-            onCancelAskUserRequest={onCancelAskUserRequest}
-            onAskUserLayoutChange={onAskUserLayoutChange}
-            onOpenChildAgent={setExpandedChildAgentId}
-          />
-        </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-base leading-6 chat-message-scrollbar">
+            <AgentTranscriptBody
+              agentCall={agentCall}
+              renderToolExecutionBlock={renderToolExecutionBlock}
+              canSubmitAskUserResponse={canSubmitAskUserResponse}
+              onSubmitAskUserResponse={onSubmitAskUserResponse}
+              onCancelAskUserRequest={onCancelAskUserRequest}
+              onAskUserLayoutChange={onAskUserLayoutChange}
+              onOpenChildAgent={setExpandedChildAgentId}
+            />
+          </div>
         </DialogContent>
       </Dialog>
 
