@@ -14,6 +14,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
+import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import type {
   AgentTask,
   AskUserOption,
@@ -988,10 +989,71 @@ export const AskUserBlock = memo(function AskUserBlock({
   );
 });
 
+function renderTerminalTextBlock(value: string, emptyLabel = "No output yet.") {
+  const text = value.length ? value : emptyLabel;
+
+  return (
+    <pre className="max-h-[min(22rem,45dvh)] overflow-auto border bg-background/80 px-3 py-2 font-mono text-xs leading-5 text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+      {text}
+    </pre>
+  );
+}
+
+function renderApprovalTerminalOutput(toolResult?: ChatToolResult) {
+  const terminal = toolResult?.terminal;
+  if (!terminal) {
+    const content = toolResult?.content.trim();
+    if (!content) return null;
+
+    return (
+      <div className="grid gap-1.5">
+        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+          Output
+        </div>
+        {renderTerminalTextBlock(content)}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-2">
+      {terminal.warnings?.length ? (
+        <div className="grid gap-1 border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          {terminal.warnings.map((warning) => (
+            <div key={warning}>{warning}</div>
+          ))}
+        </div>
+      ) : null}
+      <div className="grid gap-1.5">
+        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+          Stdout
+        </div>
+        {renderTerminalTextBlock(terminal.stdout)}
+      </div>
+      <div className="grid gap-1.5">
+        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+          Stderr
+        </div>
+        {renderTerminalTextBlock(terminal.stderr)}
+      </div>
+      <div className="grid gap-1.5 text-xs text-muted-foreground">
+        <div>
+          Exit code: {terminal.exitCode === null ? "—" : terminal.exitCode} · Duration: {terminal.durationMs ? `${(terminal.durationMs / 1000).toFixed(1)}s` : "—"}
+          {terminal.timedOut ? " · Timed out" : ""}
+          {terminal.cancelled ? " · Cancelled" : ""}
+          {terminal.outputTruncated ? " · Output truncated" : ""}
+        </div>
+        {terminal.cwd ? <div className="truncate">CWD: {terminal.cwd}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 export const ToolApprovalBlock = memo(function ToolApprovalBlock({
   id,
   request,
   response,
+  toolResult,
   status,
   canSubmit,
   isCollapsed,
@@ -1002,6 +1064,7 @@ export const ToolApprovalBlock = memo(function ToolApprovalBlock({
   id: string;
   request: ToolApprovalRequest;
   response?: ToolApprovalResponse;
+  toolResult?: ChatToolResult;
   status?: UserInputStatus;
   canSubmit: boolean;
   isCollapsed: boolean;
@@ -1014,7 +1077,7 @@ export const ToolApprovalBlock = memo(function ToolApprovalBlock({
 
   useLayoutEffect(() => {
     onLayoutChange?.();
-  }, [effectiveStatus, isCollapsed, onLayoutChange, response]);
+  }, [effectiveStatus, isCollapsed, onLayoutChange, response, toolResult]);
 
   function submitApproval(approved: boolean) {
     if (!canSubmit || !isWaiting) return;
@@ -1141,6 +1204,10 @@ export const ToolApprovalBlock = memo(function ToolApprovalBlock({
                 Operation {response.approved ? "approved" : "cancelled"}.
               </div>
             )}
+
+            {request.toolName === TERMINAL_EXEC_TOOL_NAME
+              ? renderApprovalTerminalOutput(toolResult)
+              : null}
           </div>
         )}
       </div>

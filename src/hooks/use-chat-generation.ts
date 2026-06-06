@@ -658,6 +658,36 @@ export function useChatGeneration({
     );
   }
 
+  function updateAssistantToolApprovalPartialResult(
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    stepId: string,
+    response: ToolApprovalResponse,
+    toolResult: ChatToolResult,
+    status?: UserInputStatus,
+  ) {
+    updateAssistantVariant(
+      chatId,
+      assistantMessageId,
+      variantId,
+      (variant) => ({
+        ...variant,
+        processSteps: (variant.processSteps ?? []).map((step) =>
+          step.id === stepId && (step.type === "approval" || step.type === "file_approval")
+            ? {
+                ...step,
+                status: status ?? step.status,
+                response,
+                toolResult,
+              }
+            : step,
+        ),
+      }),
+      { touch: false },
+    );
+  }
+
   function abortChatGeneration(chatId: string) {
     generationRefs.current[chatId]?.controller.abort();
   }
@@ -746,6 +776,7 @@ export function useChatGeneration({
     abortChatGeneration,
     completeAssistantUserInputStep,
     completeAssistantFileApprovalStep,
+    updateAssistantToolApprovalPartialResult,
     updateAssistantToolStepStatus,
     updateAssistantToolCallPartialResult,
     updateAssistantUserInputStepStatus,

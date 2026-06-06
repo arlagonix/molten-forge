@@ -731,7 +731,7 @@ export function ToolExecutionBlock({
                   {renderTerminalOutput(toolResult)}
                 </div>
               ) : null}
-              {!isTerminalTool && toolResult?.content.trim() && (
+              {toolResult?.content.trim() && (!isTerminalTool || !toolResult.terminal) && (
                 <div className="grid gap-1.5">
                   <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
                     Output

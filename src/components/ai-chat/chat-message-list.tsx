@@ -724,6 +724,7 @@ const ChatMessageItem = memo(
             id={step.id}
             request={step.request}
             response={step.response}
+            toolResult={step.toolResult}
             status={step.status}
             canSubmit={canSubmitAskUserResponse(step.toolCall.id)}
             isCollapsed={isCollapsed}

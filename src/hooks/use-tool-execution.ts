@@ -64,6 +64,7 @@ export function useToolExecution({
   abortChatGeneration,
   completeAssistantUserInputStep,
   completeAssistantFileApprovalStep,
+  updateAssistantToolApprovalPartialResult,
   updateAssistantToolStepStatus,
   updateAssistantToolCallPartialResult,
   updateAssistantUserInputStepStatus,
@@ -107,6 +108,15 @@ export function useToolExecution({
     stepId: string,
     response: ToolApprovalResponse,
     toolResult: ChatToolResult,
+  ) => void;
+  updateAssistantToolApprovalPartialResult: (
+    chatId: string,
+    assistantMessageId: string,
+    variantId: string,
+    stepId: string,
+    response: ToolApprovalResponse,
+    toolResult: ChatToolResult,
+    status?: UserInputStatus,
   ) => void;
   updateAssistantToolStepStatus: (
     chatId: string,
@@ -404,6 +414,8 @@ export function useToolExecution({
       chatId: string;
       assistantMessageId: string;
       variantId: string;
+      approvalStepId?: string;
+      approvalResponse?: ToolApprovalResponse;
     },
   ) {
     const terminal: TerminalExecutionResult = {
@@ -440,20 +452,34 @@ export function useToolExecution({
         2,
       );
 
+      const toolResult: ChatToolResult = {
+        toolCallId: toolCall.id,
+        toolName: toolCall.function.name,
+        content,
+        isError: status === "failed",
+        terminal: { ...terminal },
+      };
+
       updateAssistantToolCallPartialResult(
         options.chatId,
         options.assistantMessageId,
         options.variantId,
         toolCall.id,
-        {
-          toolCallId: toolCall.id,
-          toolName: toolCall.function.name,
-          content,
-          isError: status === "failed",
-          terminal: { ...terminal },
-        },
+        toolResult,
         status,
       );
+
+      if (options.approvalStepId && options.approvalResponse) {
+        updateAssistantToolApprovalPartialResult(
+          options.chatId,
+          options.assistantMessageId,
+          options.variantId,
+          options.approvalStepId,
+          options.approvalResponse,
+          toolResult,
+          "complete",
+        );
+      }
 
       if (options.chatId === activeChatId) {
         scheduleStickyScrollToBottom({ settleFrames: 2 });
@@ -680,6 +706,24 @@ export function useToolExecution({
       } else {
         const argsText = toolCall.function.arguments.trim() || "{}";
         const args = JSON.parse(argsText);
+
+        if (toolCall.function.name === TERMINAL_EXEC_TOOL_NAME) {
+          updateAssistantToolApprovalPartialResult(
+            pendingRequest.chatId,
+            pendingRequest.assistantMessageId,
+            pendingRequest.variantId,
+            pendingRequest.stepId,
+            response,
+            {
+              toolCallId: toolCall.id,
+              toolName: toolCall.function.name,
+              content: "Terminal command approved. Waiting for execution to start.",
+              isError: false,
+            },
+            "complete",
+          );
+        }
+
         const execution = await executeExternalTool(toolCall.function.name, args, {
           workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,
           signal: pendingRequest.signal,
@@ -689,6 +733,8 @@ export function useToolExecution({
                   chatId: pendingRequest.chatId,
                   assistantMessageId: pendingRequest.assistantMessageId,
                   variantId: pendingRequest.variantId,
+                  approvalStepId: pendingRequest.stepId,
+                  approvalResponse: response,
                 }),
               }
             : {}),
