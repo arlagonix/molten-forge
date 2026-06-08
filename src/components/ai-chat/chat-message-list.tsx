@@ -1,4 +1,3 @@
-import { Spinner as RadixSpinner } from "@radix-ui/themes";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   BookOpen,
@@ -1268,18 +1267,7 @@ const ChatMessageItem = memo(
           <div className="grid gap-2 text-sm leading-5 text-muted-foreground">
             <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
               <div className="min-h-6 min-w-0 flex-1 text-left">
-                {isMessageStreaming ? (
-                  <span className="inline-flex items-center gap-1.5">
-                    <RadixSpinner
-                      aria-hidden="true"
-                      className="generating-radix-spinner"
-                      size="1"
-                    />
-                    <span className="generating-gradient-text font-medium">
-                      Generating
-                    </span>
-                  </span>
-                ) : generatedModelAndMode ? (
+                {!isMessageStreaming && generatedModelAndMode ? (
                   <span
                     className="block truncate text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100"
                     title={`Generated with ${generatedModelAndMode}`}

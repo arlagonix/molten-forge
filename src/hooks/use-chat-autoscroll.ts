@@ -13,30 +13,12 @@ import {
   useState,
 } from "react";
 
-const CHAT_BOTTOM_THRESHOLD_PX = 32;
-// Eased streaming sticky-scroll (gentle glide toward the live bottom).
-// Each frame closes EASE_FACTOR of the remaining gap (exponential ease-out),
-// but the per-frame movement is clamped between MIN_STEP and MAX_STEP below.
-const STICKY_SCROLL_EASE_FACTOR = 0.1;
-// Minimum px moved per frame so the tail converges instead of crawling.
-const STICKY_SCROLL_MIN_STEP_PX = 2;
-// Maximum px moved per frame. THIS IS THE GLIDE-SPEED / DURATION KNOB:
-// the view never travels faster than this many px per ~16ms frame, so a large
-// gap glides at a steady pace instead of lunging. LOWER = slower & longer
-// glide; HIGHER = faster & snappier. (14 px/frame ~= 840 px/sec at 60fps.)
-const STICKY_SCROLL_MAX_STEP_PX = 3;
-// Within this distance, snap to the exact bottom and stop the loop.
-const STICKY_SCROLL_SNAP_DISTANCE_PX = 2;
-// Gaps larger than this snap instantly (massive paste / huge media / first
-// catch-up) to avoid a long visible crawl. Normal streaming deltas and typical
-// code-block / image insertions stay well under this and will glide.
-const STICKY_SCROLL_MAX_EASE_DISTANCE_PX = 4000;
-// Keep the "programmatic scroll" flag alive across eased frames so the
-// onScroll handler does not mistake the glide for a manual scroll.
-const STICKY_SCROLL_PROGRAMMATIC_MS = 120;
+const CHAT_BOTTOM_THRESHOLD_PX = 100;
 const SCROLL_TO_BOTTOM_BUTTON_THRESHOLD_PX = 1000;
 const STICKY_SCROLL_SUPPRESSION_MS = 1000;
-const STICKY_SCROLL_SETTLE_FRAMES = 5;
+const STICKY_SCROLL_LERP = 0.12;
+const STICKY_SCROLL_SETTLE_EPSILON_PX = 0.5;
+const STICKY_SCROLL_SETTLE_FRAMES = 4;
 const FORCED_SCROLL_SETTLE_FRAMES = 8;
 const CHAT_SCROLL_SNAPSHOTS_STORAGE_KEY = "chat-forge-chat-scroll-snapshots";
 const CHAT_SCROLL_SNAPSHOT_PERSIST_DEBOUNCE_MS = 250;
@@ -156,6 +138,7 @@ export function useChatAutoscroll({
   const scrollFrameRef = useRef<number | null>(null);
   const stickyScrollFrameRef = useRef<number | null>(null);
   const stickyScrollSettleFramesRef = useRef(0);
+  const wasActiveChatGeneratingRef = useRef(false);
   const stickyScrollForceRef = useRef(false);
   const autoScrollResetTimeoutRef = useRef<number | null>(null);
   const manualScrollSuppressionTimeoutRef = useRef<number | null>(null);
@@ -392,57 +375,30 @@ export function useChatAutoscroll({
     saveCurrentChatScrollSnapshot();
   }
 
-  // Move one eased step toward the live bottom. Returns true once it has
-  // converged (at the bottom) so the caller can stop the rAF loop. Only used
-  // for the non-forced streaming catch-up; forced snaps (scroll-to-bottom
-  // button, chat-switch restore, send/arm) still use scrollToBottomInstant().
-  function stepStickyScrollTowardBottom() {
+  function scrollTowardBottom() {
     const scrollElement = chatScrollRef.current;
     if (!scrollElement) return true;
 
-    const commit = (nextScrollTop: number) => {
-      markProgrammaticChatScroll(STICKY_SCROLL_PROGRAMMATIC_MS);
-      scrollElement.scrollTop = nextScrollTop;
-      lastChatScrollTopRef.current = nextScrollTop;
-      saveCurrentChatScrollSnapshot();
-    };
-
-    const target = Math.max(
+    const targetScrollTop = Math.max(
       0,
       scrollElement.scrollHeight - scrollElement.clientHeight,
     );
+    const currentScrollTop = scrollElement.scrollTop;
+    const distanceToBottom = targetScrollTop - currentScrollTop;
 
-    // Honour reduced-motion: snap instead of gliding.
-    if (
-      typeof window !== "undefined" &&
-      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches
-    ) {
-      commit(target);
+    markProgrammaticChatScroll(200);
+
+    if (Math.abs(distanceToBottom) <= STICKY_SCROLL_SETTLE_EPSILON_PX) {
+      scrollElement.scrollTop = targetScrollTop;
+      lastChatScrollTopRef.current = targetScrollTop;
       return true;
     }
 
-    const current = scrollElement.scrollTop;
-    const distance = target - current;
-
-    // Already at/above the bottom (or content shrank), or a huge jump: snap.
-    if (
-      distance <= STICKY_SCROLL_SNAP_DISTANCE_PX ||
-      distance > STICKY_SCROLL_MAX_EASE_DISTANCE_PX
-    ) {
-      commit(target);
-      return true;
-    }
-
-    // Exponential ease-out, clamped to a steady per-frame speed so large gaps
-    // glide instead of lunging, and a minimum step so the tail converges.
-    const step = Math.min(
-      STICKY_SCROLL_MAX_STEP_PX,
-      Math.max(distance * STICKY_SCROLL_EASE_FACTOR, STICKY_SCROLL_MIN_STEP_PX),
-    );
-    const next = Math.min(target, current + step);
-    commit(next);
-
-    return next >= target - STICKY_SCROLL_SNAP_DISTANCE_PX;
+    const nextScrollTop =
+      currentScrollTop + distanceToBottom * STICKY_SCROLL_LERP;
+    scrollElement.scrollTop = nextScrollTop;
+    lastChatScrollTopRef.current = scrollElement.scrollTop;
+    return false;
   }
 
   function syncChatScrollState() {
@@ -673,25 +629,33 @@ export function useChatAutoscroll({
         return;
       }
 
-      // Streaming catch-up: glide one eased step toward the live bottom.
-      const reachedBottom = stepStickyScrollTowardBottom();
+      // Streaming catch-up: OpenChamber-style auto-follow. Do not snap to
+      // the live bottom on every streamed update. Instead, continuously lerp
+      // toward the moving bottom and stop only after several settled frames.
+      const reachedBottom = scrollTowardBottom();
       syncChatScrollableState();
       updateIsNearChatBottom(true);
       setShowScrollToBottomButton(false);
 
-      // Keep gliding while not yet at the bottom and the chat still wants to
-      // stick. The loop re-reads the live target each frame, so it naturally
-      // follows content that is still growing. Repeated schedules while we run
-      // are no-ops (guarded above), so the loop stays continuous.
-      if (!reachedBottom && shouldStickToChatBottom()) {
-        stickyScrollFrameRef.current =
-          window.requestAnimationFrame(runStickyScrollFrame);
-        return;
+      if (reachedBottom) {
+        stickyScrollSettleFramesRef.current = Math.max(
+          0,
+          stickyScrollSettleFramesRef.current - 1,
+        );
+      } else {
+        stickyScrollSettleFramesRef.current = Math.max(
+          stickyScrollSettleFramesRef.current,
+          getStickyScrollSettleFrames(),
+        );
       }
 
-      // Converged, or the user scrolled away / generation ended. Stop; the next
-      // content/resize event re-arms via scheduleStickyScrollToBottom().
-      stickyScrollSettleFramesRef.current = 0;
+      if (
+        stickyScrollSettleFramesRef.current > 0 &&
+        shouldStickToChatBottom()
+      ) {
+        stickyScrollFrameRef.current =
+          window.requestAnimationFrame(runStickyScrollFrame);
+      }
     };
 
     stickyScrollFrameRef.current =
@@ -831,6 +795,10 @@ export function useChatAutoscroll({
   useEffect(() => {
     if (!activeChatId) return;
 
+    const activeChatIsGenerating = isActiveChatGenerating();
+    const wasActiveChatGenerating = wasActiveChatGeneratingRef.current;
+    wasActiveChatGeneratingRef.current = activeChatIsGenerating;
+
     if (shouldStickToChatBottom()) {
       scheduleStickyScrollToBottom({
         settleFrames: STICKY_SCROLL_SETTLE_FRAMES,
@@ -838,7 +806,11 @@ export function useChatAutoscroll({
       return;
     }
 
-    if (!isActiveChatGenerating()) {
+    if (!activeChatIsGenerating) {
+      if (wasActiveChatGenerating && isNearChatBottomRef.current) {
+        scheduleStickyScrollToBottom({ force: true, settleFrames: 2 });
+      }
+
       setChatAutoScrollEnabled(false);
     }
     syncChatScrollState();
@@ -951,30 +923,31 @@ export function useChatAutoscroll({
       lastChatScrollTopRef.current = currentScrollTop;
 
       const { isNearBottom } = syncChatScrollState();
+
+      if (isAutoScrollingRef.current) return;
+
       saveCurrentChatScrollSnapshot();
 
-      if (!isAutoScrollingRef.current) {
-        if (
-          currentScrollTop < previousScrollTop &&
-          hasRecentManualScrollInput()
-        ) {
-          suppressStickyScroll();
-          return;
-        }
+      if (
+        currentScrollTop < previousScrollTop &&
+        hasRecentManualScrollInput()
+      ) {
+        suppressStickyScroll();
+        return;
+      }
 
-        if (
-          isNearBottom &&
-          isActiveChatGenerating() &&
-          !isStickyScrollSuppressed()
-        ) {
-          setChatAutoScrollEnabled(true);
-        } else if (!isNearBottom && hasRecentManualScrollInput()) {
-          setChatAutoScrollEnabled(false);
-        } else if (!isNearBottom && shouldStickToChatBottom()) {
-          scheduleStickyScrollToBottom();
-        } else if (!isActiveChatGenerating()) {
-          setChatAutoScrollEnabled(false);
-        }
+      if (
+        isNearBottom &&
+        isActiveChatGenerating() &&
+        !isStickyScrollSuppressed()
+      ) {
+        setChatAutoScrollEnabled(true);
+      } else if (!isNearBottom && hasRecentManualScrollInput()) {
+        setChatAutoScrollEnabled(false);
+      } else if (!isNearBottom && shouldStickToChatBottom()) {
+        scheduleStickyScrollToBottom();
+      } else if (!isActiveChatGenerating()) {
+        setChatAutoScrollEnabled(false);
       }
     });
   }

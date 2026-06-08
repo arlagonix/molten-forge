@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner as RadixSpinner } from "@radix-ui/themes";
 import { ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -30,35 +31,29 @@ import { useChatAutoscroll } from "@/hooks/use-chat-autoscroll";
 import { useChatGeneration } from "@/hooks/use-chat-generation";
 import { useMessageContextMenu } from "@/hooks/use-message-context-menu";
 import { useStableCallback } from "@/hooks/use-stable-callback";
+import { estimateAttachmentsTokens } from "@/lib/ai-chat/attachment-limits";
 import {
   createBuiltInAgents,
   isBuiltInAgentName,
 } from "@/lib/ai-chat/builtin-agents";
 import {
+  applyBuiltInToolSettings,
   ASK_USER_TOOL,
-  ASK_USER_TOOL_NAME,
+  BASH_TOOL,
+  BASH_TOOL_NAME,
+  buildFileToolAutoApprovalFromToolsSettings,
   CALL_AGENT_TOOL,
-  CALL_AGENT_TOOL_NAME,
+  compareToolsByDisplayOrder,
   DEFAULT_AGENTS_SETTINGS,
   DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
-  READ_TOOL,
-  READ_TOOL_NAME,
-  BASH_TOOL,
-  BASH_TOOL_NAME,
   EDIT_TOOL,
-  EDIT_TOOL_NAME,
-  WRITE_TOOL,
-  WRITE_TOOL_NAME,
+  isBuiltInToolName,
+  isValidToolName,
+  READ_TOOL,
   TASK_TOOLS,
   WEB_FETCH_TOOL,
-  WEB_FETCH_TOOL_NAME,
-  applyBuiltInToolSettings,
-  buildFileToolAutoApprovalFromToolsSettings,
-  compareToolsByDisplayOrder,
-  isBuiltInToolName,
-  isTaskToolName,
-  isValidToolName,
+  WRITE_TOOL,
 } from "@/lib/ai-chat/builtin-tools";
 import {
   createId,
@@ -67,13 +62,12 @@ import {
   getEffectiveModelContext,
   getEnabledProviderModels,
   getProviderFallbackModel,
-  modelSupportsVision,
   labelForError,
+  modelSupportsVision,
   normalizeProviderForState,
   providerDisplayName,
   sortChatsByUpdatedAt,
 } from "@/lib/ai-chat/chat-utils";
-import { estimateAttachmentsTokens } from "@/lib/ai-chat/attachment-limits";
 import { buildLoadedMcpTools, DEFAULT_MCP_SETTINGS } from "@/lib/ai-chat/mcp";
 import {
   DEFAULT_MODE_ID,
@@ -83,13 +77,13 @@ import {
 } from "@/lib/ai-chat/modes";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
-  getEffectiveWorkspaceRoots,
-  getEffectiveGlobalToolPermission,
-  getEffectiveGlobalSkillPermission,
-  getEffectiveGlobalAgentPermission,
-  getEffectiveToolPermission,
-  getEffectiveSkillPermission,
   getEffectiveAgentPermission,
+  getEffectiveGlobalAgentPermission,
+  getEffectiveGlobalSkillPermission,
+  getEffectiveGlobalToolPermission,
+  getEffectiveSkillPermission,
+  getEffectiveToolPermission,
+  getEffectiveWorkspaceRoots,
   resolveProviderForChat,
   validateProviderForGeneration,
 } from "@/lib/ai-chat/request-builder";
@@ -139,8 +133,8 @@ import type {
   ProviderConfig,
   ProvidersState,
   SkillsSettings,
-  ToolCommandResult,
   TerminalStreamEvent,
+  ToolCommandResult,
   ToolExecutionStatus,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
@@ -232,9 +226,8 @@ export default function Home() {
     fontFamily: "sans",
     chatFolders: [],
   });
-  const [mcpSettings, setMcpSettings] = useState<McpSettings>(
-    DEFAULT_MCP_SETTINGS,
-  );
+  const [mcpSettings, setMcpSettings] =
+    useState<McpSettings>(DEFAULT_MCP_SETTINGS);
   const [modesState, setModesState] = useState<ModesState>(() =>
     normalizeModesState(undefined),
   );
@@ -267,7 +260,9 @@ export default function Home() {
   const [newChatDraftWorkspaceRoots, setNewChatDraftWorkspaceRoots] = useState<
     ChatWorkspaceRoot[]
   >([]);
-  const [newChatDraftFolderId, setNewChatDraftFolderId] = useState<string | undefined>();
+  const [newChatDraftFolderId, setNewChatDraftFolderId] = useState<
+    string | undefined
+  >();
   const [newChatDraftModeId, setNewChatDraftModeId] = useState(DEFAULT_MODE_ID);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
@@ -671,24 +666,30 @@ export default function Home() {
       availableAgents: [],
     };
     return new Map(
-      availableTools.map((tool) => [
-        tool.name,
-        getEffectiveToolPermission({
-          toolName: tool.name,
-          toolsSettings,
-          mode: activeMode,
-          modeCapabilityContext: context,
-        }),
-      ] as const),
+      availableTools.map(
+        (tool) =>
+          [
+            tool.name,
+            getEffectiveToolPermission({
+              toolName: tool.name,
+              toolsSettings,
+              mode: activeMode,
+              modeCapabilityContext: context,
+            }),
+          ] as const,
+      ),
     );
   }, [activeMode, availableTools, toolsSettings]);
 
   const globalToolPermissions = useMemo(() => {
     return new Map(
-      availableTools.map((tool) => [
-        tool.name,
-        getEffectiveGlobalToolPermission(tool.name, toolsSettings),
-      ] as const),
+      availableTools.map(
+        (tool) =>
+          [
+            tool.name,
+            getEffectiveGlobalToolPermission(tool.name, toolsSettings),
+          ] as const,
+      ),
     );
   }, [availableTools, toolsSettings]);
 
@@ -735,7 +736,10 @@ export default function Home() {
         continue;
       }
 
-      if (existing.sourceKind !== "workspace" && skill.sourceKind === "workspace") {
+      if (
+        existing.sourceKind !== "workspace" &&
+        skill.sourceKind === "workspace"
+      ) {
         byName.set(skill.name, skill);
       }
     }
@@ -774,24 +778,30 @@ export default function Home() {
       availableAgents: [],
     };
     return new Map(
-      availableSkills.map((skill) => [
-        skill.name,
-        getEffectiveSkillPermission({
-          skillName: skill.name,
-          skillsSettings,
-          mode: activeMode,
-          modeCapabilityContext: context,
-        }),
-      ] as const),
+      availableSkills.map(
+        (skill) =>
+          [
+            skill.name,
+            getEffectiveSkillPermission({
+              skillName: skill.name,
+              skillsSettings,
+              mode: activeMode,
+              modeCapabilityContext: context,
+            }),
+          ] as const,
+      ),
     );
   }, [activeMode, availableSkills, availableTools, skillsSettings]);
 
   const globalSkillPermissions = useMemo(() => {
     return new Map(
-      availableSkills.map((skill) => [
-        skill.name,
-        getEffectiveGlobalSkillPermission(skill.name, skillsSettings),
-      ] as const),
+      availableSkills.map(
+        (skill) =>
+          [
+            skill.name,
+            getEffectiveGlobalSkillPermission(skill.name, skillsSettings),
+          ] as const,
+      ),
     );
   }, [availableSkills, skillsSettings]);
 
@@ -829,7 +839,9 @@ export default function Home() {
   const availableAgents = useMemo(() => {
     const byName = new Map<string, LoadedAgentInfo>();
 
-    for (const agent of createBuiltInAgents(agentsSettings.builtInAgentMaxNestingDepths)) {
+    for (const agent of createBuiltInAgents(
+      agentsSettings.builtInAgentMaxNestingDepths,
+    )) {
       byName.set(agent.name, agent);
     }
 
@@ -862,24 +874,36 @@ export default function Home() {
       availableAgents,
     };
     return new Map(
-      availableAgents.map((agent) => [
-        agent.name,
-        getEffectiveAgentPermission({
-          agentName: agent.name,
-          agentsSettings,
-          mode: activeMode,
-          modeCapabilityContext: context,
-        }),
-      ] as const),
+      availableAgents.map(
+        (agent) =>
+          [
+            agent.name,
+            getEffectiveAgentPermission({
+              agentName: agent.name,
+              agentsSettings,
+              mode: activeMode,
+              modeCapabilityContext: context,
+            }),
+          ] as const,
+      ),
     );
-  }, [activeMode, agentsSettings, availableAgents, availableSkills, availableTools]);
+  }, [
+    activeMode,
+    agentsSettings,
+    availableAgents,
+    availableSkills,
+    availableTools,
+  ]);
 
   const globalAgentPermissions = useMemo(() => {
     return new Map(
-      availableAgents.map((agent) => [
-        agent.name,
-        getEffectiveGlobalAgentPermission(agent.name, agentsSettings),
-      ] as const),
+      availableAgents.map(
+        (agent) =>
+          [
+            agent.name,
+            getEffectiveGlobalAgentPermission(agent.name, agentsSettings),
+          ] as const,
+      ),
     );
   }, [agentsSettings, availableAgents]);
 
@@ -891,9 +915,18 @@ export default function Home() {
     });
   }, [activeMode, availableAgents, availableSkills, availableTools]);
 
-  const activeModeToolPermissions = useMemo(() => new Map(Object.entries(activeModePermissionMaps.toolPermissions)), [activeModePermissionMaps]);
-  const activeModeSkillPermissions = useMemo(() => new Map(Object.entries(activeModePermissionMaps.skillPermissions)), [activeModePermissionMaps]);
-  const activeModeAgentPermissions = useMemo(() => new Map(Object.entries(activeModePermissionMaps.agentPermissions)), [activeModePermissionMaps]);
+  const activeModeToolPermissions = useMemo(
+    () => new Map(Object.entries(activeModePermissionMaps.toolPermissions)),
+    [activeModePermissionMaps],
+  );
+  const activeModeSkillPermissions = useMemo(
+    () => new Map(Object.entries(activeModePermissionMaps.skillPermissions)),
+    [activeModePermissionMaps],
+  );
+  const activeModeAgentPermissions = useMemo(
+    () => new Map(Object.entries(activeModePermissionMaps.agentPermissions)),
+    [activeModePermissionMaps],
+  );
 
   const globallyEnabledAgentNames = useMemo(() => {
     return new Set(
@@ -1525,7 +1558,9 @@ export default function Home() {
     isStickyScrollSuppressed,
     syncChatScrollState,
     executeExternalTool: (toolName, args, context) => {
-      const tool = availableToolsByName.get(toolName) ?? executableTools.find((candidate) => candidate.name === toolName);
+      const tool =
+        availableToolsByName.get(toolName) ??
+        executableTools.find((candidate) => candidate.name === toolName);
       const executionId = createId();
       const isMcpTool = tool?.source === "mcp";
       const bridge = isMcpTool ? window.chatForgeMcp : getToolsBridge();
@@ -1545,7 +1580,13 @@ export default function Home() {
       ];
 
       if (!bridge) {
-        return Promise.reject(new Error(isMcpTool ? "MCP bridge is unavailable." : "Tools bridge is unavailable."));
+        return Promise.reject(
+          new Error(
+            isMcpTool
+              ? "MCP bridge is unavailable."
+              : "Tools bridge is unavailable.",
+          ),
+        );
       }
 
       return new Promise<ToolCommandResult>((resolve, reject) => {
@@ -1594,10 +1635,12 @@ export default function Home() {
 
         if (toolName === BASH_TOOL_NAME) {
           const toolsBridge = getToolsBridge();
-          const unsubscribe = toolsBridge.onStreamEvent?.((event: TerminalStreamEvent) => {
-            if (event.executionId !== executionId) return;
-            context?.onTerminalStreamEvent?.(event);
-          });
+          const unsubscribe = toolsBridge.onStreamEvent?.(
+            (event: TerminalStreamEvent) => {
+              if (event.executionId !== executionId) return;
+              context?.onTerminalStreamEvent?.(event);
+            },
+          );
           const originalCleanup = cleanup;
           const cleanupWithStream = () => {
             unsubscribe?.();
@@ -1663,7 +1706,9 @@ export default function Home() {
       // Create and persist the real chat now, then queue the send for after
       // the new chat becomes the active chat (see the effect above).
       const emptyChat = createEmptyChat();
-      const workspaceRoots = newChatDraftWorkspaceRoots.slice(0, 1).map((root) => ({ ...root }));
+      const workspaceRoots = newChatDraftWorkspaceRoots
+        .slice(0, 1)
+        .map((root) => ({ ...root }));
 
       const draftFolderId = appSettings.chatFolders.some(
         (folder) => folder.id === newChatDraftFolderId,
@@ -1999,7 +2044,8 @@ export default function Home() {
         folders.map((folder) => {
           if (folder.id !== folderId) return folder;
           const existingRoots = folder.workspaceRoots ?? [];
-          if (existingRoots.some((item) => item.path === root.path)) return folder;
+          if (existingRoots.some((item) => item.path === root.path))
+            return folder;
 
           return {
             ...folder,
@@ -2038,7 +2084,9 @@ export default function Home() {
   }
 
   function moveChatToFolder(chatId: string, folderId: string) {
-    const folderExists = appSettings.chatFolders.some((folder) => folder.id === folderId);
+    const folderExists = appSettings.chatFolders.some(
+      (folder) => folder.id === folderId,
+    );
     if (!folderExists) return;
 
     updateChat(chatId, (chat) => ({
@@ -2059,7 +2107,9 @@ export default function Home() {
     const folder = appSettings.chatFolders.find((item) => item.id === folderId);
     if (!folder) return;
 
-    updateChatFolders((folders) => folders.filter((item) => item.id !== folderId));
+    updateChatFolders((folders) =>
+      folders.filter((item) => item.id !== folderId),
+    );
 
     if (newChatDraftFolderId === folderId) {
       setNewChatDraftFolderId(undefined);
@@ -2277,7 +2327,8 @@ export default function Home() {
         const skills = await loadSkills(activeChatVisibleWorkspaceRoots);
         if (!cancelled) setLoadedSkills(skills);
       } catch (error) {
-        if (!cancelled) stableShowError("Failed to reload skills", labelForError(error));
+        if (!cancelled)
+          stableShowError("Failed to reload skills", labelForError(error));
       }
     })();
 
@@ -2430,7 +2481,7 @@ export default function Home() {
         )}
 
         <div
-          className="relative min-h-0 overflow-hidden"
+          className="relative flex min-h-0 flex-col overflow-hidden"
           onWheel={handleChatWheel}
           onPointerDown={handleChatPointerDown}
         >
@@ -2450,8 +2501,10 @@ export default function Home() {
             ref={chatScrollRef}
             onScroll={handleChatScroll}
             className={cn(
-              "chat-scrollbar h-full w-full [overflow-anchor:none]",
-              hasMessages ? "overflow-y-auto py-3 md:py-6" : "overflow-hidden",
+              "chat-scrollbar min-h-0 flex-1 w-full [overflow-anchor:none]",
+              hasMessages
+                ? "overflow-y-auto pt-3 pb-3 md:pt-6 md:pb-6"
+                : "overflow-hidden",
             )}
           >
             <div
@@ -2524,7 +2577,10 @@ export default function Home() {
               <div
                 ref={chatBottomRef}
                 aria-hidden="true"
-                className="h-px w-full shrink-0"
+                className={cn(
+                  "w-full shrink-0",
+                  hasMessages ? "h-[10vh] min-h-10" : "h-px",
+                )}
               />
             </div>
           </div>
@@ -2533,7 +2589,12 @@ export default function Home() {
             isChatScrollable &&
             !isNearChatBottom &&
             showScrollToBottomButton && (
-              <div className="pointer-events-none absolute inset-x-0 bottom-0 right-[-74px] z-10 px-3 md:px-4">
+              <div
+                className={cn(
+                  "pointer-events-none absolute inset-x-0 right-[-74px] z-10 px-3 md:px-4",
+                  isSending ? "bottom-8 md:bottom-9" : "bottom-0",
+                )}
+              >
                 <div className="mx-auto flex w-full max-w-4xl justify-end">
                   <Button
                     type="button"
@@ -2549,6 +2610,26 @@ export default function Home() {
                 </div>
               </div>
             )}
+
+          {hasMessages && isSending && (
+            <div
+              className="pointer-events-none shrink-0 px-3 pb-1 md:px-4"
+              aria-live="polite"
+            >
+              <div className="mx-auto flex w-full max-w-4xl">
+                <div className="inline-flex select-none items-center gap-1.5 text-sm leading-5 text-muted-foreground shadow-md">
+                  <RadixSpinner
+                    aria-hidden="true"
+                    className="generating-radix-spinner"
+                    size="1"
+                  />
+                  <span className="generating-gradient-text font-medium">
+                    Working
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <ChatComposer
@@ -2698,7 +2779,6 @@ export default function Home() {
         showError={stableShowError}
       />
 
-
       <ModesDialog
         open={modesOpen}
         onOpenChange={setModesOpen}
@@ -2731,7 +2811,9 @@ export default function Home() {
         availableTools={availableTools}
         loadedTools={loadedTools}
         onLoadedToolsChange={setLoadedTools}
-        callAgentEnabled={availableAgents.some((agent) => effectiveAgentPermissions.get(agent.name) !== "deny")}
+        callAgentEnabled={availableAgents.some(
+          (agent) => effectiveAgentPermissions.get(agent.name) !== "deny",
+        )}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />
