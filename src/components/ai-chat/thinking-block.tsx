@@ -151,7 +151,7 @@ export function ThinkingBlock({
 
   return (
     <article className="flex w-full min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-none text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <button
           type="button"
           className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"

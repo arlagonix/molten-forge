@@ -218,7 +218,7 @@ function FallbackToolCallBlock({
 }) {
   return (
     <article className="flex min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden border bg-muted/25 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden border bg-muted/25 px-4 py-3 text-base leading-none text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <div className="flex min-w-0 items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
           <span className="truncate">{toolCall.function.name}</span>
         </div>
@@ -764,7 +764,7 @@ function ChildAgentBlock({
       <div
         role="button"
         tabIndex={0}
-        className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-base leading-6 text-muted-foreground shadow-xs [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+        className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-base leading-none text-muted-foreground shadow-xs [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
         onClick={() => onOpenChildAgent(child.id)}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -795,7 +795,7 @@ function ChildAgentBlock({
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="h-7 w-7 shrink-0"
+            className="h-4 w-4 shrink-0"
             onClick={(event) => {
               event.stopPropagation();
               onOpenChildAgent(child.id);

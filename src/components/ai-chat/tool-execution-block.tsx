@@ -200,7 +200,7 @@ function renderTerminalTextBlock(value: string) {
   if (!text.trim()) return null;
 
   return (
-    <pre className="max-h-[min(22rem,45dvh)] overflow-auto border bg-background/80 px-3 py-2 font-mono text-xs leading-5 text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+    <pre className="max-h-[min(50rem,50dvh)] overflow-auto border bg-background/80 px-3 py-2 font-mono text-xs leading-5 text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
       {text}
     </pre>
   );
@@ -237,12 +237,18 @@ function renderTerminalOutput(toolResult?: ChatToolResult) {
       ) : null}
       <div className="grid gap-1.5 text-xs text-muted-foreground">
         <div>
-          Exit code: {terminal.exitCode === null ? "—" : terminal.exitCode} · Duration: {terminal.durationMs ? `${(terminal.durationMs / 1000).toFixed(1)}s` : "—"}
+          Exit code: {terminal.exitCode === null ? "—" : terminal.exitCode} ·
+          Duration:{" "}
+          {terminal.durationMs
+            ? `${(terminal.durationMs / 1000).toFixed(1)}s`
+            : "—"}
           {terminal.timedOut ? " · Timed out" : ""}
           {terminal.cancelled ? " · Cancelled" : ""}
           {terminal.outputTruncated ? " · Output truncated" : ""}
         </div>
-        {terminal.cwd ? <div className="truncate">CWD: {terminal.cwd}</div> : null}
+        {terminal.cwd ? (
+          <div className="truncate">CWD: {terminal.cwd}</div>
+        ) : null}
       </div>
     </div>
   );
@@ -316,7 +322,10 @@ function getLoadSkillName(toolCall: ChatToolCall, toolResult?: ChatToolResult) {
 
   try {
     const parsedResult = toolResult?.content
-      ? (JSON.parse(toolResult.content) as { name?: unknown; skillName?: unknown })
+      ? (JSON.parse(toolResult.content) as {
+          name?: unknown;
+          skillName?: unknown;
+        })
       : undefined;
     if (typeof parsedResult?.name === "string" && parsedResult.name.trim()) {
       return parsedResult.name.trim();
@@ -401,9 +410,12 @@ function getLoadSkillDetails(toolResult?: ChatToolResult) {
             : typeof parsedSkillName === "string"
               ? parsedSkillName
               : toolResult.loadedSkillName,
-        location: typeof parsedLocation === "string" ? parsedLocation : undefined,
+        location:
+          typeof parsedLocation === "string" ? parsedLocation : undefined,
         directoryPath:
-          typeof parsedDirectoryPath === "string" ? parsedDirectoryPath : undefined,
+          typeof parsedDirectoryPath === "string"
+            ? parsedDirectoryPath
+            : undefined,
       }).filter(([, value]) => value !== undefined),
     ),
     null,
@@ -411,9 +423,16 @@ function getLoadSkillDetails(toolResult?: ChatToolResult) {
   );
 
   const location = typeof parsedLocation === "string" ? parsedLocation : "";
-  const directoryPath = typeof parsedDirectoryPath === "string" ? parsedDirectoryPath : "";
+  const directoryPath =
+    typeof parsedDirectoryPath === "string" ? parsedDirectoryPath : "";
 
-  return { instructions, recommendedToolNames, compactOutput, location, directoryPath };
+  return {
+    instructions,
+    recommendedToolNames,
+    compactOutput,
+    location,
+    directoryPath,
+  };
 }
 
 function normalizeToolDescription(description?: string) {
@@ -503,7 +522,12 @@ function getStringArgument(args: Record<string, unknown>, key: string) {
 function getToolHeaderDetail(toolCall: ChatToolCall) {
   const args = parseToolCallArguments(toolCall);
 
-  if (toolCall.function.name === READ_TOOL_NAME || toolCall.function.name === EDIT_TOOL_NAME || toolCall.function.name === WRITE_TOOL_NAME || toolCall.function.name === FILE_READ_TOOL_NAME) {
+  if (
+    toolCall.function.name === READ_TOOL_NAME ||
+    toolCall.function.name === EDIT_TOOL_NAME ||
+    toolCall.function.name === WRITE_TOOL_NAME ||
+    toolCall.function.name === FILE_READ_TOOL_NAME
+  ) {
     return getStringArgument(args, "path");
   }
 
@@ -626,7 +650,7 @@ export function ToolExecutionBlock({
         <div
           role="button"
           tabIndex={0}
-          className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-none text-muted-foreground [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           onClick={() => setIsDetailsOpen(true)}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
@@ -657,7 +681,7 @@ export function ToolExecutionBlock({
               type="button"
               variant="ghost"
               size="icon-sm"
-              className="h-7 w-7 shrink-0"
+              className="h-4 w-4 shrink-0"
               onClick={(event) => {
                 event.stopPropagation();
                 setIsDetailsOpen(true);
@@ -756,18 +780,19 @@ export function ToolExecutionBlock({
                   {renderTerminalOutput(toolResult)}
                 </div>
               ) : null}
-              {toolResult?.content.trim() && (!isTerminalTool || !toolResult.terminal) && (
-                <div className="grid gap-1.5">
-                  <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-                    Output
+              {toolResult?.content.trim() &&
+                (!isTerminalTool || !toolResult.terminal) && (
+                  <div className="grid gap-1.5">
+                    <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+                      Output
+                    </div>
+                    {renderJsonCodeBlock(
+                      isLoadSkillTool
+                        ? loadSkillDetails.compactOutput
+                        : toolResult.content,
+                    )}
                   </div>
-                  {renderJsonCodeBlock(
-                    isLoadSkillTool
-                      ? loadSkillDetails.compactOutput
-                      : toolResult.content,
-                  )}
-                </div>
-              )}
+                )}
               {renderFileChangePreview(toolResult?.changePreview)}
               {isLoadSkillTool && loadSkillDetails.instructions.trim() && (
                 <div className="grid gap-1.5">

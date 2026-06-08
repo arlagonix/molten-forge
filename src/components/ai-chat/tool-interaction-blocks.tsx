@@ -993,7 +993,7 @@ function renderTerminalTextBlock(value: string, emptyLabel = "No output yet.") {
   const text = value.length ? value : emptyLabel;
 
   return (
-    <pre className="max-h-[min(22rem,45dvh)] overflow-auto border bg-background/80 px-3 py-2 font-mono text-xs leading-5 text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+    <pre className="max-h-[min(50rem,50dvh)] overflow-auto border bg-background/80 px-3 py-2 font-mono text-xs leading-5 text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
       {text}
     </pre>
   );
@@ -1038,12 +1038,18 @@ function renderApprovalTerminalOutput(toolResult?: ChatToolResult) {
       </div>
       <div className="grid gap-1.5 text-xs text-muted-foreground">
         <div>
-          Exit code: {terminal.exitCode === null ? "—" : terminal.exitCode} · Duration: {terminal.durationMs ? `${(terminal.durationMs / 1000).toFixed(1)}s` : "—"}
+          Exit code: {terminal.exitCode === null ? "—" : terminal.exitCode} ·
+          Duration:{" "}
+          {terminal.durationMs
+            ? `${(terminal.durationMs / 1000).toFixed(1)}s`
+            : "—"}
           {terminal.timedOut ? " · Timed out" : ""}
           {terminal.cancelled ? " · Cancelled" : ""}
           {terminal.outputTruncated ? " · Output truncated" : ""}
         </div>
-        {terminal.cwd ? <div className="truncate">CWD: {terminal.cwd}</div> : null}
+        {terminal.cwd ? (
+          <div className="truncate">CWD: {terminal.cwd}</div>
+        ) : null}
       </div>
     </div>
   );

@@ -76,7 +76,7 @@ export const AgentCallBlock = memo(function AgentCallBlock({
       <div
         role="button"
         tabIndex={0}
-        className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-5 text-muted-foreground shadow-xs [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+        className="w-full min-w-0 max-w-full cursor-pointer overflow-hidden border bg-muted/25 px-4 py-3 text-sm leading-none  text-muted-foreground shadow-xs [overflow-wrap:anywhere] hover:bg-muted/35 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
         onClick={() => setExpandedOpen(true)}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -108,7 +108,7 @@ export const AgentCallBlock = memo(function AgentCallBlock({
             type="button"
             variant="ghost"
             size="icon-sm"
-            className="h-7 w-7 shrink-0"
+            className="h-4 w-4 shrink-0"
             onClick={(event) => {
               event.stopPropagation();
               setExpandedOpen(true);
