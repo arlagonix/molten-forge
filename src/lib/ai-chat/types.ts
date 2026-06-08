@@ -615,7 +615,6 @@ export type McpToolMetadata = {
 export type ToolDefinition = {
   id: string;
   name: string;
-  enabled: boolean;
   description: string;
   parameters: Record<string, unknown>;
   command: string;

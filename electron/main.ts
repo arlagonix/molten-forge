@@ -142,7 +142,6 @@ type ToolInputMode = "none" | "json-stdin";
 type ToolDefinition = {
   id: string;
   name: string;
-  enabled: boolean;
   description: string;
   parameters: Record<string, unknown>;
   command: string;
@@ -756,7 +755,6 @@ function normalizeToolDefinition(candidate: unknown): ToolDefinition {
   return {
     id,
     name,
-    enabled: typeof source.enabled === "boolean" ? source.enabled : true,
     description,
     parameters: isPlainObject(parameters)
       ? parameters

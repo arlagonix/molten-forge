@@ -42,7 +42,6 @@ export type McpSettings = {
 export type McpLoadedTool = {
   id: string;
   name: string;
-  enabled: boolean;
   description: string;
   parameters: Record<string, unknown>;
   command: string;
@@ -265,7 +264,6 @@ export function buildLoadedMcpTools(settings: McpSettings): McpLoadedTool[] {
         id: `mcp:${server.id}:${tool.originalName}`,
         name: exposedName,
         displayName: `${tool.originalName} · ${server.name}`,
-        enabled: true,
         description: `[MCP: ${server.name}] ${description}`,
         parameters: schemaAsObject(tool.inputSchema),
         command: "",

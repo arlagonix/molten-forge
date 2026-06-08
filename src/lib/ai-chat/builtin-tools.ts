@@ -170,7 +170,6 @@ export function applyBuiltInToolSettings(
 export const CALL_AGENT_TOOL: LoadedToolInfo = {
   id: "builtin-call-agent",
   name: CALL_AGENT_TOOL_NAME,
-  enabled: true,
   description:
     "Delegates a focused subtask to one enabled agent. The runtime schema is rebuilt per chat so agentName is limited to currently available agents.",
   parameters: {
@@ -223,7 +222,6 @@ const MAX_TASK_SUBJECT_LENGTH = 180;
 export const ASK_USER_TOOL: LoadedToolInfo = {
   id: "builtin-ask-user",
   name: ASK_USER_TOOL_NAME,
-  enabled: true,
   description:
     "Pause and ask the user focused clarification questions, then continue the same response. Supports single_choice, multi_select, and text questions. Use text when the user must provide a custom value such as a number, name, or range. For choice questions, use concise option labels and strongly prefer one-sentence option descriptions. Use only when the answer materially changes the next step.",
   parameters: {
@@ -300,7 +298,6 @@ export const ASK_USER_TOOL: LoadedToolInfo = {
 export const TASK_UPDATE_TOOL: LoadedToolInfo = {
   id: "builtin-update-tasks",
   name: TASK_UPDATE_TOOL_NAME,
-  enabled: true,
   description:
     "Updates the visible task checklist for the current chat. Always provide the full desired current task list (both done and not-done items that should stay visible). Send an empty array to clear it.",
   parameters: {
@@ -343,7 +340,6 @@ export const TASK_TOOLS = [TASK_UPDATE_TOOL] as const;
 export const WEB_FETCH_TOOL: LoadedToolInfo = {
   id: "builtin-web-fetch",
   name: WEB_FETCH_TOOL_NAME,
-  enabled: true,
   description:
     "Fetch readable text from a specific HTTP/HTTPS URL. Use this when the user provides a URL or when an exact official documentation URL is known. This tool does not search the web.",
   parameters: {
@@ -367,7 +363,6 @@ export const WEB_FETCH_TOOL: LoadedToolInfo = {
 export const READ_TOOL: LoadedToolInfo = {
   id: "builtin-read",
   name: READ_TOOL_NAME,
-  enabled: true,
   description:
     "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are returned as data URLs. For text files, output is truncated to 2000 lines or 128KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
   parameters: {
@@ -399,7 +394,6 @@ export const READ_TOOL: LoadedToolInfo = {
 export const BASH_TOOL: LoadedToolInfo = {
   id: "builtin-bash",
   name: BASH_TOOL_NAME,
-  enabled: true,
   description:
     "Execute a bash command in the selected workspace. Returns stdout and stderr. Output is truncated to the last 2000 lines or 128KB (whichever is hit first). Optionally provide a timeout in seconds.",
   parameters: {
@@ -427,7 +421,6 @@ export const BASH_TOOL: LoadedToolInfo = {
 export const EDIT_TOOL: LoadedToolInfo = {
   id: "builtin-edit",
   name: EDIT_TOOL_NAME,
-  enabled: true,
   description:
     "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
   parameters: {
@@ -473,7 +466,6 @@ export const EDIT_TOOL: LoadedToolInfo = {
 export const WRITE_TOOL: LoadedToolInfo = {
   id: "builtin-write",
   name: WRITE_TOOL_NAME,
-  enabled: true,
   description:
     "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
   parameters: {
@@ -513,7 +505,6 @@ export function createCallAgentTool(agents: LoadedAgentInfo[]): LoadedToolInfo |
   return {
     id: "builtin-call-agent",
     name: CALL_AGENT_TOOL_NAME,
-    enabled: true,
     description: [
       "Delegate a focused subtask to one configured agent. Use this when an agent's description closely matches a separable part of the user's request. The agent result will be returned so you can continue the final answer.",
       "Built-in defaults: general is task-only and best for focused subtasks; general_full receives the full chat context and is best when the whole conversation matters.",
@@ -564,7 +555,6 @@ export function createLoadSkillTool(
   return {
     id: "builtin-skill",
     name: LOAD_SKILL_TOOL_NAME,
-    enabled: true,
     description: [
       "Load the full instructions for one relevant skill by name.",
       "Use this when a skill would materially improve the task. Loading a skill returns its SKILL.md content and tells you how to resolve relative references. You may load the same skill again if the previous load may no longer be in context.",

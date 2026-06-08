@@ -191,7 +191,6 @@ export function getGlobalEnabledTools({
   const enabledCommandTools = loadedTools
         .filter(
           (tool) =>
-            tool.enabled &&
             tool.name !== ASK_USER_TOOL_NAME &&
             tool.name !== CALL_AGENT_TOOL_NAME &&
             !isTaskToolName(tool.name) &&
@@ -370,7 +369,6 @@ export function getEnabledToolsForChat({
     : globalEnabledTools;
 
   for (const tool of baseTools) {
-    if (!tool.enabled) continue;
     const permission = toolsSettings
       ? getEffectiveToolPermission({
           toolName: tool.name,

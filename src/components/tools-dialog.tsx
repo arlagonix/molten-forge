@@ -427,7 +427,6 @@ const BUILTIN_TASK_TOOL_PARAMETERS = {
 type ToolDraft = {
   id: string;
   name: string;
-  enabled: boolean;
   description: string;
   parametersText: string;
   command: string;
@@ -542,7 +541,6 @@ function createBlankToolDraft(): ToolDraft {
   return {
     id: createId(),
     name: "",
-    enabled: true,
     description: "",
     parametersText: JSON.stringify(
       { type: "object", properties: {}, required: [] },
@@ -563,7 +561,6 @@ function areToolDraftsEqual(left: ToolDraft, right: ToolDraft) {
   return (
     left.id === right.id &&
     left.name === right.name &&
-    left.enabled === right.enabled &&
     left.description === right.description &&
     left.parametersText === right.parametersText &&
     left.command === right.command &&
@@ -580,7 +577,6 @@ function toolToDraft(tool: LoadedToolInfo): ToolDraft {
   return {
     id: tool.id,
     name: tool.name,
-    enabled: tool.enabled,
     description: tool.description,
     parametersText: JSON.stringify(tool.parameters, null, 2),
     command: tool.command,
@@ -894,7 +890,6 @@ function draftToTool(draft: ToolDraft): LoadedToolInfo {
   return {
     id: draft.id,
     name: draft.name.trim(),
-    enabled: draft.enabled,
     description: draft.description.trim(),
     parameters,
     command: draft.command.trim(),

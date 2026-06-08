@@ -1766,7 +1766,7 @@ export function useChatGeneration({
 
     if (isBuiltInAgentName(agent.name)) {
       const tools = inheritedToolsForRun.filter(
-        (tool) => tool.enabled && tool.name !== CALL_AGENT_TOOL_NAME,
+        (tool) => tool.name !== CALL_AGENT_TOOL_NAME,
       );
       // Built-in agents are depth-limited, so allow them to call any enabled
       // agent, including another instance of themselves. This is important for
@@ -1788,7 +1788,7 @@ export function useChatGeneration({
       .map((toolName) => inheritedToolsByName.get(toolName))
       .filter((tool): tool is LoadedToolInfo => {
         if (!tool) return false;
-        return tool.enabled && tool.name !== CALL_AGENT_TOOL_NAME;
+        return tool.name !== CALL_AGENT_TOOL_NAME;
       });
 
     const allowedAgentNames = new Set<string>(agent.allowedAgentNames ?? []);
