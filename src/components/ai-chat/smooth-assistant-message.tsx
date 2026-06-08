@@ -1,5 +1,7 @@
 import { memo, useEffect, useRef } from "react";
 
+import { cn } from "@/lib/utils";
+
 import { MarkdownMessage } from "./markdown-message";
 
 const FENCED_CODE_BLOCK_PATTERN = /(^|\n) {0,3}(```+|~~~+)/g;
@@ -15,17 +17,37 @@ function hasUnclosedFencedCodeBlock(content: string) {
   return hasUnclosedFence;
 }
 
+const StreamingPlainTextContent = memo(function StreamingPlainTextContent({
+  content,
+  className,
+}: {
+  content: string;
+  className?: string;
+}) {
+  return (
+    <div className={cn("chat-markdown w-full min-w-0 max-w-full", className)}>
+      <pre className="m-0 whitespace-pre-wrap break-words font-sans text-inherit [line-height:inherit] [overflow-wrap:anywhere]">{content}</pre>
+    </div>
+  );
+});
+
 const AssistantMessageContent = memo(function AssistantMessageContent({
   content,
   className,
   messageId,
+  isStreaming = false,
   skipSyntaxHighlight = false,
 }: {
   content: string;
   className?: string;
   messageId?: string;
+  isStreaming?: boolean;
   skipSyntaxHighlight?: boolean;
 }) {
+  if (isStreaming) {
+    return <StreamingPlainTextContent content={content} className={className} />;
+  }
+
   return (
     <MarkdownMessage
       content={content}
@@ -56,6 +78,7 @@ export const SmoothAssistantMessageContent = memo(
     flushVersion,
     onVisualProgress,
     onVisualStreamingChange,
+    isApiStreaming,
     skipSyntaxHighlight = false,
   }: SmoothAssistantMessageContentProps) {
     const onVisualProgressRef = useRef(onVisualProgress);
@@ -70,13 +93,14 @@ export const SmoothAssistantMessageContent = memo(
     }, [content, flushVersion]);
 
     const shouldSkipSyntaxHighlight =
-      skipSyntaxHighlight && hasUnclosedFencedCodeBlock(content);
+      skipSyntaxHighlight || hasUnclosedFencedCodeBlock(content);
 
     return (
       <AssistantMessageContent
         content={content}
         className={className}
         messageId={messageId}
+        isStreaming={isApiStreaming}
         skipSyntaxHighlight={shouldSkipSyntaxHighlight}
       />
     );
