@@ -56,6 +56,7 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
     write: "ask",
     call_agent: "ask",
   },
+  builtInToolSettings: {},
 };
 
 export function buildFileToolAutoApprovalFromToolsSettings(
@@ -101,6 +102,70 @@ export const LOAD_SKILL_TOOL_NAME = "skill";
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
 export const CALL_AGENT_TOOL_NAME = "call_agent";
 export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
+
+export const BUILT_IN_TOOL_TIMEOUTS_MS: Record<string, number> = {
+  [WEB_FETCH_TOOL_NAME]: 15_000,
+  [READ_TOOL_NAME]: 30_000,
+  [BASH_TOOL_NAME]: 30_000,
+  [EDIT_TOOL_NAME]: 30_000,
+  [WRITE_TOOL_NAME]: 30_000,
+};
+
+export function supportsBuiltInToolTimeout(toolName: string) {
+  return Object.prototype.hasOwnProperty.call(BUILT_IN_TOOL_TIMEOUTS_MS, toolName);
+}
+
+export function getDefaultBuiltInToolTimeoutMs(toolName: string) {
+  return BUILT_IN_TOOL_TIMEOUTS_MS[toolName] ?? 0;
+}
+
+function normalizeBuiltInTimeoutMs(value: unknown, fallback: number) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return fallback;
+  }
+
+  return Math.min(Math.round(value), 10 * 60_000);
+}
+
+export function getBuiltInToolEffectiveDescription(
+  tool: Pick<LoadedToolInfo, "name" | "description">,
+  settings?: ToolsSettings,
+) {
+  const customization = settings?.builtInToolSettings?.[tool.name];
+  const customDescription = customization?.customDescription?.trim();
+  return customization?.descriptionMode === "custom" && customDescription
+    ? customDescription
+    : tool.description;
+}
+
+export function getBuiltInToolEffectiveTimeoutMs(
+  toolName: string,
+  settings?: ToolsSettings,
+) {
+  if (!supportsBuiltInToolTimeout(toolName)) return 0;
+  return normalizeBuiltInTimeoutMs(
+    settings?.builtInToolSettings?.[toolName]?.timeoutMs,
+    getDefaultBuiltInToolTimeoutMs(toolName),
+  );
+}
+
+export function applyBuiltInToolSettings(
+  tool: LoadedToolInfo,
+  settings?: ToolsSettings,
+): LoadedToolInfo {
+  if (!isBuiltInToolName(tool.name)) return tool;
+
+  const description = getBuiltInToolEffectiveDescription(tool, settings);
+  const timeoutMs = supportsBuiltInToolTimeout(tool.name)
+    ? getBuiltInToolEffectiveTimeoutMs(tool.name, settings)
+    : tool.timeoutMs;
+
+  return {
+    ...tool,
+    description,
+    timeoutMs,
+  };
+}
 
 export const CALL_AGENT_TOOL: LoadedToolInfo = {
   id: "builtin-call-agent",

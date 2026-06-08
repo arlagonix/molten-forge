@@ -16,6 +16,7 @@ import {
 import { memo, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
+import { GroupHeading } from "@/components/ui/group-heading";
 import {
   Dialog,
   DialogContent,
@@ -198,9 +199,7 @@ export const SettingsDialog = memo(function SettingsDialog({
         <div className="min-h-0 overflow-y-auto p-4 chat-scrollbar">
           <div className="grid gap-6">
             <section className="grid gap-3">
-              <h3 className="text-base font-semibold leading-6">
-                Configuration
-              </h3>
+              <GroupHeading className="mt-0">Configuration</GroupHeading>
               <div className="grid gap-2">
                 <SettingsActionRow
                   icon={<Cpu className="size-4" />}
@@ -248,7 +247,7 @@ export const SettingsDialog = memo(function SettingsDialog({
             </section>
 
             <section className="grid gap-3">
-              <h3 className="text-base font-semibold leading-6">General</h3>
+              <GroupHeading className="mt-0">General</GroupHeading>
               <div className="grid gap-2">
                 <SettingsSelectRow
                   icon={

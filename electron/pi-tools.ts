@@ -41,6 +41,37 @@ function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw new Error("Tool execution was cancelled.");
 }
 
+function normalizeContextTimeoutMs(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.min(Math.round(value), 10 * 60_000)
+    : 0;
+}
+
+function withConfiguredTimeout<T>(
+  task: Promise<T>,
+  timeoutMs: number,
+  toolName: string,
+): Promise<T> {
+  if (timeoutMs <= 0) return task;
+
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`${toolName} timed out after ${Math.round(timeoutMs / 1000)} seconds.`));
+    }, timeoutMs);
+
+    task.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
+}
+
 function getDefaultUserWorkspace(): WorkspaceRoot {
   const homePath = os.homedir();
   return {
@@ -333,7 +364,13 @@ async function executeBashTool(
   if (!command) throw new Error("Missing required bash tool argument: command");
 
   const timeoutSeconds = readOptionalNonNegativeNumber(args, "timeout");
-  const timeoutMs = timeoutSeconds && timeoutSeconds > 0 ? timeoutSeconds * 1000 : 0;
+  const configuredTimeoutMs = normalizeContextTimeoutMs(context.timeoutMs);
+  const requestedTimeoutMs = timeoutSeconds && timeoutSeconds > 0 ? timeoutSeconds * 1000 : 0;
+  const timeoutMs = requestedTimeoutMs > 0
+    ? configuredTimeoutMs > 0
+      ? Math.min(requestedTimeoutMs, configuredTimeoutMs)
+      : requestedTimeoutMs
+    : configuredTimeoutMs;
   const workspace = getSelectedWorkspace(context);
   const cwd = await fs.realpath(workspace.path);
   const shellConfig = getShellConfig();
@@ -651,10 +688,11 @@ export async function executePiTool(
   onEvent?: StreamEventCallback,
 ): Promise<ToolCommandResult> {
   try {
-    if (toolName === READ_TOOL_NAME) return await executeReadTool(args, context);
+    const timeoutMs = normalizeContextTimeoutMs(context.timeoutMs);
+    if (toolName === READ_TOOL_NAME) return await withConfiguredTimeout(executeReadTool(args, context), timeoutMs, toolName);
     if (toolName === BASH_TOOL_NAME) return await executeBashTool(args, context, onEvent);
-    if (toolName === EDIT_TOOL_NAME) return await executeEditTool(args, context);
-    if (toolName === WRITE_TOOL_NAME) return await executeWriteTool(args, context);
+    if (toolName === EDIT_TOOL_NAME) return await withConfiguredTimeout(executeEditTool(args, context), timeoutMs, toolName);
+    if (toolName === WRITE_TOOL_NAME) return await withConfiguredTimeout(executeWriteTool(args, context), timeoutMs, toolName);
     throw new Error(`Unsupported Pi tool: ${toolName}`);
   } catch (error) {
     const message = getErrorMessage(error);

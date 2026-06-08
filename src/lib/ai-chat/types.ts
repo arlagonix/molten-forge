@@ -747,6 +747,14 @@ export type AgentExportResult = {
   path?: string;
 };
 
+export type BuiltInToolDescriptionMode = "default" | "custom";
+
+export type BuiltInToolSettings = {
+  descriptionMode?: BuiltInToolDescriptionMode;
+  customDescription?: string;
+  timeoutMs?: number;
+};
+
 export type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
@@ -762,6 +770,8 @@ export type ToolsSettings = {
   bashAutoApproveEnabled: boolean;
   editAutoApproveEnabled: boolean;
   writeAutoApproveEnabled: boolean;
+  /** Model-facing description and execution settings for built-in tools. */
+  builtInToolSettings?: Record<string, BuiltInToolSettings>;
   /** Feature-level master permission for the whole tools category. */
   toolsPermission?: FeaturePermission;
   toolPermissions?: PermissionMap;

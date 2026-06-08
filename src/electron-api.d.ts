@@ -191,12 +191,14 @@ declare global {
         name: string;
         args: unknown;
         workspaceRoots?: ChatWorkspaceRoot[];
+        timeoutMs?: number;
       }) => Promise<ToolCommandResult>;
       executeStream: (request: {
         executionId?: string;
         name: string;
         args: unknown;
         workspaceRoots?: ChatWorkspaceRoot[];
+        timeoutMs?: number;
       }) => Promise<ToolCommandResult>;
       onStreamEvent: (
         callback: (event: TerminalStreamEvent) => void,

@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { GroupHeading } from "@/components/ui/group-heading";
 import {
   Select,
   SelectContent,
@@ -187,14 +187,6 @@ export const SkillsDialog = memo(function SkillsDialog({
   }, [loadedSkills]);
   const skillsMasterPermission = getSkillsMasterPermission(skillsSettings);
   const childPermissionsLocked = skillsMasterPermission !== "custom";
-  const enabledSkillsCount = loadedSkills.filter(
-    (skill) =>
-      !skill.shadowed &&
-      getDisplayedSkillPermission(skillsSettings, skill.name) !== "deny",
-  ).length;
-  const visibleSkillsCount = loadedSkills.filter(
-    (skill) => !skill.shadowed,
-  ).length;
 
   useEffect(() => {
     if (
@@ -261,14 +253,6 @@ export const SkillsDialog = memo(function SkillsDialog({
 
         <div className="grid h-full min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[400px_minmax(0,1fr)]">
           <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                Skills
-              </Label>
-              <span className="text-sm text-muted-foreground">
-                {enabledSkillsCount}/{visibleSkillsCount} enabled
-              </span>
-            </div>
             <div className="grid gap-3">
               <div className="flex items-center gap-2">
                 <Button
@@ -318,9 +302,9 @@ export const SkillsDialog = memo(function SkillsDialog({
               {loadedSkills.length > 0 ? (
                 groupedSkills.map((group) => (
                   <div key={group.title} className="mb-3">
-                    <div className="px-2 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <GroupHeading className="mb-1 mt-0 px-2 pb-1 pt-2">
                       {group.title}
-                    </div>
+                    </GroupHeading>
                     {group.skills.map((skill) => {
                       const selected =
                         getSkillSelectionKey(skill) === selectedSkillKey;

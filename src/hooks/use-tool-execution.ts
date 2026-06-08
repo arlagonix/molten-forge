@@ -48,6 +48,7 @@ type PendingUserInputRequest = {
   cleanup: () => void;
   workspaceRoots?: ChatWorkspaceRoot[];
   signal?: AbortSignal;
+  tool?: LoadedToolInfo;
 };
 
 export function useToolExecution({
@@ -89,6 +90,7 @@ export function useToolExecution({
       workspaceRoots?: ChatWorkspaceRoot[];
       signal?: AbortSignal;
       onTerminalStreamEvent?: (event: TerminalStreamEvent) => void;
+      timeoutMs?: number;
     },
   ) => Promise<ToolCommandResult>;
   executeTaskTool: (toolCall: ChatToolCall, chatId: string) => ChatToolResult;
@@ -246,9 +248,10 @@ export function useToolExecution({
       signal?: AbortSignal;
       workspaceRoots?: ChatWorkspaceRoot[];
       fileToolAutoApproval?: ChatFileToolAutoApproval;
+      tool?: LoadedToolInfo;
     },
   ): Promise<ChatToolResult> {
-    const tool = loadedTools.find((candidate) => candidate.name === toolCall.function.name);
+    const tool = options.tool ?? loadedTools.find((candidate) => candidate.name === toolCall.function.name);
 
     if (requiresFileToolApproval(toolCall.function.name)) {
       parseFileToolApprovalRequestFromToolCall(
@@ -303,6 +306,7 @@ export function useToolExecution({
         stepId: options.stepId,
         workspaceRoots: options.workspaceRoots ?? workspaceRoots,
         signal: options.signal,
+        tool,
         resolve: settleResolve,
         reject: settleReject,
         cleanup,
@@ -536,10 +540,11 @@ export function useToolExecution({
       stepId: string;
       workspaceRoots?: ChatWorkspaceRoot[];
       signal?: AbortSignal;
+      tool?: LoadedToolInfo;
     },
   ): Promise<ChatToolResult> {
     const toolName = toolCall.function.name;
-    const tool = loadedTools.find((candidate) => candidate.name === toolName);
+    const tool = options.tool ?? loadedTools.find((candidate) => candidate.name === toolName);
     const argsText = toolCall.function.arguments.trim() || "{}";
     const args = JSON.parse(argsText);
 
@@ -555,13 +560,15 @@ export function useToolExecution({
                 workspaceRoots: options.workspaceRoots ?? workspaceRoots,
                 signal: options.signal,
                 onTerminalStreamEvent: createTerminalStreamHandler(toolCall, options),
+                timeoutMs: tool?.timeoutMs,
               }
             : isFileToolName(toolName)
               ? {
                   workspaceRoots: options.workspaceRoots ?? workspaceRoots,
                   signal: options.signal,
+                  timeoutMs: tool?.timeoutMs,
                 }
-              : { signal: options.signal },
+              : { signal: options.signal, timeoutMs: tool?.timeoutMs },
         ),
       (status) =>
         updateAssistantToolStepStatus(
@@ -597,6 +604,7 @@ export function useToolExecution({
       activeSkillNames?: string[];
       workspaceRoots?: ChatWorkspaceRoot[];
       fileToolAutoApproval?: ChatFileToolAutoApproval;
+      tool?: LoadedToolInfo;
     },
   ): Promise<ChatToolResult> {
     const toolName = toolCall.function.name;
@@ -610,9 +618,9 @@ export function useToolExecution({
         return executeTaskTool(toolCall, options.chatId);
       }
 
-      const customTool = loadedTools.find((candidate) => candidate.name === toolName);
+      const tool = options.tool ?? loadedTools.find((candidate) => candidate.name === toolName);
 
-      if (requiresToolApproval(toolName, customTool)) {
+      if (requiresToolApproval(toolName, tool)) {
         return await executeToolCallWithApproval(toolCall, options);
       }
 
@@ -693,6 +701,7 @@ export function useToolExecution({
       } else {
         const argsText = toolCall.function.arguments.trim() || "{}";
         const args = JSON.parse(argsText);
+        const tool = pendingRequest.tool ?? loadedTools.find((candidate) => candidate.name === toolCall.function.name);
 
         if (toolCall.function.name === BASH_TOOL_NAME) {
           updateAssistantToolApprovalPartialResult(
@@ -717,6 +726,7 @@ export function useToolExecution({
           const execution = await executeExternalTool(toolCall.function.name, args, {
             workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,
             signal: pendingRequest.signal,
+            timeoutMs: tool?.timeoutMs,
             ...(toolCall.function.name === BASH_TOOL_NAME
               ? {
                   onTerminalStreamEvent: createTerminalStreamHandler(toolCall, {

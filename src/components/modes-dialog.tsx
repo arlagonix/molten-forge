@@ -26,6 +26,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { GroupHeading } from "@/components/ui/group-heading";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -704,14 +705,6 @@ export const ModesDialog = memo(function ModesDialog({
 
           <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[400px_minmax(0,1fr)]">
             <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Modes
-                </Label>
-                <span className="text-sm text-muted-foreground">
-                  {enabledModesCount}/{modes.length} enabled
-                </span>
-              </div>
               <Button
                 type="button"
                 variant="secondary"
@@ -735,9 +728,9 @@ export const ModesDialog = memo(function ModesDialog({
                   .filter((group) => group.modes.length > 0)
                   .map((group) => (
                     <div key={group.title} className="grid gap-1.5">
-                      <Label className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      <GroupHeading className="mt-0">
                         {group.title}
-                      </Label>
+                      </GroupHeading>
                       {group.modes.map((mode) => {
                         const selected =
                           selectedMode?.id === mode.id && !isCreatingMode;

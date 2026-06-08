@@ -42,6 +42,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { GroupHeading } from "@/components/ui/group-heading";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -400,10 +401,6 @@ export const AgentsDialog = memo(function AgentsDialog({
     : false;
   const agentsMasterPermission = getAgentsMasterPermission(agentsSettings);
   const childPermissionsLocked = agentsMasterPermission !== "custom";
-  const enabledAgentsCount = displayedAgents.filter(
-    (agent) =>
-      getDisplayedAgentPermission(agentsSettings, agent.name) !== "deny",
-  ).length;
 
   const visibleProviderGroups = useMemo(() => {
     const search = modelSearch.trim().toLowerCase();
@@ -679,15 +676,6 @@ export const AgentsDialog = memo(function AgentsDialog({
 
           <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[400px_minmax(0,1fr)]">
             <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
-              <div className="mb-3 flex items-center justify-between gap-2">
-                <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Agents
-                </Label>
-                <span className="text-sm text-muted-foreground">
-                  {enabledAgentsCount}/{displayedAgents.length} enabled
-                </span>
-              </div>
-
               <div className="mb-3 flex items-start justify-between gap-3 border bg-background px-3 py-2 text-base">
                 <span className="min-w-0">
                   <span className="block font-medium">Agents</span>
@@ -760,9 +748,7 @@ export const AgentsDialog = memo(function AgentsDialog({
               <div className="grid gap-3">
                 {groupedDisplayedAgents.map((group) => (
                   <div key={group.title} className="grid gap-1.5">
-                    <Label className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {group.title}
-                    </Label>
+                    <GroupHeading className="mt-0">{group.title}</GroupHeading>
                     {group.agents.map((agent) => (
                       <div
                         key={agent.id}
@@ -815,9 +801,9 @@ export const AgentsDialog = memo(function AgentsDialog({
 
               {agentLoadErrors.length > 0 && (
                 <div className="mt-4 grid gap-2">
-                  <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                  <GroupHeading className="mt-0">
                     Agent file issues
-                  </Label>
+                  </GroupHeading>
                   {agentLoadErrors.map((error) => (
                     <div
                       key={`${error.source}:${error.message}`}

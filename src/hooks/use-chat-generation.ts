@@ -1780,9 +1780,12 @@ export function useChatGeneration({
       return callAgentTool ? [...tools, callAgentTool] : tools;
     }
 
+    const inheritedToolsByName = new Map(
+      inheritedToolsForRun.map((tool) => [tool.name, tool] as const),
+    );
     const allowedToolNames = new Set<string>(agent.allowedToolNames ?? []);
     const tools = [...allowedToolNames]
-      .map((toolName) => availableToolsByName.get(toolName))
+      .map((toolName) => inheritedToolsByName.get(toolName))
       .filter((tool): tool is LoadedToolInfo => {
         if (!tool) return false;
         return tool.enabled && tool.name !== CALL_AGENT_TOOL_NAME;
@@ -2048,6 +2051,13 @@ export function useChatGeneration({
             )
           : inheritedToolsForRun;
 
+        const currentAgentToolsForRun = getAgentTools({
+          agent,
+          depth,
+          inheritedToolsForRun: currentInheritedToolsForRun,
+          chatEnabledAgents,
+        });
+
         const result = await streamProviderChat({
           provider,
           systemPrompt: createAgentSystemPrompt(agent, currentAgentActiveSkillNames),
@@ -2055,12 +2065,7 @@ export function useChatGeneration({
           userMessage: currentUserMessage,
           userAttachments: round === 0 ? userAttachments : undefined,
           signal,
-          tools: getAgentTools({
-            agent,
-            depth,
-            inheritedToolsForRun: currentInheritedToolsForRun,
-            chatEnabledAgents,
-          }),
+          tools: currentAgentToolsForRun,
           settingsOverride: getChatThinkingSettings(chatId),
           onContentDelta: (delta) => {
             accumulatedOutput += delta;
@@ -2198,9 +2203,10 @@ export function useChatGeneration({
         const agentTimelineSteps: ChatAssistantProcessStep[] = [];
         for (const childToolCall of toolCalls) {
           const stepId = createId();
-          const childTool = availableToolsByName.get(
-            childToolCall.function.name,
-          );
+          const childTool =
+            currentAgentToolsForRun.find(
+              (candidate) => candidate.name === childToolCall.function.name,
+            ) ?? availableToolsByName.get(childToolCall.function.name);
           const childNeedsApproval = requiresToolApproval(
             childToolCall.function.name,
             childTool,
@@ -2436,9 +2442,10 @@ export function useChatGeneration({
               currentAgentActiveSkillNames,
             );
 
-            const childTool = availableToolsByName.get(
-              childToolCall.function.name,
-            );
+            const childTool =
+              currentAgentToolsForRun.find(
+                (candidate) => candidate.name === childToolCall.function.name,
+              ) ?? availableToolsByName.get(childToolCall.function.name);
 
             if (requiresToolApproval(childToolCall.function.name, childTool)) {
               const approvalStepId = createId();
@@ -2471,6 +2478,7 @@ export function useChatGeneration({
                 signal,
                 activeSkillNames: currentAgentActiveSkillNames,
                 workspaceRoots: childWorkspaceRoots,
+                tool: childTool,
               });
               recordAgentApprovalStepResult(toolResult);
               recordAgentToolStepResult(toolResult);
@@ -2489,6 +2497,7 @@ export function useChatGeneration({
               activeSkillNames: currentAgentActiveSkillNames,
               workspaceRoots: childWorkspaceRoots,
               fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
+              tool: childTool,
             });
             recordAgentToolStepResult(toolResult);
             return toolResult;
@@ -3474,6 +3483,10 @@ export function useChatGeneration({
                   activeSkillNames: currentActiveSkillNames,
                   workspaceRoots: currentWorkspaceRoots,
                   fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
+                  tool:
+                    currentToolsForRun.find(
+                      (candidate) => candidate.name === toolCall.function.name,
+                    ) ?? availableToolsByName.get(toolCall.function.name),
                 });
 
           applyToolResultToVisibleStep(toolResult);

@@ -233,6 +233,14 @@ type AgentDefinition = {
 
 type PublicAgentDefinition = AgentDefinition;
 
+type Permission = "allow" | "ask" | "deny";
+type FeaturePermission = "custom" | Permission;
+type BuiltInToolSettings = {
+  descriptionMode?: "default" | "custom";
+  customDescription?: string;
+  timeoutMs?: number;
+};
+
 type ToolsSettings = {
   enabled: boolean;
   askUserEnabled: boolean;
@@ -247,6 +255,10 @@ type ToolsSettings = {
   bashAutoApproveEnabled: boolean;
   editAutoApproveEnabled: boolean;
   writeAutoApproveEnabled: boolean;
+  toolsPermission?: FeaturePermission;
+  toolPermissions?: Record<string, Permission>;
+  builtInToolSettings?: Record<string, BuiltInToolSettings>;
+  permissionModelVersion?: 2;
 };
 
 type SkillsSettings = {
@@ -356,6 +368,20 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   bashAutoApproveEnabled: false,
   editAutoApproveEnabled: false,
   writeAutoApproveEnabled: false,
+  toolsPermission: "custom",
+  permissionModelVersion: 2,
+  toolPermissions: {
+    ask_user: "allow",
+    update_tasks: "allow",
+    skill: "ask",
+    web_fetch: "deny",
+    read: "ask",
+    bash: "ask",
+    edit: "ask",
+    write: "ask",
+    call_agent: "ask",
+  },
+  builtInToolSettings: {},
 };
 const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   enabled: true,
@@ -512,36 +538,109 @@ function readBooleanSetting(value: unknown, fallback: boolean) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function normalizePermission(value: unknown, fallback: Permission = "ask"): Permission {
+  return value === "allow" || value === "ask" || value === "deny" ? value : fallback;
+}
+
+function normalizeFeaturePermission(value: unknown, fallback: FeaturePermission = "custom"): FeaturePermission {
+  return value === "custom" || value === "allow" || value === "ask" || value === "deny" ? value : fallback;
+}
+
+function normalizePermissionMap(value: unknown): Record<string, Permission> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Record<string, Permission> = {};
+  for (const [name, permission] of Object.entries(value as Record<string, unknown>)) {
+    const trimmedName = name.trim();
+    if (!trimmedName) continue;
+    result[trimmedName] = normalizePermission(permission);
+  }
+  return result;
+}
+
+function legacyToolPermission(enabled: unknown, autoApproved: unknown, fallbackEnabled = true): Permission {
+  const isEnabled = typeof enabled === "boolean" ? enabled : fallbackEnabled;
+  if (!isEnabled) return "deny";
+  return autoApproved === true ? "allow" : "ask";
+}
+
+const MAX_BUILT_IN_TOOL_TIMEOUT_MS = 10 * 60_000;
+
+function normalizeBuiltInToolSettings(value: unknown): ToolsSettings["builtInToolSettings"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: NonNullable<ToolsSettings["builtInToolSettings"]> = {};
+  for (const [name, rawSettings] of Object.entries(value as Record<string, unknown>)) {
+    if (!name.trim() || !rawSettings || typeof rawSettings !== "object" || Array.isArray(rawSettings)) continue;
+    const source = rawSettings as Record<string, unknown>;
+    const customDescription = safeString(source.customDescription);
+    const timeoutMs = typeof source.timeoutMs === "number" && Number.isFinite(source.timeoutMs) && source.timeoutMs > 0
+      ? Math.min(Math.round(source.timeoutMs), MAX_BUILT_IN_TOOL_TIMEOUT_MS)
+      : undefined;
+    result[name] = {
+      descriptionMode: source.descriptionMode === "custom" ? "custom" : "default",
+      customDescription,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    };
+  }
+  return result;
+}
+
 function normalizeToolsSettings(value: unknown): ToolsSettings {
   if (!isPlainObject(value)) return DEFAULT_TOOLS_SETTINGS;
 
   const legacyChecklistWriteEnabled = value.checklistWriteEnabled;
+  const permissionModelVersion = value.permissionModelVersion === 2 ? 2 : undefined;
+  const toolsPermission = permissionModelVersion === 2
+    ? normalizeFeaturePermission(value.toolsPermission, "custom")
+    : "custom";
 
-  return {
-    enabled: readBooleanSetting(value.enabled, true),
-    askUserEnabled: readBooleanSetting(value.askUserEnabled, true),
-    taskToolsEnabled:
+  const readEnabled = value.readEnabled ?? value.fileReadEnabled;
+  const bashEnabled = value.bashEnabled ?? value.terminalExecEnabled;
+  const editEnabled = value.editEnabled ?? value.fileReplaceTextEnabled;
+  const writeEnabled = value.writeEnabled ?? value.fileCreateEnabled;
+  const permissionOverrides = normalizePermissionMap(value.toolPermissions);
+  const toolPermissions: Record<string, Permission> = {
+    ask_user: legacyToolPermission(value.askUserEnabled, true, true),
+    update_tasks: legacyToolPermission(
       typeof value.taskToolsEnabled === "boolean"
         ? value.taskToolsEnabled
         : typeof legacyChecklistWriteEnabled === "boolean"
           ? legacyChecklistWriteEnabled
           : true,
-    loadSkillEnabled: false,
-    webFetchEnabled: readBooleanSetting(value.webFetchEnabled, false),
-    readEnabled: readBooleanSetting(value.readEnabled ?? value.fileReadEnabled, true),
-    bashEnabled: readBooleanSetting(value.bashEnabled ?? value.terminalExecEnabled, true),
-    editEnabled: readBooleanSetting(value.editEnabled ?? value.fileReplaceTextEnabled, true),
-    writeEnabled: readBooleanSetting(value.writeEnabled ?? value.fileCreateEnabled, true),
-    readAutoApproveEnabled: readBooleanSetting(value.readAutoApproveEnabled, false),
-    bashAutoApproveEnabled: readBooleanSetting(value.bashAutoApproveEnabled, false),
-    editAutoApproveEnabled: readBooleanSetting(
-      value.editAutoApproveEnabled ?? value.fileReplaceTextAutoApproveEnabled,
-      false,
+      true,
+      true,
     ),
-    writeAutoApproveEnabled: readBooleanSetting(
-      value.writeAutoApproveEnabled ?? value.fileCreateAutoApproveEnabled,
-      false,
-    ),
+    skill: legacyToolPermission(value.loadSkillEnabled, false, true),
+    web_fetch: legacyToolPermission(value.webFetchEnabled, false, false),
+    read: legacyToolPermission(readEnabled, value.readAutoApproveEnabled, true),
+    bash: legacyToolPermission(bashEnabled, value.bashAutoApproveEnabled, true),
+    edit: legacyToolPermission(value.editEnabled ?? value.fileReplaceTextEnabled, value.editAutoApproveEnabled ?? value.fileReplaceTextAutoApproveEnabled, true),
+    write: legacyToolPermission(value.writeEnabled ?? value.fileCreateEnabled, value.writeAutoApproveEnabled ?? value.fileCreateAutoApproveEnabled, true),
+    call_agent: "ask",
+    ...permissionOverrides,
+  };
+
+  const toolsEnabled = permissionModelVersion === 2
+    ? toolsPermission !== "deny"
+    : readBooleanSetting(value.enabled, true);
+
+  return {
+    enabled: toolsEnabled,
+    askUserEnabled: toolPermissions.ask_user !== "deny",
+    taskToolsEnabled: toolPermissions.update_tasks !== "deny",
+    loadSkillEnabled: toolPermissions.skill !== "deny",
+    webFetchEnabled: toolPermissions.web_fetch !== "deny",
+    readEnabled: toolPermissions.read !== "deny",
+    bashEnabled: toolPermissions.bash !== "deny",
+    editEnabled: toolPermissions.edit !== "deny",
+    writeEnabled: toolPermissions.write !== "deny",
+    readAutoApproveEnabled: toolPermissions.read === "allow",
+    bashAutoApproveEnabled: toolPermissions.bash === "allow",
+    editAutoApproveEnabled: toolPermissions.edit === "allow",
+    writeAutoApproveEnabled: toolPermissions.write === "allow",
+    toolsPermission,
+    toolPermissions,
+    builtInToolSettings: normalizeBuiltInToolSettings(value.builtInToolSettings),
+    permissionModelVersion: 2,
   };
 }
 
@@ -622,6 +721,12 @@ function normalizeTimeoutMs(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.min(Math.round(value), 10 * 60_000)
     : DEFAULT_TOOL_TIMEOUT_MS;
+}
+
+function normalizeOptionalTimeoutMs(value: unknown, fallback = 0) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.min(Math.round(value), 10 * 60_000)
+    : fallback;
 }
 
 function normalizeOptionalPositiveInteger(value: unknown) {
@@ -1268,7 +1373,7 @@ async function readResponseTextWithLimit(
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
-async function fetchWebUrl(startUrl: URL, signal?: AbortSignal) {
+async function fetchWebUrl(startUrl: URL, signal?: AbortSignal, timeoutMs = WEB_FETCH_TIMEOUT_MS) {
   let currentUrl = new URL(startUrl.toString());
   currentUrl.hash = "";
 
@@ -1288,7 +1393,7 @@ async function fetchWebUrl(startUrl: URL, signal?: AbortSignal) {
     const timeout = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, WEB_FETCH_TIMEOUT_MS);
+    }, timeoutMs);
 
     let response: Response;
     try {
@@ -1305,7 +1410,7 @@ async function fetchWebUrl(startUrl: URL, signal?: AbortSignal) {
       if (error instanceof DOMException && error.name === "AbortError") {
         if (!timedOut && signal?.aborted) throw createAbortError();
         throw new Error(
-          `web_fetch timed out after ${Math.round(WEB_FETCH_TIMEOUT_MS / 1000)} seconds.`,
+          `web_fetch timed out after ${Math.round(timeoutMs / 1000)} seconds.`,
         );
       }
       throw error;
@@ -1536,6 +1641,7 @@ function decodeUrlComponentSafely(value: string) {
 async function executeWebFetchTool(
   args: unknown,
   signal?: AbortSignal,
+  timeoutMs = WEB_FETCH_TIMEOUT_MS,
 ): Promise<ToolCommandResult> {
   throwIfAborted(signal);
   const { url: rawUrl } = parseWebFetchArgs(args);
@@ -1544,7 +1650,7 @@ async function executeWebFetchTool(
     ? decodeUrlComponentSafely(requestedUrl.hash.slice(1))
     : "";
 
-  const fetched = await fetchWebUrl(requestedUrl, signal);
+  const fetched = await fetchWebUrl(requestedUrl, signal, timeoutMs);
   throwIfAborted(signal);
   const title = fetched.contentType.includes("html")
     ? extractTitleFromHtml(fetched.text)
@@ -1630,7 +1736,7 @@ async function executeToolManifest(
   throwIfAborted(context.signal);
 
   if (toolName === WEB_FETCH_TOOL_NAME) {
-    return executeWebFetchTool(args, context.signal);
+    return executeWebFetchTool(args, context.signal, normalizeOptionalTimeoutMs(context.timeoutMs, WEB_FETCH_TIMEOUT_MS));
   }
 
   if (isFileToolName(toolName)) {
@@ -4669,6 +4775,7 @@ ipcMain.handle("tools:execute-stream", async (event, request: unknown) => {
       {
         workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
         signal: controller.signal,
+        timeoutMs: normalizeOptionalTimeoutMs(value.timeoutMs),
       },
       (streamEvent) => {
         event.sender.send("tools:stream-event", {
@@ -4697,6 +4804,7 @@ ipcMain.handle("tools:execute", async (_event, request: unknown) => {
     return await executeToolManifest(value.name, value.args, {
       workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
       signal: controller.signal,
+      timeoutMs: normalizeOptionalTimeoutMs(value.timeoutMs),
     });
   } finally {
     if (executionId) activeToolExecutions.delete(executionId);

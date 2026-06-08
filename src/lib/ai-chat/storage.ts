@@ -204,6 +204,30 @@ function legacyToolPermission(enabled: unknown, autoApproved: unknown, fallbackE
   return autoApproved === true ? "allow" as const : "ask" as const;
 }
 
+const MAX_BUILT_IN_TOOL_TIMEOUT_MS = 10 * 60_000;
+
+function normalizeBuiltInToolSettings(value: unknown): ToolsSettings["builtInToolSettings"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const result: NonNullable<ToolsSettings["builtInToolSettings"]> = {};
+  for (const [name, rawSettings] of Object.entries(value as Record<string, unknown>)) {
+    if (!name.trim() || !rawSettings || typeof rawSettings !== "object" || Array.isArray(rawSettings)) continue;
+    const source = rawSettings as Record<string, unknown>;
+    const customDescription = typeof source.customDescription === "string" ? source.customDescription : "";
+    const timeout = typeof source.timeoutMs === "number" && Number.isFinite(source.timeoutMs) && source.timeoutMs > 0
+      ? Math.min(Math.round(source.timeoutMs), MAX_BUILT_IN_TOOL_TIMEOUT_MS)
+      : undefined;
+
+    result[name] = {
+      descriptionMode: source.descriptionMode === "custom" ? "custom" : "default",
+      customDescription,
+      ...(timeout !== undefined ? { timeoutMs: timeout } : {}),
+    };
+  }
+
+  return result;
+}
+
 function normalizeToolsSettings(
   value: Partial<ToolsSettings> | undefined,
 ): ToolsSettings {
@@ -251,6 +275,7 @@ function normalizeToolsSettings(
     enabled: toolsEnabled,
     toolsPermission,
     permissionModelVersion: 2,
+    builtInToolSettings: normalizeBuiltInToolSettings((value as Record<string, unknown> | undefined)?.builtInToolSettings),
     askUserEnabled: toolPermissions.ask_user !== "deny",
     taskToolsEnabled: toolPermissions.update_tasks !== "deny",
     loadSkillEnabled: toolPermissions.skill !== "deny",

@@ -32,6 +32,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { GroupHeading } from "@/components/ui/group-heading";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -880,7 +881,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         }
         onDrop={options?.droppable ? handleRootChatsDrop : undefined}
       >
-        <div className="rounded-sm px-2 pt-1 text-sm font-medium text-muted-foreground transition-none hover:bg-muted/60 hover:text-foreground">{label}</div>
+        <GroupHeading className="mt-0 pt-1">{label}</GroupHeading>
         <div className="grid gap-[1px]">
           {sectionChats.map(renderChatRow)}
           {sectionChats.length === 0 ? (
@@ -950,21 +951,23 @@ export const ChatSidebar = memo(function ChatSidebar({
           <div className="grid gap-3">
             {filteredChatList.folders.length > 0 || !isSearching ? (
               <section className="grid gap-1.5">
-                <div className="flex items-center gap-1 px-1 pt-1 text-sm font-medium text-muted-foreground">
-                  <div className="flex min-w-0 flex-1 items-center gap-1 text-left">
-                    <span>Folders</span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="h-6 w-6 shrink-0 transition-none hover:bg-muted hover:text-foreground"
-                    onClick={startCreatingFolder}
-                    title="New folder"
-                  >
-                    <Plus className="size-3.5" />
-                  </Button>
-                </div>
+                <GroupHeading
+                  className="mt-0 pt-1"
+                  action={
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6 shrink-0 transition-none hover:bg-muted hover:text-foreground"
+                      onClick={startCreatingFolder}
+                      title="New folder"
+                    >
+                      <Plus className="size-3.5" />
+                    </Button>
+                  }
+                >
+                  Folders
+                </GroupHeading>
 
                 <div className="grid gap-1">
                   {isCreatingFolder ? (

@@ -21,6 +21,7 @@ import {
   WRITE_TOOL,
   WRITE_TOOL_NAME,
   isValidToolName,
+  applyBuiltInToolSettings,
   LOAD_SKILL_TOOL_NAME,
 } from "@/lib/ai-chat/builtin-tools";
 import { FEATURE_PERMISSION_KEY, getModeInstructionsBlock, getModePermissionMaps, resolvePermission, type ModeCapabilityContext } from "@/lib/ai-chat/modes";
@@ -183,6 +184,7 @@ export function getGlobalEnabledTools({
     WRITE_TOOL,
   ];
   const enabledBuiltIns = builtInTools
+    .map((tool) => applyBuiltInToolSettings(tool, toolsSettings))
     .map((tool) => withPermissionApproval(tool, getEffectiveGlobalToolPermission(tool.name, toolsSettings)))
     .filter((tool): tool is LoadedToolInfo => Boolean(tool));
 

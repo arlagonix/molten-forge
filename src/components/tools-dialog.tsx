@@ -37,6 +37,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { GroupHeading } from "@/components/ui/group-heading";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -445,11 +446,83 @@ type ToolTestState = {
   runId?: string;
 };
 
+type BuiltInToolDraft = {
+  descriptionMode: "default" | "custom";
+  customDescription: string;
+  timeoutMs: string;
+};
+
+const BUILTIN_TOOL_TIMEOUT_FALLBACKS_MS: Record<string, number> = {
+  [BUILTIN_WEB_FETCH_TOOL_NAME]: 15_000,
+  [BUILTIN_READ_TOOL_NAME]: 30_000,
+  [BUILTIN_BASH_TOOL_NAME]: 30_000,
+  [BUILTIN_EDIT_TOOL_NAME]: 30_000,
+  [BUILTIN_WRITE_TOOL_NAME]: 30_000,
+};
+
+function supportsBuiltInTimeout(toolName: string) {
+  return Object.prototype.hasOwnProperty.call(
+    BUILTIN_TOOL_TIMEOUT_FALLBACKS_MS,
+    toolName,
+  );
+}
+
+function normalizeBuiltInTimeoutText(value: string, fallback: number) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return String(fallback);
+  return String(Math.min(Math.round(numeric), 10 * 60_000));
+}
+
+function getStaticBuiltInDescription(toolName: string) {
+  if (toolName === BUILTIN_ASK_USER_TOOL_NAME)
+    return BUILTIN_ASK_USER_TOOL_DESCRIPTION;
+  if (toolName === BUILTIN_LOAD_SKILL_TOOL_NAME)
+    return BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION;
+  if (toolName === BUILTIN_CALL_AGENT_TOOL_NAME)
+    return BUILTIN_CALL_AGENT_TOOL_DESCRIPTION;
+  if (toolName === BUILTIN_WEB_FETCH_TOOL_NAME)
+    return BUILTIN_WEB_FETCH_TOOL_DESCRIPTION;
+  const taskTool = BUILTIN_TASK_TOOL_META.find(
+    (tool) => tool.name === toolName,
+  );
+  if (taskTool) return taskTool.description;
+  const fileTool = BUILTIN_FILE_TOOL_META.find(
+    (tool) => tool.name === toolName,
+  );
+  if (fileTool) return fileTool.description;
+  return "Built-in tool.";
+}
+
+function getSavedBuiltInToolDraft(
+  settings: ToolsSettings,
+  toolName: string,
+): BuiltInToolDraft {
+  const saved = settings.builtInToolSettings?.[toolName];
+  const fallbackTimeout = BUILTIN_TOOL_TIMEOUT_FALLBACKS_MS[toolName] ?? 0;
+  return {
+    descriptionMode: saved?.descriptionMode === "custom" ? "custom" : "default",
+    customDescription: saved?.customDescription ?? "",
+    timeoutMs: String(saved?.timeoutMs ?? fallbackTimeout),
+  };
+}
+
+function areBuiltInToolDraftsEqual(
+  left: BuiltInToolDraft,
+  right: BuiltInToolDraft,
+) {
+  return (
+    left.descriptionMode === right.descriptionMode &&
+    left.customDescription === right.customDescription &&
+    left.timeoutMs === right.timeoutMs
+  );
+}
+
 type ToolsDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   toolsSettings: ToolsSettings;
   onToolsSettingsChange: Dispatch<SetStateAction<ToolsSettings>>;
+  availableTools: LoadedToolInfo[];
   loadedTools: LoadedToolInfo[];
   onLoadedToolsChange: Dispatch<SetStateAction<LoadedToolInfo[]>>;
   callAgentEnabled: boolean;
@@ -928,6 +1001,7 @@ export const ToolsDialog = memo(function ToolsDialog({
   onOpenChange,
   toolsSettings,
   onToolsSettingsChange,
+  availableTools,
   loadedTools,
   onLoadedToolsChange,
   callAgentEnabled,
@@ -944,6 +1018,9 @@ export const ToolsDialog = memo(function ToolsDialog({
     Record<string, ToolTestState>
   >(() => loadToolTestStates());
   const [selectedToolName, setSelectedToolName] = useState<string | null>(null);
+  const [builtInToolDrafts, setBuiltInToolDrafts] = useState<
+    Record<string, BuiltInToolDraft>
+  >({});
 
   const isAskUserToolSelected = selectedToolName === BUILTIN_ASK_USER_TOOL_NAME;
   const selectedTaskToolInfo = BUILTIN_TASK_TOOL_META.find(
@@ -958,6 +1035,26 @@ export const ToolsDialog = memo(function ToolsDialog({
     selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME;
   const selectedFileToolInfo = BUILTIN_FILE_TOOL_META.find(
     (tool) => tool.name === selectedToolName,
+  );
+  const builtInToolNames = useMemo(
+    () =>
+      [
+        BUILTIN_ASK_USER_TOOL_NAME,
+        ...BUILTIN_TASK_TOOL_NAMES,
+        BUILTIN_LOAD_SKILL_TOOL_NAME,
+        BUILTIN_CALL_AGENT_TOOL_NAME,
+        BUILTIN_WEB_FETCH_TOOL_NAME,
+        ...BUILTIN_FILE_TOOL_NAMES,
+      ] as string[],
+    [],
+  );
+  const selectedBuiltInToolName =
+    selectedToolName && builtInToolNames.includes(selectedToolName)
+      ? selectedToolName
+      : null;
+  const availableToolsByName = useMemo(
+    () => new Map(availableTools.map((tool) => [tool.name, tool] as const)),
+    [availableTools],
   );
   const selectedTool = useMemo(
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
@@ -999,6 +1096,16 @@ export const ToolsDialog = memo(function ToolsDialog({
       : undefined);
   const toolsMasterPermission = getToolsMasterPermission(toolsSettings);
   const childPermissionsLocked = toolsMasterPermission !== "custom";
+  useEffect(() => {
+    if (!selectedBuiltInToolName) return;
+    setBuiltInToolDrafts((current) => ({
+      ...current,
+      [selectedBuiltInToolName]: getSavedBuiltInToolDraft(
+        toolsSettings,
+        selectedBuiltInToolName,
+      ),
+    }));
+  }, [selectedBuiltInToolName, toolsSettings]);
 
   useEffect(() => {
     const isEditingUnsavedTool =
@@ -1062,6 +1169,196 @@ export const ToolsDialog = memo(function ToolsDialog({
 
   function updateToolDraft(patch: Partial<ToolDraft>) {
     setToolDraft((current) => (current ? { ...current, ...patch } : current));
+  }
+
+  function updateBuiltInToolDraft(
+    toolName: string,
+    patch: Partial<BuiltInToolDraft>,
+  ) {
+    setBuiltInToolDrafts((current) => ({
+      ...current,
+      [toolName]: {
+        ...getSavedBuiltInToolDraft(toolsSettings, toolName),
+        ...(current[toolName] ?? {}),
+        ...patch,
+      },
+    }));
+  }
+
+  function getDefaultBuiltInDescription(toolName: string, fallback: string) {
+    const saved = toolsSettings.builtInToolSettings?.[toolName];
+    const currentTool = availableToolsByName.get(toolName);
+    if (saved?.descriptionMode === "custom") return fallback;
+    return currentTool?.description ?? fallback;
+  }
+
+  function getDraftModelDescription(toolName: string, fallback: string) {
+    const draft =
+      builtInToolDrafts[toolName] ??
+      getSavedBuiltInToolDraft(toolsSettings, toolName);
+    const customDescription = draft.customDescription.trim();
+    return draft.descriptionMode === "custom" && customDescription
+      ? customDescription
+      : getDefaultBuiltInDescription(toolName, fallback);
+  }
+
+  function saveBuiltInToolDraft(toolName: string) {
+    const fallbackTimeout = BUILTIN_TOOL_TIMEOUT_FALLBACKS_MS[toolName] ?? 0;
+    const draft =
+      builtInToolDrafts[toolName] ??
+      getSavedBuiltInToolDraft(toolsSettings, toolName);
+    const normalizedTimeout = supportsBuiltInTimeout(toolName)
+      ? Number(normalizeBuiltInTimeoutText(draft.timeoutMs, fallbackTimeout))
+      : undefined;
+
+    onToolsSettingsChange((current) => ({
+      ...current,
+      builtInToolSettings: {
+        ...(current.builtInToolSettings ?? {}),
+        [toolName]: {
+          descriptionMode: draft.descriptionMode,
+          customDescription: draft.customDescription,
+          ...(normalizedTimeout !== undefined
+            ? { timeoutMs: normalizedTimeout }
+            : {}),
+        },
+      },
+    }));
+
+    setBuiltInToolDrafts((current) => ({
+      ...current,
+      [toolName]: {
+        ...draft,
+        ...(normalizedTimeout !== undefined
+          ? { timeoutMs: String(normalizedTimeout) }
+          : {}),
+      },
+    }));
+    showSuccess("Built-in tool settings saved", toolName);
+  }
+
+  function resetBuiltInToolDraft(toolName: string) {
+    onToolsSettingsChange((current) => {
+      const { [toolName]: _removed, ...rest } =
+        current.builtInToolSettings ?? {};
+      void _removed;
+      return {
+        ...current,
+        builtInToolSettings: rest,
+      };
+    });
+
+    setBuiltInToolDrafts((current) => ({
+      ...current,
+      [toolName]: getSavedBuiltInToolDraft(
+        { ...toolsSettings, builtInToolSettings: {} },
+        toolName,
+      ),
+    }));
+    showSuccess("Built-in tool settings reset", toolName);
+  }
+
+  function renderBuiltInToolEditableSettings({
+    name,
+    defaultDescription,
+  }: {
+    name: string;
+    defaultDescription: string;
+  }) {
+    const draft =
+      builtInToolDrafts[name] ?? getSavedBuiltInToolDraft(toolsSettings, name);
+    const savedDraft = getSavedBuiltInToolDraft(toolsSettings, name);
+    const hasChanges = !areBuiltInToolDraftsEqual(draft, savedDraft);
+    const modelDescription = getDraftModelDescription(name, defaultDescription);
+
+    return (
+      <div className="grid gap-4 border bg-muted/10 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <Label>Model-facing description</Label>
+            <p className="text-sm leading-5 text-muted-foreground">
+              This is the exact description the model receives for this built-in
+              tool.
+            </p>
+          </div>
+          <div className="whitespace-pre-wrap border bg-background p-3 text-sm leading-5 text-muted-foreground">
+            {modelDescription}
+          </div>
+        </div>
+
+        <div className="grid gap-2 content-start">
+          <Label htmlFor={`builtin-${name}-description-mode`}>
+            Description
+          </Label>
+          <Select
+            value={draft.descriptionMode}
+            onValueChange={(value) =>
+              updateBuiltInToolDraft(name, {
+                descriptionMode: value === "custom" ? "custom" : "default",
+              })
+            }
+          >
+            <SelectTrigger id={`builtin-${name}-description-mode`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="default">Default</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor={`builtin-${name}-custom-description`}>
+            Custom description
+          </Label>
+          <Textarea
+            id={`builtin-${name}-custom-description`}
+            value={draft.customDescription}
+            onChange={(event) =>
+              updateBuiltInToolDraft(name, {
+                customDescription: event.target.value,
+              })
+            }
+            disabled={draft.descriptionMode !== "custom"}
+            placeholder="Override the description sent to the model."
+            className="min-h-32 resize-y"
+          />
+        </div>
+
+        {supportsBuiltInTimeout(name) ? (
+          <div className="grid gap-2 w-full">
+            <Label htmlFor={`builtin-${name}-timeout`}>Timeout ms</Label>
+            <Input
+              id={`builtin-${name}-timeout`}
+              value={draft.timeoutMs}
+              onChange={(event) =>
+                updateBuiltInToolDraft(name, { timeoutMs: event.target.value })
+              }
+              inputMode="numeric"
+            />
+          </div>
+        ) : null}
+        <div className="flex items-center gap-2 justify-end">
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => resetBuiltInToolDraft(name)}
+          >
+            Reset
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            disabled={!hasChanges}
+            onClick={() => saveBuiltInToolDraft(name)}
+          >
+            Save
+          </Button>
+        </div>
+      </div>
+    );
   }
 
   const hasToolDraftChanges = useMemo(() => {
@@ -1433,15 +1730,6 @@ export const ToolsDialog = memo(function ToolsDialog({
 
         <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[400px_minmax(0,1fr)]">
           <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                Tools
-              </Label>
-              <span className="text-sm text-muted-foreground">
-                {enabledToolsCount}/{totalToolsCount} enabled
-              </span>
-            </div>
-
             <div className="mb-3 flex items-start justify-between gap-3 border bg-background px-3 py-2 text-base">
               <span className="min-w-0">
                 <span className="block font-medium">Tools</span>
@@ -1513,14 +1801,15 @@ export const ToolsDialog = memo(function ToolsDialog({
             </div>
 
             <div className="grid gap-1.5">
-              <Label className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Built-in
-              </Label>
+              <GroupHeading className="mt-0">Built-in</GroupHeading>
 
               {renderBuiltInToolRow({
                 id: BUILTIN_ASK_USER_TOOL_ID,
                 name: BUILTIN_ASK_USER_TOOL_NAME,
-                description: BUILTIN_ASK_USER_TOOL_DESCRIPTION,
+                description: getDraftModelDescription(
+                  BUILTIN_ASK_USER_TOOL_NAME,
+                  BUILTIN_ASK_USER_TOOL_DESCRIPTION,
+                ),
                 icon: MessageSquareText,
                 selected: isAskUserToolSelected,
               })}
@@ -1529,7 +1818,10 @@ export const ToolsDialog = memo(function ToolsDialog({
                 renderBuiltInToolRow({
                   id: taskTool.id,
                   name: taskTool.name,
-                  description: taskTool.description,
+                  description: getDraftModelDescription(
+                    taskTool.name,
+                    taskTool.description,
+                  ),
                   icon: ListTodo,
                   selected: selectedToolName === taskTool.name,
                 }),
@@ -1538,7 +1830,10 @@ export const ToolsDialog = memo(function ToolsDialog({
               {renderBuiltInToolRow({
                 id: BUILTIN_LOAD_SKILL_TOOL_ID,
                 name: BUILTIN_LOAD_SKILL_TOOL_NAME,
-                description: BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION,
+                description: getDraftModelDescription(
+                  BUILTIN_LOAD_SKILL_TOOL_NAME,
+                  BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION,
+                ),
                 icon: BookOpen,
                 selected: selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME,
               })}
@@ -1546,7 +1841,10 @@ export const ToolsDialog = memo(function ToolsDialog({
               {renderBuiltInToolRow({
                 id: BUILTIN_CALL_AGENT_TOOL_ID,
                 name: BUILTIN_CALL_AGENT_TOOL_NAME,
-                description: BUILTIN_CALL_AGENT_TOOL_DESCRIPTION,
+                description: getDraftModelDescription(
+                  BUILTIN_CALL_AGENT_TOOL_NAME,
+                  BUILTIN_CALL_AGENT_TOOL_DESCRIPTION,
+                ),
                 icon: Bot,
                 selected: isCallAgentToolSelected,
               })}
@@ -1554,7 +1852,10 @@ export const ToolsDialog = memo(function ToolsDialog({
               {renderBuiltInToolRow({
                 id: BUILTIN_WEB_FETCH_TOOL_ID,
                 name: BUILTIN_WEB_FETCH_TOOL_NAME,
-                description: BUILTIN_WEB_FETCH_TOOL_DESCRIPTION,
+                description: getDraftModelDescription(
+                  BUILTIN_WEB_FETCH_TOOL_NAME,
+                  BUILTIN_WEB_FETCH_TOOL_DESCRIPTION,
+                ),
                 icon: Globe,
                 selected: isWebFetchToolSelected,
               })}
@@ -1563,18 +1864,16 @@ export const ToolsDialog = memo(function ToolsDialog({
                 renderBuiltInToolRow({
                   id: fileTool.id,
                   name: fileTool.name,
-                  description: fileTool.description,
+                  description: getDraftModelDescription(
+                    fileTool.name,
+                    fileTool.description,
+                  ),
                   icon: fileTool.icon,
                   selected: selectedToolName === fileTool.name,
                 }),
               )}
 
-              <div className="mt-3 flex items-center gap-2 px-1">
-                <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Custom tools
-                </Label>
-                <div className="h-px flex-1 bg-border" />
-              </div>
+              <GroupHeading>Custom tools</GroupHeading>
 
               {loadedTools.map((tool) => (
                 <div
@@ -1621,9 +1920,7 @@ export const ToolsDialog = memo(function ToolsDialog({
 
             {toolLoadErrors.length > 0 && (
               <div className="mt-4 grid gap-2">
-                <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                  Tool file issues
-                </Label>
+                <GroupHeading className="mt-0">Tool file issues</GroupHeading>
                 {toolLoadErrors.map((error) => (
                   <div
                     key={`${error.source}:${error.message}`}
@@ -1665,9 +1962,21 @@ export const ToolsDialog = memo(function ToolsDialog({
                         {BUILTIN_ASK_USER_TOOL_NAME}
                       </h3>
                       <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {BUILTIN_ASK_USER_TOOL_DESCRIPTION}
+                        {getDraftModelDescription(
+                          BUILTIN_ASK_USER_TOOL_NAME,
+                          BUILTIN_ASK_USER_TOOL_DESCRIPTION,
+                        )}
                       </p>
                     </div>
+
+                    {selectedBuiltInToolName
+                      ? renderBuiltInToolEditableSettings({
+                          name: selectedBuiltInToolName,
+                          defaultDescription: getStaticBuiltInDescription(
+                            selectedBuiltInToolName,
+                          ),
+                        })
+                      : null}
 
                     <div className="grid gap-2">
                       <Label>Behavior</Label>
@@ -1725,10 +2034,23 @@ export const ToolsDialog = memo(function ToolsDialog({
                         {selectedTaskToolInfo?.name}
                       </h3>
                       <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {selectedTaskToolInfo?.description ??
-                          BUILTIN_TASK_TOOLS_DESCRIPTION}
+                        {selectedTaskToolInfo
+                          ? getDraftModelDescription(
+                              selectedTaskToolInfo.name,
+                              selectedTaskToolInfo.description,
+                            )
+                          : BUILTIN_TASK_TOOLS_DESCRIPTION}
                       </p>
                     </div>
+
+                    {selectedBuiltInToolName
+                      ? renderBuiltInToolEditableSettings({
+                          name: selectedBuiltInToolName,
+                          defaultDescription: getStaticBuiltInDescription(
+                            selectedBuiltInToolName,
+                          ),
+                        })
+                      : null}
 
                     <div className="grid gap-2">
                       <Label>Behavior</Label>
@@ -1787,9 +2109,21 @@ export const ToolsDialog = memo(function ToolsDialog({
                         {BUILTIN_LOAD_SKILL_TOOL_NAME}
                       </h3>
                       <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION}
+                        {getDraftModelDescription(
+                          BUILTIN_LOAD_SKILL_TOOL_NAME,
+                          BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION,
+                        )}
                       </p>
                     </div>
+
+                    {selectedBuiltInToolName
+                      ? renderBuiltInToolEditableSettings({
+                          name: selectedBuiltInToolName,
+                          defaultDescription: getStaticBuiltInDescription(
+                            selectedBuiltInToolName,
+                          ),
+                        })
+                      : null}
 
                     <div className="grid gap-2">
                       <Label>Behavior</Label>
@@ -1841,9 +2175,21 @@ export const ToolsDialog = memo(function ToolsDialog({
                         {BUILTIN_CALL_AGENT_TOOL_NAME}
                       </h3>
                       <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {BUILTIN_CALL_AGENT_TOOL_DESCRIPTION}
+                        {getDraftModelDescription(
+                          BUILTIN_CALL_AGENT_TOOL_NAME,
+                          BUILTIN_CALL_AGENT_TOOL_DESCRIPTION,
+                        )}
                       </p>
                     </div>
+
+                    {selectedBuiltInToolName
+                      ? renderBuiltInToolEditableSettings({
+                          name: selectedBuiltInToolName,
+                          defaultDescription: getStaticBuiltInDescription(
+                            selectedBuiltInToolName,
+                          ),
+                        })
+                      : null}
 
                     <div className="grid gap-2">
                       <Label>Behavior</Label>
@@ -1896,9 +2242,21 @@ export const ToolsDialog = memo(function ToolsDialog({
                         {BUILTIN_WEB_FETCH_TOOL_NAME}
                       </h3>
                       <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {BUILTIN_WEB_FETCH_TOOL_DESCRIPTION}
+                        {getDraftModelDescription(
+                          BUILTIN_WEB_FETCH_TOOL_NAME,
+                          BUILTIN_WEB_FETCH_TOOL_DESCRIPTION,
+                        )}
                       </p>
                     </div>
+
+                    {selectedBuiltInToolName
+                      ? renderBuiltInToolEditableSettings({
+                          name: selectedBuiltInToolName,
+                          defaultDescription: getStaticBuiltInDescription(
+                            selectedBuiltInToolName,
+                          ),
+                        })
+                      : null}
 
                     <div className="grid gap-2">
                       <Label>Behavior</Label>
@@ -1958,9 +2316,21 @@ export const ToolsDialog = memo(function ToolsDialog({
                         {selectedFileToolInfo.name}
                       </h3>
                       <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {selectedFileToolInfo.description}
+                        {getDraftModelDescription(
+                          selectedFileToolInfo.name,
+                          selectedFileToolInfo.description,
+                        )}
                       </p>
                     </div>
+
+                    {selectedBuiltInToolName
+                      ? renderBuiltInToolEditableSettings({
+                          name: selectedBuiltInToolName,
+                          defaultDescription: getStaticBuiltInDescription(
+                            selectedBuiltInToolName,
+                          ),
+                        })
+                      : null}
 
                     <div className="grid gap-2">
                       <Label>Behavior</Label>

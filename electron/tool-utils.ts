@@ -18,6 +18,7 @@ export type WorkspaceRoot = {
 export type ToolExecutionContext = {
   workspaceRoots?: WorkspaceRoot[];
   signal?: AbortSignal;
+  timeoutMs?: number;
 };
 
 export function isPlainObject(value: unknown): value is JsonRecord {

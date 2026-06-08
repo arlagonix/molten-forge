@@ -53,6 +53,7 @@ import {
   TASK_TOOLS,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
+  applyBuiltInToolSettings,
   buildFileToolAutoApprovalFromToolsSettings,
   compareToolsByDisplayOrder,
   isBuiltInToolName,
@@ -653,11 +654,11 @@ export default function Home() {
       ...loadedMcpTools,
     ]) {
       if (!isValidToolName(tool.name) || byName.has(tool.name)) continue;
-      byName.set(tool.name, tool);
+      byName.set(tool.name, applyBuiltInToolSettings(tool, toolsSettings));
     }
 
     return [...byName.values()].sort(compareToolsByDisplayOrder);
-  }, [loadedMcpTools, loadedTools]);
+  }, [loadedMcpTools, loadedTools, toolsSettings]);
 
   const availableToolsByName = useMemo(() => {
     return new Map(availableTools.map((tool) => [tool.name, tool] as const));
@@ -1524,7 +1525,7 @@ export default function Home() {
     isStickyScrollSuppressed,
     syncChatScrollState,
     executeExternalTool: (toolName, args, context) => {
-      const tool = executableTools.find((candidate) => candidate.name === toolName);
+      const tool = availableToolsByName.get(toolName) ?? executableTools.find((candidate) => candidate.name === toolName);
       const executionId = createId();
       const isMcpTool = tool?.source === "mcp";
       const bridge = isMcpTool ? window.chatForgeMcp : getToolsBridge();
@@ -1610,6 +1611,7 @@ export default function Home() {
               name: toolName,
               args,
               workspaceRoots: workspaceRootsWithSkills,
+              timeoutMs: tool?.timeoutMs,
             })
             .then(settleResolve, settleReject);
           return;
@@ -1621,6 +1623,7 @@ export default function Home() {
             name: toolName,
             args,
             workspaceRoots: workspaceRootsWithSkills,
+            timeoutMs: tool?.timeoutMs,
           })
           .then(settleResolve, settleReject);
       });
@@ -2725,6 +2728,7 @@ export default function Home() {
         onOpenChange={setToolsOpen}
         toolsSettings={toolsSettings}
         onToolsSettingsChange={setToolsSettings}
+        availableTools={availableTools}
         loadedTools={loadedTools}
         onLoadedToolsChange={setLoadedTools}
         callAgentEnabled={availableAgents.some((agent) => effectiveAgentPermissions.get(agent.name) !== "deny")}
