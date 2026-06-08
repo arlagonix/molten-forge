@@ -32,7 +32,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { GroupHeading } from "@/components/ui/group-heading";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +42,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { GroupHeading } from "@/components/ui/group-heading";
 import { Input } from "@/components/ui/input";
 import {
   formatChatActivityDate,
@@ -106,7 +106,6 @@ type ChatSidebarProps = {
   onMoveChatToFolder: (chatId: string, folderId: string) => void;
   onRemoveChatFromFolder: (chatId: string) => void;
 };
-
 
 type FolderNameInputProps = {
   initialName?: string;
@@ -184,7 +183,9 @@ const NewFolderDraftRow = memo(function NewFolderDraftRow({
         </div>
       </div>
       <div className="grid gap-[1px] pb-1 pl-5">
-        <div className="px-2 py-1 text-base leading-6 text-muted-foreground">No chats</div>
+        <div className="px-2 py-1 text-base leading-6 text-muted-foreground">
+          No chats
+        </div>
       </div>
     </section>
   );
@@ -224,25 +225,38 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [renamingChatId, setRenamingChatId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [chatSearchQuery, setChatSearchQuery] = useState("");
-  const [openChatOptionsChatId, setOpenChatOptionsChatId] = useState<string | null>(null);
-  const [focusedChatOptionsChatId, setFocusedChatOptionsChatId] = useState<string | null>(null);
-  const [openFolderOptionsFolderId, setOpenFolderOptionsFolderId] = useState<string | null>(null);
-  const [visibleChatLimit, setVisibleChatLimit] = useState(CHAT_LIST_BATCH_SIZE);
+  const [openChatOptionsChatId, setOpenChatOptionsChatId] = useState<
+    string | null
+  >(null);
+  const [focusedChatOptionsChatId, setFocusedChatOptionsChatId] = useState<
+    string | null
+  >(null);
+  const [openFolderOptionsFolderId, setOpenFolderOptionsFolderId] = useState<
+    string | null
+  >(null);
+  const [visibleChatLimit, setVisibleChatLimit] =
+    useState(CHAT_LIST_BATCH_SIZE);
   const [relativeTimeNow, setRelativeTimeNow] = useState(() => Date.now());
-  const [visibleFolderLimit, setVisibleFolderLimit] = useState(FOLDER_BATCH_SIZE);
-  const [collapsedFolderIds, setCollapsedFolderIds] = useState<Record<string, boolean>>(() =>
+  const [visibleFolderLimit, setVisibleFolderLimit] =
+    useState(FOLDER_BATCH_SIZE);
+  const [collapsedFolderIds, setCollapsedFolderIds] = useState<
+    Record<string, boolean>
+  >(() =>
     Object.fromEntries(
       folders
         .filter((folder) => folder.id !== activeChatFolderId)
         .map((folder) => [folder.id, true]),
     ),
   );
-  const [folderChatLimits, setFolderChatLimits] = useState<Record<string, number>>({});
+  const [folderChatLimits, setFolderChatLimits] = useState<
+    Record<string, number>
+  >({});
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [isRootChatsDragOver, setIsRootChatsDragOver] = useState(false);
-  const [deleteFolderTarget, setDeleteFolderTarget] = useState<ChatFolder | null>(null);
+  const [deleteFolderTarget, setDeleteFolderTarget] =
+    useState<ChatFolder | null>(null);
   const normalizedChatSearchQuery = chatSearchQuery.trim().toLocaleLowerCase();
   const isSearching = normalizedChatSearchQuery.length > 0;
 
@@ -269,7 +283,8 @@ export const ChatSidebar = memo(function ChatSidebar({
     });
     setFolderChatLimits((current) => ({
       ...current,
-      [activeChatFolderId]: current[activeChatFolderId] ?? FOLDER_CHAT_BATCH_SIZE,
+      [activeChatFolderId]:
+        current[activeChatFolderId] ?? FOLDER_CHAT_BATCH_SIZE,
     }));
   }, [activeChatFolderId]);
 
@@ -314,7 +329,10 @@ export const ChatSidebar = memo(function ChatSidebar({
       : -1;
     const effectiveVisibleChatLimit = isSearching
       ? Number.POSITIVE_INFINITY
-      : Math.max(visibleChatLimit, activeChatIndex >= 0 ? activeChatIndex + 1 : 0);
+      : Math.max(
+          visibleChatLimit,
+          activeChatIndex >= 0 ? activeChatIndex + 1 : 0,
+        );
     let remainingChats = effectiveVisibleChatLimit;
     const visiblePinnedChats = pinnedChats.slice(0, remainingChats);
     remainingChats = Math.max(0, remainingChats - visiblePinnedChats.length);
@@ -330,13 +348,23 @@ export const ChatSidebar = memo(function ChatSidebar({
       pinnedChats: visiblePinnedChats,
       rootChats: visibleRootChats,
     };
-  }, [activeChatId, chats, folders, isSearching, normalizedChatSearchQuery, visibleChatLimit]);
+  }, [
+    activeChatId,
+    chats,
+    folders,
+    isSearching,
+    normalizedChatSearchQuery,
+    visibleChatLimit,
+  ]);
 
   const visibleFolders = isSearching
     ? filteredChatList.folders
     : filteredChatList.folders.slice(0, visibleFolderLimit);
-  const hasMoreFolders = !isSearching && visibleFolders.length < filteredChatList.folders.length;
-  const hasMoreChats = !isSearching && filteredChatList.visibleChatCount < filteredChatList.filteredChatCount;
+  const hasMoreFolders =
+    !isSearching && visibleFolders.length < filteredChatList.folders.length;
+  const hasMoreChats =
+    !isSearching &&
+    filteredChatList.visibleChatCount < filteredChatList.filteredChatCount;
 
   useEffect(() => {
     setVisibleChatLimit(CHAT_LIST_BATCH_SIZE);
@@ -346,7 +374,8 @@ export const ChatSidebar = memo(function ChatSidebar({
     if (!hasMoreChats) return;
 
     const element = event.currentTarget;
-    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
 
     if (distanceFromBottom <= CHAT_LIST_SCROLL_THRESHOLD_PX) {
       setVisibleChatLimit((current) => current + CHAT_LIST_BATCH_SIZE);
@@ -404,7 +433,10 @@ export const ChatSidebar = memo(function ChatSidebar({
     setCollapsedFolderIds((current) => {
       const isCollapsedNow = current[folderId] === true;
       if (isCollapsedNow) {
-        setFolderChatLimits((limits) => ({ ...limits, [folderId]: FOLDER_CHAT_BATCH_SIZE }));
+        setFolderChatLimits((limits) => ({
+          ...limits,
+          [folderId]: FOLDER_CHAT_BATCH_SIZE,
+        }));
         const next = { ...current };
         delete next[folderId];
         return next;
@@ -417,22 +449,30 @@ export const ChatSidebar = memo(function ChatSidebar({
   function showMoreFolderChats(folderId: string) {
     setFolderChatLimits((current) => ({
       ...current,
-      [folderId]: (current[folderId] ?? FOLDER_CHAT_BATCH_SIZE) + FOLDER_CHAT_BATCH_SIZE,
+      [folderId]:
+        (current[folderId] ?? FOLDER_CHAT_BATCH_SIZE) + FOLDER_CHAT_BATCH_SIZE,
     }));
   }
 
-  function handleChatDragStart(event: DragEvent<HTMLDivElement>, chat: ChatSession) {
+  function handleChatDragStart(
+    event: DragEvent<HTMLDivElement>,
+    chat: ChatSession,
+  ) {
     if (renamingChatId === chat.id) return;
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("application/x-chat-forge-chat-id", chat.id);
   }
 
   function isChatDragEvent(event: DragEvent<HTMLElement>) {
-    return Array.from(event.dataTransfer.types).includes("application/x-chat-forge-chat-id");
+    return Array.from(event.dataTransfer.types).includes(
+      "application/x-chat-forge-chat-id",
+    );
   }
 
   function getDraggedChatId(event: DragEvent<HTMLElement>) {
-    return event.dataTransfer.getData("application/x-chat-forge-chat-id").trim();
+    return event.dataTransfer
+      .getData("application/x-chat-forge-chat-id")
+      .trim();
   }
 
   function handleFolderDrop(event: DragEvent<HTMLElement>, folderId: string) {
@@ -475,7 +515,9 @@ export const ChatSidebar = memo(function ChatSidebar({
   }
 
   function renderMoveToFolderItems(chat: ChatSession) {
-    const targetFolders = folders.filter((folder) => folder.id !== chat.folderId);
+    const targetFolders = folders.filter(
+      (folder) => folder.id !== chat.folderId,
+    );
     if (targetFolders.length === 0) return null;
 
     return (
@@ -484,7 +526,11 @@ export const ChatSidebar = memo(function ChatSidebar({
           <Folder className="size-4" />
           Move to folder
         </DropdownMenuSubTrigger>
-        <DropdownMenuSubContent sideOffset={2} alignOffset={0} className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] min-w-52 overflow-y-auto">
+        <DropdownMenuSubContent
+          sideOffset={2}
+          alignOffset={0}
+          className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] min-w-52 overflow-y-auto"
+        >
           {targetFolders.map((folder) => (
             <DropdownMenuItem
               key={folder.id}
@@ -506,13 +552,18 @@ export const ChatSidebar = memo(function ChatSidebar({
     const isActive = chat.id === activeChatId;
     const isRenaming = renamingChatId === chat.id;
     const isGenerating = generatingChatIds.includes(chat.id);
-    const hasCompletedGeneration = !isActive && completedGenerationChatIds.includes(chat.id);
+    const hasCompletedGeneration =
+      !isActive && completedGenerationChatIds.includes(chat.id);
     const isGeneratingTitle = titleGenerationChatIds.includes(chat.id);
     const isChatOptionsOpen = openChatOptionsChatId === chat.id;
     const isChatOptionsFocused = focusedChatOptionsChatId === chat.id;
     const isChatOptionsActive = isChatOptionsOpen || isChatOptionsFocused;
-    const showStatusIndicator = !isChatOptionsActive && (isGenerating || hasCompletedGeneration);
-    const relativeTimeLabel = formatRelativeChatActivityDate(getChatActivityDate(chat), relativeTimeNow);
+    const showStatusIndicator =
+      !isChatOptionsActive && (isGenerating || hasCompletedGeneration);
+    const relativeTimeLabel = formatRelativeChatActivityDate(
+      getChatActivityDate(chat),
+      relativeTimeNow,
+    );
     const fullDateLabel = formatChatActivityDate(getChatActivityDate(chat));
 
     return (
@@ -570,7 +621,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         {!isRenaming ? (
           <div className="relative h-7 w-9 shrink-0">
             {showStatusIndicator && isGenerating ? (
-              <Loader2 className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-3.5 -translate-x-1/2 -translate-y-1/2 animate-spin text-muted-foreground transition-none group-hover:opacity-0" />
+              <Loader2 className="pointer-events-none absolute left-[calc(50%+4px)] top-1/2 z-0 size-3.5 -translate-x-1/2 -translate-y-1/2 animate-spin text-muted-foreground transition-none group-hover:opacity-0" />
             ) : showStatusIndicator && hasCompletedGeneration ? (
               <span className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary transition-none group-hover:opacity-0" />
             ) : !isChatOptionsActive ? (
@@ -583,7 +634,9 @@ export const ChatSidebar = memo(function ChatSidebar({
             ) : null}
             <DropdownMenu
               open={isChatOptionsOpen}
-              onOpenChange={(open) => setOpenChatOptionsChatId(open ? chat.id : null)}
+              onOpenChange={(open) =>
+                setOpenChatOptionsChatId(open ? chat.id : null)
+              }
             >
               <DropdownMenuTrigger asChild>
                 <Button
@@ -592,7 +645,11 @@ export const ChatSidebar = memo(function ChatSidebar({
                   size="icon-sm"
                   className="absolute right-0 top-0 z-10 h-7 w-7 shrink-0 opacity-0 transition-none hover:bg-muted group-hover:opacity-100 focus:opacity-100 focus-visible:opacity-100 data-[state=open]:bg-muted data-[state=open]:opacity-100"
                   onFocus={() => setFocusedChatOptionsChatId(chat.id)}
-                  onBlur={() => setFocusedChatOptionsChatId((current) => (current === chat.id ? null : current))}
+                  onBlur={() =>
+                    setFocusedChatOptionsChatId((current) =>
+                      current === chat.id ? null : current,
+                    )
+                  }
                   onPointerDown={(event) => event.stopPropagation()}
                   onClick={(event) => event.stopPropagation()}
                   title="Chat options"
@@ -616,7 +673,11 @@ export const ChatSidebar = memo(function ChatSidebar({
                   Rename
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={isGenerating || isGeneratingTitle || chat.messages.length === 0}
+                  disabled={
+                    isGenerating ||
+                    isGeneratingTitle ||
+                    chat.messages.length === 0
+                  }
                   onSelect={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -657,14 +718,20 @@ export const ChatSidebar = memo(function ChatSidebar({
                       onToggleChatPinned(chat.id);
                     }}
                   >
-                    {chat.isPinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
+                    {chat.isPinned ? (
+                      <PinOff className="size-4" />
+                    ) : (
+                      <Pin className="size-4" />
+                    )}
                     {chat.isPinned ? "Unpin" : "Pin"}
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   variant="destructive"
-                  disabled={chat.messages.length === 0 && !chat.activeSkillNames?.length}
+                  disabled={
+                    chat.messages.length === 0 && !chat.activeSkillNames?.length
+                  }
                   onClick={(event) => {
                     event.stopPropagation();
                     onClearChat(chat.id);
@@ -693,11 +760,15 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   function renderFolder(folderInfo: SidebarFolder) {
     const { folder, chats: folderChats } = folderInfo;
-    const isFolderCollapsed = !isSearching && collapsedFolderIds[folder.id] === true;
+    const isFolderCollapsed =
+      !isSearching && collapsedFolderIds[folder.id] === true;
     const isRenamingFolder = renamingFolderId === folder.id;
-    const chatLimit = isSearching ? Number.POSITIVE_INFINITY : (folderChatLimits[folder.id] ?? FOLDER_CHAT_BATCH_SIZE);
+    const chatLimit = isSearching
+      ? Number.POSITIVE_INFINITY
+      : (folderChatLimits[folder.id] ?? FOLDER_CHAT_BATCH_SIZE);
     const visibleChats = folderChats.slice(0, chatLimit);
-    const hasMoreFolderChats = !isSearching && visibleChats.length < folderChats.length;
+    const hasMoreFolderChats =
+      !isSearching && visibleChats.length < folderChats.length;
     const isFolderOptionsOpen = openFolderOptionsFolderId === folder.id;
     const isDragOverFolder = dragOverFolderId === folder.id;
 
@@ -723,21 +794,34 @@ export const ChatSidebar = memo(function ChatSidebar({
           setDragOverFolderId(folder.id);
         }}
         onDragLeave={(event) => {
-          if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-          setDragOverFolderId((current) => (current === folder.id ? null : current));
+          if (event.currentTarget.contains(event.relatedTarget as Node | null))
+            return;
+          setDragOverFolderId((current) =>
+            current === folder.id ? null : current,
+          );
         }}
         onDrop={(event) => handleFolderDrop(event, folder.id)}
       >
         <div
           className={cn(
             "group/folder flex min-w-0 items-center gap-1 rounded-sm px-1 py-0.5 text-muted-foreground transition-none hover:bg-muted/60 hover:text-foreground",
-            isDragOverFolder ? "rounded-none bg-accent text-accent-foreground" : undefined,
+            isDragOverFolder
+              ? "rounded-none bg-accent text-accent-foreground"
+              : undefined,
           )}
         >
           {isRenamingFolder ? (
             <div className="flex min-w-0 flex-1 items-center gap-1.5">
-              {isFolderCollapsed ? <ChevronRight className="size-3.5 shrink-0" /> : <ChevronDown className="size-3.5 shrink-0" />}
-              {isFolderCollapsed ? <Folder className="size-4 shrink-0" /> : <FolderOpen className="size-4 shrink-0" />}
+              {isFolderCollapsed ? (
+                <ChevronRight className="size-3.5 shrink-0" />
+              ) : (
+                <ChevronDown className="size-3.5 shrink-0" />
+              )}
+              {isFolderCollapsed ? (
+                <Folder className="size-4 shrink-0" />
+              ) : (
+                <FolderOpen className="size-4 shrink-0" />
+              )}
               <FolderNameInput
                 key={folder.id}
                 initialName={folder.name}
@@ -753,9 +837,19 @@ export const ChatSidebar = memo(function ChatSidebar({
               onClick={() => toggleFolder(folder.id)}
               title={folder.name}
             >
-              {isFolderCollapsed ? <ChevronRight className="size-3.5 shrink-0" /> : <ChevronDown className="size-3.5 shrink-0" />}
-              {isFolderCollapsed ? <Folder className="size-4 shrink-0" /> : <FolderOpen className="size-4 shrink-0" />}
-              <span className="truncate text-base leading-6">{folder.name}</span>
+              {isFolderCollapsed ? (
+                <ChevronRight className="size-3.5 shrink-0" />
+              ) : (
+                <ChevronDown className="size-3.5 shrink-0" />
+              )}
+              {isFolderCollapsed ? (
+                <Folder className="size-4 shrink-0" />
+              ) : (
+                <FolderOpen className="size-4 shrink-0" />
+              )}
+              <span className="truncate text-base leading-6">
+                {folder.name}
+              </span>
             </button>
           )}
           {!isRenamingFolder ? (
@@ -775,7 +869,9 @@ export const ChatSidebar = memo(function ChatSidebar({
               </Button>
               <DropdownMenu
                 open={isFolderOptionsOpen}
-                onOpenChange={(open) => setOpenFolderOptionsFolderId(open ? folder.id : null)}
+                onOpenChange={(open) =>
+                  setOpenFolderOptionsFolderId(open ? folder.id : null)
+                }
               >
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -808,7 +904,10 @@ export const ChatSidebar = memo(function ChatSidebar({
                     Rename folder
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" onClick={() => setDeleteFolderTarget(folder)}>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => setDeleteFolderTarget(folder)}
+                  >
                     <Trash2 className="size-4" />
                     Delete folder
                   </DropdownMenuItem>
@@ -822,7 +921,9 @@ export const ChatSidebar = memo(function ChatSidebar({
           <div className="grid gap-[1px] pb-1 pl-5">
             {visibleChats.map(renderChatRow)}
             {folderChats.length === 0 && !isSearching ? (
-              <div className="px-2 py-1 text-base leading-6 text-muted-foreground">No chats</div>
+              <div className="px-2 py-1 text-base leading-6 text-muted-foreground">
+                No chats
+              </div>
             ) : null}
             {hasMoreFolderChats ? (
               <button
@@ -839,15 +940,22 @@ export const ChatSidebar = memo(function ChatSidebar({
     );
   }
 
-  function renderChatSection(label: string, sectionChats: ChatSession[], options?: { droppable?: boolean }) {
-    if (sectionChats.length === 0 && (!options?.droppable || isSearching)) return null;
+  function renderChatSection(
+    label: string,
+    sectionChats: ChatSession[],
+    options?: { droppable?: boolean },
+  ) {
+    if (sectionChats.length === 0 && (!options?.droppable || isSearching))
+      return null;
 
     return (
       <section
         key={label}
         className={cn(
           "grid gap-1.5 rounded-none transition-none",
-          options?.droppable && isRootChatsDragOver ? "bg-accent/60 ring-1 ring-primary/30" : undefined,
+          options?.droppable && isRootChatsDragOver
+            ? "bg-accent/60 ring-1 ring-primary/30"
+            : undefined,
         )}
         onDragEnter={
           options?.droppable
@@ -874,7 +982,12 @@ export const ChatSidebar = memo(function ChatSidebar({
         onDragLeave={
           options?.droppable
             ? (event) => {
-                if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+                if (
+                  event.currentTarget.contains(
+                    event.relatedTarget as Node | null,
+                  )
+                )
+                  return;
                 setIsRootChatsDragOver(false);
               }
             : undefined
@@ -885,7 +998,9 @@ export const ChatSidebar = memo(function ChatSidebar({
         <div className="grid gap-[1px]">
           {sectionChats.map(renderChatRow)}
           {sectionChats.length === 0 ? (
-            <div className="px-2 py-1 text-base leading-6 text-muted-foreground">No chats</div>
+            <div className="px-2 py-1 text-base leading-6 text-muted-foreground">
+              No chats
+            </div>
           ) : null}
         </div>
       </section>
@@ -917,7 +1032,9 @@ export const ChatSidebar = memo(function ChatSidebar({
             <div className="min-w-0 flex-1">
               <h1 className="flex min-w-0 items-baseline gap-1 truncate text-base font-semibold leading-6">
                 <span className="truncate">{appName}</span>
-                <span className="shrink-0 text-muted-foreground">{appVersionLabel}</span>
+                <span className="shrink-0 text-muted-foreground">
+                  {appVersionLabel}
+                </span>
               </h1>
             </div>
 
@@ -947,7 +1064,10 @@ export const ChatSidebar = memo(function ChatSidebar({
           </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-2 chat-scrollbar" onScroll={handleChatListScroll}>
+        <div
+          className="min-h-0 flex-1 overflow-y-auto p-2 chat-scrollbar"
+          onScroll={handleChatListScroll}
+        >
           <div className="grid gap-3">
             {filteredChatList.folders.length > 0 || !isSearching ? (
               <section className="grid gap-1.5">
@@ -977,14 +1097,22 @@ export const ChatSidebar = memo(function ChatSidebar({
                     />
                   ) : null}
                   {visibleFolders.map(renderFolder)}
-                  {filteredChatList.folders.length === 0 && !isSearching && !isCreatingFolder ? (
-                    <div className="px-2 py-1 text-base leading-6 text-muted-foreground">No folders</div>
+                  {filteredChatList.folders.length === 0 &&
+                  !isSearching &&
+                  !isCreatingFolder ? (
+                    <div className="px-2 py-1 text-base leading-6 text-muted-foreground">
+                      No folders
+                    </div>
                   ) : null}
                   {hasMoreFolders ? (
                     <button
                       type="button"
                       className="px-2 py-1 text-left text-base leading-6 text-muted-foreground transition-none hover:bg-muted/60 hover:text-foreground"
-                      onClick={() => setVisibleFolderLimit((current) => current + FOLDER_BATCH_SIZE)}
+                      onClick={() =>
+                        setVisibleFolderLimit(
+                          (current) => current + FOLDER_BATCH_SIZE,
+                        )
+                      }
                     >
                       Show more
                     </button>
@@ -994,12 +1122,18 @@ export const ChatSidebar = memo(function ChatSidebar({
             ) : null}
 
             {renderChatSection("Pinned", filteredChatList.pinnedChats)}
-            {renderChatSection("Chats", filteredChatList.rootChats, { droppable: true })}
+            {renderChatSection("Chats", filteredChatList.rootChats, {
+              droppable: true,
+            })}
             {filteredChatList.filteredChatCount === 0 ? (
-              <div className="px-2 py-6 text-center text-sm leading-5 text-muted-foreground">No chats found.</div>
+              <div className="px-2 py-6 text-center text-sm leading-5 text-muted-foreground">
+                No chats found.
+              </div>
             ) : null}
             {hasMoreChats ? (
-              <div className="px-2 pb-1 text-center text-sm leading-5 text-muted-foreground">Scroll to load more chats</div>
+              <div className="px-2 pb-1 text-center text-sm leading-5 text-muted-foreground">
+                Scroll to load more chats
+              </div>
             ) : null}
           </div>
         </div>
@@ -1042,12 +1176,16 @@ export const ChatSidebar = memo(function ChatSidebar({
         </div>
       ) : null}
 
-      <AlertDialog open={Boolean(deleteFolderTarget)} onOpenChange={(open) => !open && setDeleteFolderTarget(null)}>
+      <AlertDialog
+        open={Boolean(deleteFolderTarget)}
+        onOpenChange={(open) => !open && setDeleteFolderTarget(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete folder?</AlertDialogTitle>
             <AlertDialogDescription>
-              Choose what should happen to chats inside “{deleteFolderTarget?.name ?? "this folder"}”.
+              Choose what should happen to chats inside “
+              {deleteFolderTarget?.name ?? "this folder"}”.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1055,7 +1193,8 @@ export const ChatSidebar = memo(function ChatSidebar({
             <AlertDialogAction
               className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
               onClick={() => {
-                if (deleteFolderTarget) onDeleteFolder(deleteFolderTarget.id, "move");
+                if (deleteFolderTarget)
+                  onDeleteFolder(deleteFolderTarget.id, "move");
                 setDeleteFolderTarget(null);
               }}
             >
@@ -1064,7 +1203,8 @@ export const ChatSidebar = memo(function ChatSidebar({
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
-                if (deleteFolderTarget) onDeleteFolder(deleteFolderTarget.id, "delete");
+                if (deleteFolderTarget)
+                  onDeleteFolder(deleteFolderTarget.id, "delete");
                 setDeleteFolderTarget(null);
               }}
             >
