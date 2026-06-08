@@ -14,14 +14,13 @@ import {
   ATTACHMENT_LIMITS,
   estimateAttachmentTokens,
 } from "../src/lib/ai-chat/attachment-limits";
-import { isFileToolName } from "../src/lib/ai-chat/file-tool-names";
+import { BASH_TOOL_NAME, isFileToolName } from "../src/lib/ai-chat/file-tool-names";
 import type { AttachmentKind, ChatAttachment, ChatFolder, ChatWorkspaceRoot } from "../src/lib/ai-chat/types";
 import {
   runChatCompletion,
   streamChatCompletion,
   type AdapterStreamEvent,
 } from "./ai-sdk-client";
-import { executeFileTool } from "./file-tools";
 import {
   buildLoadedMcpTools,
   executeMcpTool,
@@ -39,8 +38,7 @@ import {
   type JsonRecord,
   type ToolExecutionContext,
 } from "./tool-utils";
-import { executeTerminalExecTool } from "./terminal-tool";
-import { TERMINAL_EXEC_TOOL_NAME } from "../src/lib/ai-chat/terminal-tool";
+import { executePiTool } from "./pi-tools";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
@@ -204,8 +202,14 @@ type SkillDefinition = {
   description: string;
   instructions: string;
   recommendedToolNames: string[];
-  // Absolute path to the skill folder. Derived at load time, never persisted.
   directoryPath?: string;
+  manifestPath?: string;
+  manifestContent?: string;
+  disableModelInvocation?: boolean;
+  source?: string;
+  sourceKind?: "global" | "workspace";
+  sourcePath?: string;
+  shadowed?: boolean;
 };
 
 type PublicSkillDefinition = SkillDefinition;
@@ -235,24 +239,18 @@ type ToolsSettings = {
   taskToolsEnabled: boolean;
   loadSkillEnabled: boolean;
   webFetchEnabled: boolean;
-  terminalExecEnabled: boolean;
-  fileReadEnabled: boolean;
-  fileFindEnabled: boolean;
-  fileSearchTextEnabled: boolean;
-  fileReplaceTextEnabled: boolean;
-  fileCreateEnabled: boolean;
-  fileDeleteEnabled: boolean;
-  archiveExtractEnabled: boolean;
-  archiveCreateEnabled: boolean;
-  documentConvertEnabled: boolean;
-  chatFileCreateEnabled: boolean;
-  fileReplaceTextAutoApproveEnabled: boolean;
-  fileCreateAutoApproveEnabled: boolean;
-  fileDeleteAutoApproveEnabled: boolean;
+  readEnabled: boolean;
+  bashEnabled: boolean;
+  editEnabled: boolean;
+  writeEnabled: boolean;
+  readAutoApproveEnabled: boolean;
+  bashAutoApproveEnabled: boolean;
+  editAutoApproveEnabled: boolean;
+  writeAutoApproveEnabled: boolean;
 };
 
 type SkillsSettings = {
-  enabled: boolean;
+  enabled?: boolean;
 };
 
 type AgentsSettings = {
@@ -348,22 +346,16 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
   askUserEnabled: true,
   taskToolsEnabled: true,
-  loadSkillEnabled: true,
+  loadSkillEnabled: false,
   webFetchEnabled: false,
-  terminalExecEnabled: false,
-  fileReadEnabled: true,
-  fileFindEnabled: true,
-  fileSearchTextEnabled: true,
-  fileReplaceTextEnabled: false,
-  fileCreateEnabled: true,
-  fileDeleteEnabled: false,
-  archiveExtractEnabled: true,
-  archiveCreateEnabled: true,
-  documentConvertEnabled: true,
-  chatFileCreateEnabled: true,
-  fileReplaceTextAutoApproveEnabled: false,
-  fileCreateAutoApproveEnabled: false,
-  fileDeleteAutoApproveEnabled: false,
+  readEnabled: true,
+  bashEnabled: true,
+  editEnabled: true,
+  writeEnabled: true,
+  readAutoApproveEnabled: false,
+  bashAutoApproveEnabled: false,
+  editAutoApproveEnabled: false,
+  writeAutoApproveEnabled: false,
 };
 const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   enabled: true,
@@ -516,81 +508,40 @@ async function readUpstreamJson(response: Response) {
   }
 }
 
+function readBooleanSetting(value: unknown, fallback: boolean) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 function normalizeToolsSettings(value: unknown): ToolsSettings {
   if (!isPlainObject(value)) return DEFAULT_TOOLS_SETTINGS;
 
   const legacyChecklistWriteEnabled = value.checklistWriteEnabled;
 
   return {
-    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
-    askUserEnabled:
-      typeof value.askUserEnabled === "boolean" ? value.askUserEnabled : true,
+    enabled: readBooleanSetting(value.enabled, true),
+    askUserEnabled: readBooleanSetting(value.askUserEnabled, true),
     taskToolsEnabled:
       typeof value.taskToolsEnabled === "boolean"
         ? value.taskToolsEnabled
         : typeof legacyChecklistWriteEnabled === "boolean"
           ? legacyChecklistWriteEnabled
           : true,
-    loadSkillEnabled:
-      typeof value.loadSkillEnabled === "boolean"
-        ? value.loadSkillEnabled
-        : true,
-    webFetchEnabled:
-      typeof value.webFetchEnabled === "boolean"
-        ? value.webFetchEnabled
-        : false,
-    terminalExecEnabled:
-      typeof value.terminalExecEnabled === "boolean"
-        ? value.terminalExecEnabled
-        : false,
-    fileReadEnabled:
-      typeof value.fileReadEnabled === "boolean" ? value.fileReadEnabled : true,
-    fileFindEnabled:
-      typeof value.fileFindEnabled === "boolean" ? value.fileFindEnabled : true,
-    fileSearchTextEnabled:
-      typeof value.fileSearchTextEnabled === "boolean"
-        ? value.fileSearchTextEnabled
-        : true,
-    fileReplaceTextEnabled:
-      typeof value.fileReplaceTextEnabled === "boolean"
-        ? value.fileReplaceTextEnabled
-        : false,
-    fileCreateEnabled:
-      typeof value.fileCreateEnabled === "boolean"
-        ? value.fileCreateEnabled
-        : true,
-    fileDeleteEnabled:
-      typeof value.fileDeleteEnabled === "boolean"
-        ? value.fileDeleteEnabled
-        : false,
-    archiveExtractEnabled:
-      typeof value.archiveExtractEnabled === "boolean"
-        ? value.archiveExtractEnabled
-        : true,
-    archiveCreateEnabled:
-      typeof value.archiveCreateEnabled === "boolean"
-        ? value.archiveCreateEnabled
-        : true,
-    documentConvertEnabled:
-      typeof value.documentConvertEnabled === "boolean"
-        ? value.documentConvertEnabled
-        : true,
-    chatFileCreateEnabled:
-      typeof value.chatFileCreateEnabled === "boolean"
-        ? value.chatFileCreateEnabled
-        : true,
-    fileReplaceTextAutoApproveEnabled:
-      typeof value.fileReplaceTextAutoApproveEnabled === "boolean"
-        ? value.fileReplaceTextAutoApproveEnabled
-        : false,
-    fileCreateAutoApproveEnabled:
-      typeof value.fileCreateAutoApproveEnabled === "boolean"
-        ? value.fileCreateAutoApproveEnabled
-        : false,
-    fileDeleteAutoApproveEnabled:
-      typeof value.fileDeleteAutoApproveEnabled === "boolean"
-        ? value.fileDeleteAutoApproveEnabled
-        : false,
+    loadSkillEnabled: false,
+    webFetchEnabled: readBooleanSetting(value.webFetchEnabled, false),
+    readEnabled: readBooleanSetting(value.readEnabled ?? value.fileReadEnabled, true),
+    bashEnabled: readBooleanSetting(value.bashEnabled ?? value.terminalExecEnabled, true),
+    editEnabled: readBooleanSetting(value.editEnabled ?? value.fileReplaceTextEnabled, true),
+    writeEnabled: readBooleanSetting(value.writeEnabled ?? value.fileCreateEnabled, true),
+    readAutoApproveEnabled: readBooleanSetting(value.readAutoApproveEnabled, false),
+    bashAutoApproveEnabled: readBooleanSetting(value.bashAutoApproveEnabled, false),
+    editAutoApproveEnabled: readBooleanSetting(
+      value.editAutoApproveEnabled ?? value.fileReplaceTextAutoApproveEnabled,
+      false,
+    ),
+    writeAutoApproveEnabled: readBooleanSetting(
+      value.writeAutoApproveEnabled ?? value.fileCreateAutoApproveEnabled,
+      false,
+    ),
   };
 }
 
@@ -787,13 +738,23 @@ function normalizeSkillDefinition(candidate: unknown): SkillDefinition {
 
   return {
     name,
-    enabled: typeof source.enabled === "boolean" ? source.enabled : true,
+    enabled: true,
     description,
     instructions,
     recommendedToolNames: safeStringArray(source.recommendedToolNames)
       .map((item) => item.trim())
       .filter(Boolean),
     directoryPath: safeString(source.directoryPath).trim() || undefined,
+    manifestPath: safeString(source.manifestPath).trim() || undefined,
+    manifestContent: safeString(source.manifestContent),
+    disableModelInvocation: source.disableModelInvocation === true,
+    source: safeString(source.source).trim() || undefined,
+    sourceKind: (() => {
+      const value = safeString(source.sourceKind).trim();
+      return value === "global" || value === "workspace" ? value : undefined;
+    })(),
+    sourcePath: safeString(source.sourcePath).trim() || undefined,
+    shadowed: source.shadowed === true,
   };
 }
 
@@ -804,13 +765,11 @@ function validateSkillDefinition(skill: SkillDefinition) {
       "Skill name must use only letters, numbers, underscores, or hyphens.",
     );
   }
-  if (skill.name === "load_skill") {
+  if (skill.name === "skill") {
     throw new Error(
-      "load_skill is a built-in tool name and cannot be used by a skill.",
+      "skill is a built-in tool name and cannot be used by a skill.",
     );
   }
-  if (!skill.description) throw new Error("Skill description is required.");
-  if (!skill.instructions) throw new Error("Skill instructions are required.");
 }
 
 function toPublicSkill(skill: SkillDefinition): PublicSkillDefinition {
@@ -1674,12 +1633,8 @@ async function executeToolManifest(
     return executeWebFetchTool(args, context.signal);
   }
 
-  if (toolName === TERMINAL_EXEC_TOOL_NAME) {
-    return executeTerminalExecTool(args, context);
-  }
-
   if (isFileToolName(toolName)) {
-    return executeFileTool(toolName, args, context);
+    return executePiTool(toolName, args, context);
   }
 
   const tools = await loadJsonTools();
@@ -3503,7 +3458,7 @@ function validateImportedToolDefinition(tool: ToolDefinition) {
   if (
     tool.name === "ask_user" ||
     tool.name === "checklist_write" ||
-    tool.name === "load_skill" ||
+    tool.name === "skill" ||
     tool.name === WEB_FETCH_TOOL_NAME ||
     isFileToolName(tool.name)
   ) {
@@ -3724,40 +3679,28 @@ async function openJsonToolsFolder() {
 }
 
 // ---------------------------------------------------------------------------
-// Skill storage — folder-per-skill SKILL.md (Agent Skills standard layout).
+// Readonly skill discovery.
 //
-// On disk each skill is a folder:  skills/<readable-name>/SKILL.md  (+ optional
-// scripts/ references/ templates/ assets/). SKILL.md carries YAML frontmatter
-// (name, description, allowed-tools) plus one app extension that standard
-// parsers ignore: `enabled`. Skill names are unique and act as skill identity.
-// Legacy `id` frontmatter is ignored and is not written back on save/export.
-//   instructions      <-> SKILL.md markdown body
-//   recommendedToolNames <-> frontmatter `allowed-tools`
+// Skills are filesystem folders with SKILL.md. Chat Forge does not edit or
+// enable/disable them. It discovers the global ~/.agents/skills folder plus the
+// selected workspace .agents/skills fallback, shows SKILL.md readonly,
+// advertises metadata to the model, and loads skill content through the
+// built-in skill tool.
 // ---------------------------------------------------------------------------
 
 const SKILL_MANIFEST_FILENAME = "SKILL.md";
-const LEGACY_SKILL_BACKUP_DIR = "_legacy-json";
 
 type SkillFolderRecord = {
   skill: SkillDefinition;
-  folderName: string;
   folderPath: string;
+  manifestPath: string;
 };
 
 type SkillFrontmatter = {
   name?: string;
   description?: string;
-  enabled?: boolean;
-  allowedTools?: string[];
+  disableModelInvocation?: boolean;
 };
-
-function oneLine(value: string) {
-  return value.replace(/\s*\n\s*/g, " ").trim();
-}
-
-function quoteYamlString(value: string) {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-}
 
 function unquoteYamlString(value: string) {
   const trimmed = value.trim();
@@ -3776,569 +3719,187 @@ function parseSkillManifest(content: string): {
 } {
   const normalized = content.replace(/\r\n/g, "\n").replace(/^\uFEFF/, "");
   const match = /^---\n([\s\S]*?)\n---\n?/.exec(normalized);
-  if (!match) {
-    return { frontmatter: {}, body: normalized.trim() };
-  }
+  if (!match) return { frontmatter: {}, body: normalized.trim() };
 
-  const body = normalized.slice(match[0].length).trim();
   const frontmatter: SkillFrontmatter = {};
-  let collectingTools = false;
-
   for (const rawLine of match[1].split("\n")) {
-    if (!rawLine.trim()) continue;
-
-    const listItem = /^\s*-\s+(.*)$/.exec(rawLine);
-    if (listItem && collectingTools) {
-      const item = unquoteYamlString(listItem[1]).trim();
-      if (item) (frontmatter.allowedTools ??= []).push(item);
-      continue;
-    }
-
     const keyValue = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(rawLine);
     if (!keyValue) continue;
 
     const key = keyValue[1].trim();
-    const value = keyValue[2].trim();
-    collectingTools = false;
-
-    if (key === "id") {
-      // Legacy skill ids are ignored. Skill names are the unique identifier.
-      continue;
-    } else if (key === "name") {
-      frontmatter.name = unquoteYamlString(value);
-    } else if (key === "description") {
-      frontmatter.description = unquoteYamlString(value);
-    } else if (key === "enabled") {
-      frontmatter.enabled = unquoteYamlString(value).toLowerCase() !== "false";
-    } else if (key === "allowed-tools" || key === "allowedTools") {
-      if (!value) {
-        collectingTools = true;
-        frontmatter.allowedTools ??= [];
-      } else {
-        frontmatter.allowedTools = value
-          .replace(/^\[/, "")
-          .replace(/\]$/, "")
-          .split(",")
-          .map((item) => unquoteYamlString(item).trim())
-          .filter(Boolean);
-      }
+    const value = unquoteYamlString(keyValue[2].trim());
+    if (key === "name") frontmatter.name = value;
+    else if (key === "description") frontmatter.description = value;
+    else if (key === "disable-model-invocation") {
+      frontmatter.disableModelInvocation = value.toLowerCase() === "true";
     }
   }
 
-  return { frontmatter, body };
+  return { frontmatter, body: normalized.slice(match[0].length).trim() };
 }
 
-function serializeSkillManifest(skill: SkillDefinition): string {
-  const lines: string[] = ["---", `name: ${skill.name}`];
-  lines.push(`description: ${quoteYamlString(oneLine(skill.description))}`);
-
-  if (skill.recommendedToolNames.length > 0) {
-    lines.push("allowed-tools:");
-    for (const toolName of skill.recommendedToolNames) {
-      lines.push(`  - ${toolName}`);
-    }
-  }
-  if (!skill.enabled) lines.push("enabled: false");
-
-  lines.push("---", "", skill.instructions.trim(), "");
-  return lines.join("\n");
+function normalizeSkillName(value: string) {
+  return value.trim();
 }
 
 function buildSkillFromManifest(
-  folderName: string,
+  folderPath: string,
   content: string,
+  sourceKind: "global" | "workspace",
+  sourcePath: string,
 ): SkillDefinition {
   const { frontmatter, body } = parseSkillManifest(content);
+  const manifestPath = path.join(folderPath, SKILL_MANIFEST_FILENAME);
+  const name = normalizeSkillName(frontmatter.name || path.basename(folderPath));
+
   return normalizeSkillDefinition({
-    name: frontmatter.name || folderName,
+    name,
+    enabled: true,
     description: frontmatter.description ?? "",
     instructions: body,
-    enabled: frontmatter.enabled ?? true,
-    recommendedToolNames: frontmatter.allowedTools ?? [],
+    recommendedToolNames: [],
+    directoryPath: folderPath,
+    manifestPath,
+    manifestContent: content,
+    disableModelInvocation: frontmatter.disableModelInvocation === true,
+    sourceKind,
+    sourcePath,
+    source: sourceKind === "global" ? "Global" : "Workspace",
   });
 }
 
-function isReservedSkillDirName(name: string) {
-  return name.startsWith(".") || name.startsWith("_");
+function getGlobalSkillSearchDirs() {
+  return [path.join(app.getPath("home"), ".agents", "skills")];
 }
 
-function uniqueSkillFolderName(baseName: string, taken: Set<string>) {
-  const base = sanitizeFileNamePart(baseName || "skill");
-  if (!taken.has(base)) return base;
+function getWorkspaceSkillSearchDirs(workspaceRootsValue: unknown) {
+  const dirs: string[] = [];
+  const roots = normalizeWorkspaceRoots(workspaceRootsValue);
 
-  let index = 1;
-  let candidate = `${base}-${index}`;
-  while (taken.has(candidate)) {
-    index += 1;
-    candidate = `${base}-${index}`;
+  for (const root of roots.slice(0, 1)) {
+    const rootPath = root.path.trim();
+    if (!rootPath) continue;
+
+    dirs.push(path.join(rootPath, ".agents", "skills"));
   }
-  return candidate;
+
+  return dirs;
 }
 
-async function readSkillManifestContent(
+function uniqueStrings(values: string[]) {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    const normalized = path.resolve(value);
+    const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+async function tryReadSkillFolder(
   folderPath: string,
-): Promise<string | undefined> {
+  sourceKind: "global" | "workspace",
+  sourcePath: string,
+): Promise<SkillFolderRecord | undefined> {
+  const manifestPath = path.join(folderPath, SKILL_MANIFEST_FILENAME);
+  let content: string;
   try {
-    return await fs.readFile(
-      path.join(folderPath, SKILL_MANIFEST_FILENAME),
-      "utf8",
-    );
+    content = await fs.readFile(manifestPath, "utf8");
   } catch (error) {
-    const code =
-      typeof error === "object" && error && "code" in error
-        ? (error as { code?: string }).code
-        : undefined;
-    if (code === "ENOENT") return undefined;
+    const code = typeof error === "object" && error && "code" in error ? (error as { code?: string }).code : undefined;
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
     throw error;
   }
+
+  const skill = buildSkillFromManifest(folderPath, content, sourceKind, sourcePath);
+  if (!skill.name) return undefined;
+  return { skill, folderPath, manifestPath };
 }
 
-async function readSkillFolderRecords(): Promise<SkillFolderRecord[]> {
-  const skillsDir = getStoragePaths().skillsDir;
-  await fs.mkdir(skillsDir, { recursive: true });
-  const entries = await fs.readdir(skillsDir, { withFileTypes: true });
+async function discoverSkillsInDir(searchDir: string, sourceKind: "global" | "workspace"): Promise<SkillFolderRecord[]> {
   const records: SkillFolderRecord[] = [];
+  try {
+    const rootRecord = await tryReadSkillFolder(searchDir, sourceKind, searchDir);
+    if (rootRecord) records.push(rootRecord);
 
-  for (const entry of entries) {
-    if (!entry.isDirectory() || isReservedSkillDirName(entry.name)) continue;
-
-    const folderPath = path.join(skillsDir, entry.name);
-    let content: string | undefined;
-    try {
-      content = await readSkillManifestContent(folderPath);
-    } catch (error) {
-      console.error(`Failed to read skill manifest in ${entry.name}:`, error);
-      continue;
+    const entries = await fs.readdir(searchDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      const record = await tryReadSkillFolder(path.join(searchDir, entry.name), sourceKind, searchDir);
+      if (record) records.push(record);
     }
-    if (content === undefined) continue;
-
-    // Only expose the folder path when the skill bundles files beyond
-    // SKILL.md (e.g. references/), so pure-instruction skills add no noise.
-    const folderEntries = await fs.readdir(folderPath);
-    const hasBundledFiles = folderEntries.some(
-      (name) => name !== SKILL_MANIFEST_FILENAME,
-    );
-    const skill = {
-      ...buildSkillFromManifest(entry.name, content),
-      directoryPath: hasBundledFiles ? folderPath : undefined,
-    };
-    try {
-      validateSkillDefinition(skill);
-      records.push({ skill, folderName: entry.name, folderPath });
-    } catch (error) {
-      console.error(`Invalid skill manifest in ${entry.name}:`, error);
-    }
+  } catch (error) {
+    const code = typeof error === "object" && error && "code" in error ? (error as { code?: string }).code : undefined;
+    if (code === "ENOENT" || code === "ENOTDIR") return [];
+    console.error(`Failed to discover skills in ${searchDir}:`, error);
   }
-
   return records;
 }
 
-async function writeSkillManifest(folderPath: string, skill: SkillDefinition) {
-  await fs.mkdir(folderPath, { recursive: true });
-  const manifestPath = path.join(folderPath, SKILL_MANIFEST_FILENAME);
-  const tempPath = `${manifestPath}.${process.pid}.${Date.now()}.tmp`;
-  await fs.writeFile(tempPath, serializeSkillManifest(skill), "utf8");
-  await fs.rename(tempPath, manifestPath);
-}
+async function loadJsonSkills(request?: unknown) {
+  const workspaceRoots = isPlainObject(request) ? request.workspaceRoots : undefined;
+  const globalDirs = uniqueStrings(getGlobalSkillSearchDirs());
+  const workspaceDirs = uniqueStrings(getWorkspaceSkillSearchDirs(workspaceRoots));
 
-async function removeSkillFolder(folderPath: string) {
-  await fs.rm(folderPath, { recursive: true, force: true });
-}
-
-async function migrateLegacySkillJsonFiles() {
-  const skillsDir = getStoragePaths().skillsDir;
-  await fs.mkdir(skillsDir, { recursive: true });
-  const entries = await fs.readdir(skillsDir, { withFileTypes: true });
-
-  const legacyFiles = entries.filter(
-    (entry) => entry.isFile() && entry.name.endsWith(".json"),
-  );
-  if (legacyFiles.length === 0) return;
-
-  const takenFolders = new Set(
-    entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
-  );
-  const backupDir = path.join(skillsDir, LEGACY_SKILL_BACKUP_DIR);
-
-  for (const entry of legacyFiles) {
-    const filePath = path.join(skillsDir, entry.name);
-    const raw = await readJsonFile<unknown>(filePath, undefined);
-    if (raw === undefined) continue;
-
-    const skill = normalizeSkillDefinition(raw);
-    try {
-      validateSkillDefinition(skill);
-    } catch (error) {
-      console.error(`Skipping legacy skill ${entry.name}:`, error);
-      continue;
-    }
-
-    const folderName = uniqueSkillFolderName(skill.name, takenFolders);
-    takenFolders.add(folderName);
-    await writeSkillManifest(path.join(skillsDir, folderName), skill);
-
-    try {
-      await fs.mkdir(backupDir, { recursive: true });
-      await fs.rename(filePath, path.join(backupDir, entry.name));
-    } catch (error) {
-      console.error(`Failed to back up legacy skill ${entry.name}:`, error);
-    }
+  const globalRecords: SkillFolderRecord[] = [];
+  const workspaceRecords: SkillFolderRecord[] = [];
+  for (const searchDir of globalDirs) {
+    globalRecords.push(...(await discoverSkillsInDir(searchDir, "global")));
   }
+  for (const searchDir of workspaceDirs) {
+    workspaceRecords.push(...(await discoverSkillsInDir(searchDir, "workspace")));
+  }
+
+  const workspaceSkillNames = new Set(workspaceRecords.map((record) => record.skill.name));
+  const allSkills = [
+    ...globalRecords.map((record) => ({
+      ...record.skill,
+      shadowed: workspaceSkillNames.has(record.skill.name),
+    })),
+    ...workspaceRecords.map((record) => ({ ...record.skill, shadowed: false })),
+  ];
+
+  return allSkills
+    .sort((left, right) => {
+      const sourceOrder = (left.sourceKind === "global" ? 0 : 1) - (right.sourceKind === "global" ? 0 : 1);
+      if (sourceOrder !== 0) return sourceOrder;
+      return left.name.localeCompare(right.name);
+    })
+    .map(toPublicSkill);
 }
 
-async function loadJsonSkills() {
-  await initializeJsonStorageIfNeeded();
-  await migrateLegacySkillJsonFiles();
-
-  const records = await readSkillFolderRecords();
-  const skills = records.map((record) => record.skill);
-  skills.sort((left, right) => left.name.localeCompare(right.name));
-  return skills.map(toPublicSkill);
+async function saveJsonSkill(..._args: unknown[]) {
+  throw new Error("Skills are readonly. Edit SKILL.md in the skills folder.");
 }
 
-async function saveJsonSkill(value: unknown, previousNameValue?: unknown) {
-  const skill = normalizeSkillDefinition(value);
-  validateSkillDefinition(skill);
-  const previousName = safeString(previousNameValue).trim();
-
-  let savedDirectoryPath = skill.directoryPath;
-  await queueStorageWrite(async () => {
-    await initializeJsonStorageIfNeeded();
-    await migrateLegacySkillJsonFiles();
-
-    const skillsDir = getStoragePaths().skillsDir;
-    const records = await readSkillFolderRecords();
-    const existing = previousName
-      ? records.find((record) => record.skill.name === previousName)
-      : records.find((record) => record.skill.name === skill.name);
-
-    const duplicate = records.find(
-      (record) =>
-        record !== existing && record.skill.name === skill.name,
-    );
-    if (duplicate)
-      throw new Error(`Another skill already uses the name: ${skill.name}`);
-
-    const taken = new Set(
-      records
-        .filter((record) => record !== existing)
-        .map((record) => record.folderName),
-    );
-
-    const desired = sanitizeFileNamePart(skill.name);
-    let folderName = existing ? existing.folderName : "";
-    if (!folderName || (folderName !== desired && !taken.has(desired))) {
-      folderName = uniqueSkillFolderName(skill.name, taken);
-    }
-
-    const folderPath = path.join(skillsDir, folderName);
-    if (existing && existing.folderName !== folderName) {
-      await removeSkillFolder(folderPath);
-      await fs.cp(existing.folderPath, folderPath, { recursive: true });
-    }
-    await writeSkillManifest(folderPath, skill);
-    if (existing && existing.folderName !== folderName) {
-      await removeSkillFolder(existing.folderPath);
-    }
-    savedDirectoryPath = folderPath;
-  });
-
-  return { ...skill, directoryPath: savedDirectoryPath };
-}
-
-async function deleteJsonSkill(skillNameValue: unknown) {
-  const name = safeString(skillNameValue).trim();
-  if (!name) return;
-
-  await queueStorageWrite(async () => {
-    await initializeJsonStorageIfNeeded();
-    const records = await readSkillFolderRecords();
-    for (const record of records) {
-      if (record.skill.name === name) await removeSkillFolder(record.folderPath);
-    }
-  });
+async function deleteJsonSkill(..._args: unknown[]) {
+  throw new Error("Skills are readonly. Delete the skill folder from the filesystem.");
 }
 
 function createEmptySkillImportResult(cancelled: boolean): SkillImportResult {
-  return {
-    cancelled,
-    imported: 0,
-    updated: 0,
-    skipped: [],
-    invalid: [],
-    renamed: [],
-  };
-}
-
-function createUniqueImportedSkillName(
-  baseName: string,
-  existingNames: Set<string>,
-) {
-  let index = 1;
-  let candidate = `${baseName}_${index}`;
-  while (existingNames.has(candidate)) {
-    index += 1;
-    candidate = `${baseName}_${index}`;
-  }
-  return candidate;
-}
-
-function areSkillDefinitionsEquivalent(
-  left: SkillDefinition,
-  right: SkillDefinition,
-) {
-  return (
-    left.name === right.name &&
-    left.description === right.description &&
-    left.instructions === right.instructions &&
-    left.enabled === right.enabled &&
-    left.recommendedToolNames.length === right.recommendedToolNames.length &&
-    left.recommendedToolNames.every(
-      (tool, index) => tool === right.recommendedToolNames[index],
-    )
-  );
-}
-
-type ParsedImportSkill = {
-  source: string;
-  skill: SkillDefinition;
-  sourceFolder?: string;
-};
-
-async function collectImportableSkills(
-  sourceDir: string,
-  importResult: SkillImportResult,
-): Promise<ParsedImportSkill[]> {
-  const collected: ParsedImportSkill[] = [];
-
-  const tryFolder = async (folderPath: string, label: string) => {
-    let content: string | undefined;
-    try {
-      content = await readSkillManifestContent(folderPath);
-    } catch (error) {
-      importResult.invalid.push({ source: label, message: getErrorMessage(error) });
-      return;
-    }
-    if (content === undefined) return;
-
-    try {
-      const skill = buildSkillFromManifest(path.basename(folderPath), content);
-      validateSkillDefinition(skill);
-      collected.push({ source: label, skill, sourceFolder: folderPath });
-    } catch (error) {
-      importResult.invalid.push({ source: label, message: getErrorMessage(error) });
-    }
-  };
-
-  await tryFolder(sourceDir, path.basename(sourceDir));
-
-  const entries = await fs.readdir(sourceDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.isDirectory()) {
-      if (isReservedSkillDirName(entry.name)) continue;
-      await tryFolder(path.join(sourceDir, entry.name), entry.name);
-    } else if (entry.isFile() && entry.name.endsWith(".json")) {
-      const filePath = path.join(sourceDir, entry.name);
-      try {
-        const raw = JSON.parse(await fs.readFile(filePath, "utf8"));
-        const skill = normalizeSkillDefinition(raw);
-        validateSkillDefinition(skill);
-        collected.push({ source: entry.name, skill });
-      } catch (error) {
-        importResult.invalid.push({ source: entry.name, message: getErrorMessage(error) });
-      }
-    }
-  }
-
-  return collected;
+  return { cancelled, imported: 0, updated: 0, skipped: [], invalid: [], renamed: [] };
 }
 
 async function importJsonSkillsFromFiles(): Promise<SkillImportResult> {
-  await initializeJsonStorageIfNeeded();
-
-  const openOptions = {
-    title: "Import skills (choose a skill folder or a folder of skills)",
-    properties: ["openDirectory"] as Array<"openDirectory">,
-  };
-  const result = win
-    ? await dialog.showOpenDialog(win, openOptions)
-    : await dialog.showOpenDialog(openOptions);
-
-  if (result.canceled || result.filePaths.length === 0) {
-    return createEmptySkillImportResult(true);
-  }
-
-  const importResult = createEmptySkillImportResult(false);
-  const parsedSkills = await collectImportableSkills(
-    result.filePaths[0],
-    importResult,
-  );
-  if (parsedSkills.length === 0) return importResult;
-
-  await queueStorageWrite(async () => {
-    await initializeJsonStorageIfNeeded();
-    await migrateLegacySkillJsonFiles();
-
-    const skillsDir = getStoragePaths().skillsDir;
-    const records = await readSkillFolderRecords();
-    const byName = new Map(records.map((record) => [record.skill.name, record]));
-    const takenFolders = new Set(records.map((record) => record.folderName));
-    const usedNames = new Set(records.map((record) => record.skill.name));
-
-    for (const { source, skill, sourceFolder } of parsedSkills) {
-      const sameNameRecord = byName.get(skill.name);
-      let skillToSave = skill;
-
-      if (sameNameRecord) {
-        if (areSkillDefinitionsEquivalent(sameNameRecord.skill, skill)) {
-          importResult.skipped.push({
-            source,
-            skillName: skill.name,
-            message: `A matching skill already exists: ${skill.name}`,
-          });
-          continue;
-        }
-
-        const renamedName = createUniqueImportedSkillName(skill.name, usedNames);
-        skillToSave = { ...skill, name: renamedName };
-        importResult.renamed.push({
-          source,
-          skillName: renamedName,
-          message: `Renamed ${skill.name} to ${renamedName} because the original name already exists with different settings.`,
-        });
-      }
-
-      const folderName = uniqueSkillFolderName(skillToSave.name, takenFolders);
-      takenFolders.add(folderName);
-
-      const destFolder = path.join(skillsDir, folderName);
-      if (
-        sourceFolder &&
-        path.resolve(sourceFolder) !== path.resolve(destFolder)
-      ) {
-        await removeSkillFolder(destFolder);
-        await fs.cp(sourceFolder, destFolder, { recursive: true });
-      } else {
-        await fs.mkdir(destFolder, { recursive: true });
-      }
-      await writeSkillManifest(destFolder, skillToSave);
-
-      importResult.imported += 1;
-
-      const savedRecord: SkillFolderRecord = {
-        skill: skillToSave,
-        folderName,
-        folderPath: destFolder,
-      };
-      byName.set(skillToSave.name, savedRecord);
-      usedNames.add(skillToSave.name);
-    }
-  });
-
-  return importResult;
+  return createEmptySkillImportResult(true);
 }
 
-function normalizeExportSkills(value: unknown): SkillDefinition[] {
-  const values = Array.isArray(value) ? value : [value];
-  return values.map((item) => {
-    const skill = normalizeSkillDefinition(item);
-    validateSkillDefinition(skill);
-    return skill;
-  });
+async function exportJsonSkillToFile(..._args: unknown[]): Promise<SkillExportResult> {
+  throw new Error("Skills are readonly. Copy the skill folder from the filesystem.");
 }
 
-async function writeExportedSkill(
-  parentDir: string,
-  skill: SkillDefinition,
-  takenNames: Set<string>,
-  sourceRecords: SkillFolderRecord[],
-) {
-  const folderName = uniqueSkillFolderName(skill.name, takenNames);
-  takenNames.add(folderName);
-  const destFolder = path.join(parentDir, folderName);
-
-  const source = sourceRecords.find(
-    (record) => record.skill.name === skill.name,
-  );
-  if (source && path.resolve(source.folderPath) !== path.resolve(destFolder)) {
-    await removeSkillFolder(destFolder);
-    await fs.cp(source.folderPath, destFolder, { recursive: true });
-  } else {
-    await fs.mkdir(destFolder, { recursive: true });
-  }
-  await writeSkillManifest(destFolder, skill);
-  return destFolder;
-}
-
-async function exportJsonSkillToFile(
-  value: unknown,
-): Promise<SkillExportResult> {
-  const skills = normalizeExportSkills(value);
-  const skill = skills[0];
-  if (!skill) throw new Error("No skill to export.");
-
-  const openOptions = {
-    title: "Export skill to folder",
-    properties: ["openDirectory", "createDirectory"] as Array<
-      "openDirectory" | "createDirectory"
-    >,
-  };
-  const result = win
-    ? await dialog.showOpenDialog(win, openOptions)
-    : await dialog.showOpenDialog(openOptions);
-
-  if (result.canceled || result.filePaths.length === 0) {
-    return { cancelled: true, exported: 0 };
-  }
-
-  const sourceRecords = await readSkillFolderRecords();
-  const destFolder = await writeExportedSkill(
-    result.filePaths[0],
-    skill,
-    new Set<string>(),
-    sourceRecords,
-  );
-
-  return { cancelled: false, exported: 1, path: destFolder };
-}
-
-async function exportJsonSkillsToFolder(
-  value: unknown,
-): Promise<SkillExportResult> {
-  const skills = normalizeExportSkills(value);
-  if (skills.length === 0) throw new Error("No skills to export.");
-
-  const openOptions = {
-    title: "Export skills to folder",
-    properties: ["openDirectory", "createDirectory"] as Array<
-      "openDirectory" | "createDirectory"
-    >,
-  };
-  const result = win
-    ? await dialog.showOpenDialog(win, openOptions)
-    : await dialog.showOpenDialog(openOptions);
-
-  if (result.canceled || result.filePaths.length === 0) {
-    return { cancelled: true, exported: 0 };
-  }
-
-  const folderPath = result.filePaths[0];
-  await fs.mkdir(folderPath, { recursive: true });
-
-  const sourceRecords = await readSkillFolderRecords();
-  const usedNames = new Set<string>();
-  for (const skill of skills) {
-    await writeExportedSkill(folderPath, skill, usedNames, sourceRecords);
-  }
-
-  return { cancelled: false, exported: skills.length, path: folderPath };
+async function exportJsonSkillsToFolder(..._args: unknown[]): Promise<SkillExportResult> {
+  throw new Error("Skills are readonly. Copy the skill folders from the filesystem.");
 }
 
 async function openJsonSkillsFolder() {
-  await initializeJsonStorageIfNeeded();
-  await fs.mkdir(getStoragePaths().skillsDir, { recursive: true });
-
-  const error = await shell.openPath(getStoragePaths().skillsDir);
+  const skillsDir = getGlobalSkillSearchDirs()[0];
+  await fs.mkdir(skillsDir, { recursive: true });
+  const error = await shell.openPath(skillsDir);
   if (error) throw new Error(error);
 }
 
@@ -4852,22 +4413,6 @@ ipcMain.handle(
 );
 
 
-ipcMain.handle("attachments:materialize", async (_event, request: unknown) => {
-  await ensureStorageDirectories();
-  const { chatId, messageId, attachments } = normalizeMaterializeAttachmentsRequest(request);
-  const workspaceRoot = await ensureChatWorkspaceRoot(chatId);
-  const materialized = await Promise.all(
-    attachments.map((attachment) =>
-      copyAttachmentIntoChatWorkspace({ chatId, messageId, attachment }),
-    ),
-  );
-  return { attachments: materialized, workspaceRoot };
-});
-
-ipcMain.handle("attachments:export", async (_event, request: unknown) =>
-  exportManagedFile(request),
-);
-
 ipcMain.handle(
   "attachments:delete-unused",
   async (_event, request: unknown) => {
@@ -5049,7 +4594,7 @@ ipcMain.handle("storage:tools:export", async (_event, tools: unknown) =>
 
 ipcMain.handle("storage:tools:open-folder", async () => openJsonToolsFolder());
 
-ipcMain.handle("storage:skills:load", async () => loadJsonSkills());
+ipcMain.handle("storage:skills:load", async (_event, request: unknown) => loadJsonSkills(request));
 
 ipcMain.handle(
   "storage:skill:save",
@@ -5114,11 +4659,12 @@ ipcMain.handle("tools:execute-stream", async (event, request: unknown) => {
 
   try {
     const toolName = safeString(value.name).trim();
-    if (toolName !== TERMINAL_EXEC_TOOL_NAME) {
+    if (toolName !== BASH_TOOL_NAME) {
       throw new Error(`Streaming execution is not supported for tool: ${toolName}`);
     }
 
-    return await executeTerminalExecTool(
+    return await executePiTool(
+      toolName,
       value.args,
       {
         workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
@@ -5395,7 +4941,3 @@ app.on("activate", () => {
 
 app.whenReady().then(createWindow);
 
-
-ipcMain.handle("workspace:ensure-chat", async (_event, chatId: unknown) =>
-  ensureChatWorkspaceRoot(chatId),
-);

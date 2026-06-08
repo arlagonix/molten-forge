@@ -21,35 +21,34 @@ import {
 } from "@/components/ui/dialog";
 import { Spinner } from "@/components/ui/spinner";
 import {
-  ARCHIVE_CREATE_TOOL,
-  ARCHIVE_CREATE_TOOL_NAME,
-  ARCHIVE_EXTRACT_TOOL,
-  ARCHIVE_EXTRACT_TOOL_NAME,
   ASK_USER_TOOL,
+  BASH_TOOL,
+  BASH_TOOL_NAME,
   CALL_AGENT_TOOL_NAME,
-  CHAT_FILE_CREATE_TOOL,
-  CHAT_FILE_CREATE_TOOL_NAME,
-  DOCUMENT_CONVERT_TOOL,
-  DOCUMENT_CONVERT_TOOL_NAME,
-  FILE_CREATE_TOOL,
-  FILE_CREATE_TOOL_NAME,
-  FILE_DELETE_TOOL,
-  FILE_DELETE_TOOL_NAME,
-  FILE_FIND_TOOL,
-  FILE_FIND_TOOL_NAME,
-  FILE_READ_TOOL,
-  FILE_READ_TOOL_NAME,
-  FILE_REPLACE_TEXT_TOOL,
-  FILE_REPLACE_TEXT_TOOL_NAME,
-  FILE_SEARCH_TEXT_TOOL,
-  FILE_SEARCH_TEXT_TOOL_NAME,
+  EDIT_TOOL,
+  EDIT_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
+  READ_TOOL,
+  READ_TOOL_NAME,
   TASK_TOOLS,
-  TERMINAL_EXEC_TOOL,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
+  WRITE_TOOL,
+  WRITE_TOOL_NAME,
   isTaskToolName,
 } from "@/lib/ai-chat/builtin-tools";
+import {
+  ARCHIVE_CREATE_TOOL_NAME,
+  ARCHIVE_EXTRACT_TOOL_NAME,
+  CHAT_FILE_CREATE_TOOL_NAME,
+  DOCUMENT_CONVERT_TOOL_NAME,
+  FILE_CREATE_TOOL_NAME,
+  FILE_DELETE_TOOL_NAME,
+  FILE_FIND_TOOL_NAME,
+  FILE_READ_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL_NAME,
+  FILE_SEARCH_TEXT_TOOL_NAME,
+} from "@/lib/ai-chat/file-tool-names";
 import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import { buildToolExecutionPreviewForCall } from "@/lib/ai-chat/tool-preview";
 import type {
@@ -71,19 +70,12 @@ const BUILTIN_TOOL_DESCRIPTIONS: Record<string, string> = {
     TASK_TOOLS.map((tool) => [tool.name, tool.description]),
   ),
   [WEB_FETCH_TOOL.name]: WEB_FETCH_TOOL.description,
-  [TERMINAL_EXEC_TOOL.name]: TERMINAL_EXEC_TOOL.description,
-  [FILE_READ_TOOL.name]: FILE_READ_TOOL.description,
-  [FILE_FIND_TOOL.name]: FILE_FIND_TOOL.description,
-  [FILE_SEARCH_TEXT_TOOL.name]: FILE_SEARCH_TEXT_TOOL.description,
-  [FILE_REPLACE_TEXT_TOOL.name]: FILE_REPLACE_TEXT_TOOL.description,
-  [FILE_CREATE_TOOL.name]: FILE_CREATE_TOOL.description,
-  [FILE_DELETE_TOOL.name]: FILE_DELETE_TOOL.description,
-  [ARCHIVE_EXTRACT_TOOL.name]: ARCHIVE_EXTRACT_TOOL.description,
-  [ARCHIVE_CREATE_TOOL.name]: ARCHIVE_CREATE_TOOL.description,
-  [DOCUMENT_CONVERT_TOOL.name]: DOCUMENT_CONVERT_TOOL.description,
-  [CHAT_FILE_CREATE_TOOL.name]: CHAT_FILE_CREATE_TOOL.description,
+  [READ_TOOL.name]: READ_TOOL.description,
+  [BASH_TOOL.name]: BASH_TOOL.description,
+  [EDIT_TOOL.name]: EDIT_TOOL.description,
+  [WRITE_TOOL.name]: WRITE_TOOL.description,
   [LOAD_SKILL_TOOL_NAME]:
-    "Load the full instructions for one relevant skill and activate it for this chat.",
+    "Load the full instructions for one relevant skill by name.",
   [CALL_AGENT_TOOL_NAME]:
     "Delegate a focused subtask to one configured agent and return the result to the current chat.",
 };
@@ -199,8 +191,13 @@ function renderToolExecutionPreview(execution?: ToolExecutionPreview) {
   );
 }
 
-function renderTerminalTextBlock(value: string, emptyLabel = "No output yet.") {
-  const text = value.length ? value : emptyLabel;
+function stripAnsi(value: string) {
+  return value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
+}
+
+function renderTerminalTextBlock(value: string) {
+  const text = stripAnsi(value);
+  if (!text.trim()) return null;
 
   return (
     <pre className="max-h-[min(22rem,45dvh)] overflow-auto border bg-background/80 px-3 py-2 font-mono text-xs leading-5 text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
@@ -222,18 +219,22 @@ function renderTerminalOutput(toolResult?: ChatToolResult) {
           ))}
         </div>
       ) : null}
-      <div className="grid gap-1.5">
-        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-          Stdout
+      {terminal.stdout.trim() ? (
+        <div className="grid gap-1.5">
+          <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+            Stdout
+          </div>
+          {renderTerminalTextBlock(terminal.stdout)}
         </div>
-        {renderTerminalTextBlock(terminal.stdout)}
-      </div>
-      <div className="grid gap-1.5">
-        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-          Stderr
+      ) : null}
+      {terminal.stderr.trim() ? (
+        <div className="grid gap-1.5">
+          <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+            Stderr
+          </div>
+          {renderTerminalTextBlock(terminal.stderr)}
         </div>
-        {renderTerminalTextBlock(terminal.stderr)}
-      </div>
+      ) : null}
       <div className="grid gap-1.5 text-xs text-muted-foreground">
         <div>
           Exit code: {terminal.exitCode === null ? "—" : terminal.exitCode} · Duration: {terminal.durationMs ? `${(terminal.durationMs / 1000).toFixed(1)}s` : "—"}
@@ -315,8 +316,11 @@ function getLoadSkillName(toolCall: ChatToolCall, toolResult?: ChatToolResult) {
 
   try {
     const parsedResult = toolResult?.content
-      ? (JSON.parse(toolResult.content) as { skillName?: unknown })
+      ? (JSON.parse(toolResult.content) as { name?: unknown; skillName?: unknown })
       : undefined;
+    if (typeof parsedResult?.name === "string" && parsedResult.name.trim()) {
+      return parsedResult.name.trim();
+    }
     if (
       typeof parsedResult?.skillName === "string" &&
       parsedResult.skillName.trim()
@@ -329,8 +333,10 @@ function getLoadSkillName(toolCall: ChatToolCall, toolResult?: ChatToolResult) {
 
   try {
     const parsedArgs = JSON.parse(toolCall.function.arguments || "{}") as {
+      name?: unknown;
       skillName?: unknown;
     };
+    if (typeof parsedArgs.name === "string") return parsedArgs.name.trim();
     return typeof parsedArgs.skillName === "string"
       ? parsedArgs.skillName.trim()
       : "";
@@ -345,11 +351,16 @@ function getLoadSkillDetails(toolResult?: ChatToolResult) {
       instructions: "",
       recommendedToolNames: [] as string[],
       compactOutput: toolResult?.content ?? "",
+      location: "",
+      directoryPath: "",
     };
   }
 
   let parsedStatus: unknown;
   let parsedSkillName: unknown;
+  let parsedName: unknown;
+  let parsedLocation: unknown;
+  let parsedDirectoryPath: unknown;
   let parsedInstructions: unknown;
   let parsedRecommendedToolNames: unknown;
 
@@ -360,6 +371,9 @@ function getLoadSkillDetails(toolResult?: ChatToolResult) {
     >;
     parsedStatus = parsed.status;
     parsedSkillName = parsed.skillName;
+    parsedName = parsed.name;
+    parsedLocation = parsed.location;
+    parsedDirectoryPath = parsed.directoryPath;
     parsedInstructions = parsed.instructions;
     parsedRecommendedToolNames = parsed.recommendedToolNames;
   } catch {
@@ -381,17 +395,25 @@ function getLoadSkillDetails(toolResult?: ChatToolResult) {
       Object.entries({
         ok: !toolResult.isError,
         status: typeof parsedStatus === "string" ? parsedStatus : undefined,
-        skillName:
-          typeof parsedSkillName === "string"
-            ? parsedSkillName
-            : toolResult.loadedSkillName,
+        name:
+          typeof parsedName === "string"
+            ? parsedName
+            : typeof parsedSkillName === "string"
+              ? parsedSkillName
+              : toolResult.loadedSkillName,
+        location: typeof parsedLocation === "string" ? parsedLocation : undefined,
+        directoryPath:
+          typeof parsedDirectoryPath === "string" ? parsedDirectoryPath : undefined,
       }).filter(([, value]) => value !== undefined),
     ),
     null,
     2,
   );
 
-  return { instructions, recommendedToolNames, compactOutput };
+  const location = typeof parsedLocation === "string" ? parsedLocation : "";
+  const directoryPath = typeof parsedDirectoryPath === "string" ? parsedDirectoryPath : "";
+
+  return { instructions, recommendedToolNames, compactOutput, location, directoryPath };
 }
 
 function normalizeToolDescription(description?: string) {
@@ -412,9 +434,10 @@ function getEffectiveToolStatus(
   status: ToolExecutionStatus | undefined,
   result?: ChatToolResult,
 ): ToolExecutionStatus {
-  if (result?.isError) return "failed";
-  if (result) return "complete";
-  return status ?? "running";
+  if (status === "running" || status === "pending") return status;
+  if (result?.isError || status === "failed") return "failed";
+  if (result || status === "complete") return "complete";
+  return "running";
 }
 
 function renderToolStatus(status: ToolExecutionStatus) {
@@ -480,8 +503,13 @@ function getStringArgument(args: Record<string, unknown>, key: string) {
 function getToolHeaderDetail(toolCall: ChatToolCall) {
   const args = parseToolCallArguments(toolCall);
 
-  if (toolCall.function.name === FILE_READ_TOOL_NAME) {
+  if (toolCall.function.name === READ_TOOL_NAME || toolCall.function.name === EDIT_TOOL_NAME || toolCall.function.name === WRITE_TOOL_NAME || toolCall.function.name === FILE_READ_TOOL_NAME) {
     return getStringArgument(args, "path");
+  }
+
+  if (toolCall.function.name === BASH_TOOL_NAME) {
+    const command = getStringArgument(args, "command");
+    return command.length > 120 ? `${command.slice(0, 117)}...` : command;
   }
 
   if (toolCall.function.name === FILE_FIND_TOOL_NAME) {
@@ -551,7 +579,9 @@ export function ToolExecutionBlock({
   const loadSkillDetails = getLoadSkillDetails(toolResult);
   const isLoadSkillTool = toolCall.function.name === LOAD_SKILL_TOOL_NAME;
   const isTaskTool = isTaskToolName(toolCall.function.name);
-  const isTerminalTool = toolCall.function.name === TERMINAL_EXEC_TOOL_NAME;
+  const isTerminalTool =
+    toolCall.function.name === TERMINAL_EXEC_TOOL_NAME ||
+    toolCall.function.name === BASH_TOOL_NAME;
   const ToolIcon = isTerminalTool ? Terminal : Wrench;
   const toolDescription = getToolDescription(
     toolCall.function.name,
@@ -561,7 +591,7 @@ export function ToolExecutionBlock({
     hasMeaningfulToolInput(toolCall.function.arguments || "") &&
     (isTaskTool || !executionPreview || executionPreview.usesStdin);
   const toolHeaderDetail = isLoadSkillTool
-    ? loadedSkillName
+    ? [loadedSkillName, loadSkillDetails.location].filter(Boolean).join(" · ")
     : getToolHeaderDetail(toolCall);
   const generatedFiles = toolResult?.generatedFiles ?? [];
 
@@ -638,11 +668,6 @@ export function ToolExecutionBlock({
               <Maximize2 className="size-3.5" />
             </Button>
           </div>
-          {isTerminalTool && toolResult?.terminal ? (
-            <div className="mt-3 border-t pt-3 normal-case tracking-normal">
-              {renderTerminalOutput(toolResult)}
-            </div>
-          ) : null}
           {generatedFiles.length > 0 ? (
             <div
               className="mt-3 flex flex-wrap gap-2 border-t pt-3 normal-case tracking-normal"
@@ -726,7 +751,7 @@ export function ToolExecutionBlock({
               {isTerminalTool && toolResult?.terminal ? (
                 <div className="grid gap-1.5">
                   <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-                    Terminal output
+                    Output
                   </div>
                   {renderTerminalOutput(toolResult)}
                 </div>

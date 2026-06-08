@@ -1,5 +1,5 @@
 import { defaultGenerationSettings, defaultProvider } from "./provider-presets";
-import { normalizeModesState, serializeModesState } from "./modes";
+import { normalizeModesState, serializeModesState, normalizeFeaturePermission, normalizePermissionMap } from "./modes";
 import { normalizeProviderForState, sortChatsByUpdatedAt } from "./chat-utils";
 import type {
   AgentsSettings,
@@ -22,6 +22,9 @@ import type {
   ToolExportResult,
   ToolImportResult,
   ToolsSettings,
+  PermissionMap,
+  Permission,
+  FeaturePermission,
 } from "./types";
 
 const DB_NAME = "chat-forge";
@@ -96,7 +99,7 @@ type ChatForgeStorageApi = {
   exportTool: (tool: LoadedToolInfo) => Promise<ToolExportResult>;
   exportTools: (tools: LoadedToolInfo[]) => Promise<ToolExportResult>;
   openToolsFolder: () => Promise<void>;
-  loadSkills: () => Promise<LoadedSkillInfo[]>;
+  loadSkills: (request?: { workspaceRoots?: ChatWorkspaceRoot[] }) => Promise<LoadedSkillInfo[]>;
   saveSkill: (skill: LoadedSkillInfo, previousName?: string) => Promise<LoadedSkillInfo>;
   deleteSkill: (skillName: string) => Promise<void>;
   importSkills: () => Promise<SkillImportResult>;
@@ -195,95 +198,94 @@ function normalizeProvidersState(value?: ProvidersState): ProvidersState {
   };
 }
 
+function legacyToolPermission(enabled: unknown, autoApproved: unknown, fallbackEnabled = true) {
+  const isEnabled = typeof enabled === "boolean" ? enabled : fallbackEnabled;
+  if (!isEnabled) return "deny" as const;
+  return autoApproved === true ? "allow" as const : "ask" as const;
+}
+
 function normalizeToolsSettings(
   value: Partial<ToolsSettings> | undefined,
 ): ToolsSettings {
   const legacyChecklistWriteEnabled = (
     value as Partial<ToolsSettings> & { checklistWriteEnabled?: unknown }
   )?.checklistWriteEnabled;
-
-  return {
-    enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
-    askUserEnabled:
-      typeof value?.askUserEnabled === "boolean" ? value.askUserEnabled : true,
-    taskToolsEnabled:
+  const legacy = value as Partial<ToolsSettings> & Record<string, unknown>;
+  const permissionOverrides = normalizePermissionMap((value as Record<string, unknown> | undefined)?.toolPermissions);
+  const readEnabled = value?.readEnabled ?? legacy.fileReadEnabled;
+  const bashEnabled = value?.bashEnabled ?? legacy.terminalExecEnabled;
+  const editEnabled = value?.editEnabled ?? legacy.fileReplaceTextEnabled;
+  const writeEnabled = value?.writeEnabled ?? legacy.fileCreateEnabled;
+  const permissionModelVersion = (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2 ? 2 : undefined;
+  const toolsPermission: FeaturePermission = permissionModelVersion === 2
+    ? normalizeFeaturePermission((value as Record<string, unknown> | undefined)?.toolsPermission, "custom")
+    : "custom";
+  const toolPermissions: PermissionMap = {
+    ask_user: legacyToolPermission(value?.askUserEnabled, true, true),
+    update_tasks: legacyToolPermission(
       typeof value?.taskToolsEnabled === "boolean"
         ? value.taskToolsEnabled
         : typeof legacyChecklistWriteEnabled === "boolean"
           ? legacyChecklistWriteEnabled
           : true,
-    loadSkillEnabled:
-      typeof value?.loadSkillEnabled === "boolean"
-        ? value.loadSkillEnabled
-        : true,
-    webFetchEnabled:
-      typeof value?.webFetchEnabled === "boolean"
-        ? value.webFetchEnabled
-        : false,
-    terminalExecEnabled:
-      typeof value?.terminalExecEnabled === "boolean"
-        ? value.terminalExecEnabled
-        : false,
-    fileReadEnabled:
-      typeof value?.fileReadEnabled === "boolean"
-        ? value.fileReadEnabled
-        : true,
-    fileFindEnabled:
-      typeof value?.fileFindEnabled === "boolean"
-        ? value.fileFindEnabled
-        : true,
-    fileSearchTextEnabled:
-      typeof value?.fileSearchTextEnabled === "boolean"
-        ? value.fileSearchTextEnabled
-        : true,
-    fileReplaceTextEnabled:
-      typeof value?.fileReplaceTextEnabled === "boolean"
-        ? value.fileReplaceTextEnabled
-        : false,
-    fileCreateEnabled:
-      typeof value?.fileCreateEnabled === "boolean"
-        ? value.fileCreateEnabled
-        : true,
-    fileDeleteEnabled:
-      typeof value?.fileDeleteEnabled === "boolean"
-        ? value.fileDeleteEnabled
-        : false,
-    archiveExtractEnabled:
-      typeof value?.archiveExtractEnabled === "boolean"
-        ? value.archiveExtractEnabled
-        : true,
-    archiveCreateEnabled:
-      typeof value?.archiveCreateEnabled === "boolean"
-        ? value.archiveCreateEnabled
-        : true,
-    documentConvertEnabled:
-      typeof value?.documentConvertEnabled === "boolean"
-        ? value.documentConvertEnabled
-        : true,
-    chatFileCreateEnabled:
-      typeof value?.chatFileCreateEnabled === "boolean"
-        ? value.chatFileCreateEnabled
-        : true,
-    fileReplaceTextAutoApproveEnabled:
-      typeof value?.fileReplaceTextAutoApproveEnabled === "boolean"
-        ? value.fileReplaceTextAutoApproveEnabled
-        : false,
-    fileCreateAutoApproveEnabled:
-      typeof value?.fileCreateAutoApproveEnabled === "boolean"
-        ? value.fileCreateAutoApproveEnabled
-        : false,
-    fileDeleteAutoApproveEnabled:
-      typeof value?.fileDeleteAutoApproveEnabled === "boolean"
-        ? value.fileDeleteAutoApproveEnabled
-        : false,
+      true,
+      true,
+    ),
+    skill: legacyToolPermission(value?.loadSkillEnabled, false, true),
+    web_fetch: legacyToolPermission(value?.webFetchEnabled, false, false),
+    read: legacyToolPermission(readEnabled, value?.readAutoApproveEnabled, true),
+    bash: legacyToolPermission(bashEnabled, value?.bashAutoApproveEnabled, true),
+    edit: legacyToolPermission(editEnabled, value?.editAutoApproveEnabled ?? legacy.fileReplaceTextAutoApproveEnabled, true),
+    write: legacyToolPermission(writeEnabled, value?.writeAutoApproveEnabled ?? legacy.fileCreateAutoApproveEnabled, true),
+    call_agent: "ask",
+    ...permissionOverrides,
+  };
+
+  const toolsEnabled = permissionModelVersion === 2
+    ? toolsPermission !== "deny"
+    : typeof value?.enabled === "boolean"
+      ? value.enabled
+      : true;
+
+  return {
+    enabled: toolsEnabled,
+    toolsPermission,
+    permissionModelVersion: 2,
+    askUserEnabled: toolPermissions.ask_user !== "deny",
+    taskToolsEnabled: toolPermissions.update_tasks !== "deny",
+    loadSkillEnabled: toolPermissions.skill !== "deny",
+    webFetchEnabled: toolPermissions.web_fetch !== "deny",
+    readEnabled: toolPermissions.read !== "deny",
+    bashEnabled: toolPermissions.bash !== "deny",
+    editEnabled: toolPermissions.edit !== "deny",
+    writeEnabled: toolPermissions.write !== "deny",
+    readAutoApproveEnabled: toolPermissions.read === "allow",
+    bashAutoApproveEnabled: toolPermissions.bash === "allow",
+    editAutoApproveEnabled: toolPermissions.edit === "allow",
+    writeAutoApproveEnabled: toolPermissions.write === "allow",
+    toolPermissions,
   };
 }
+
 
 function normalizeSkillsSettings(
   value: Partial<SkillsSettings> | undefined,
 ): SkillsSettings {
+  const permissionModelVersion = (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2 ? 2 : undefined;
+  const skillsPermission: FeaturePermission = permissionModelVersion === 2
+    ? normalizeFeaturePermission((value as Record<string, unknown> | undefined)?.skillsPermission, "custom")
+    : "custom";
+  const skillsEnabled = permissionModelVersion === 2
+    ? skillsPermission !== "deny"
+    : typeof value?.enabled === "boolean"
+      ? value.enabled
+      : true;
+
   return {
-    enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
+    enabled: skillsEnabled,
+    skillsPermission,
+    skillPermissions: normalizePermissionMap((value as Record<string, unknown> | undefined)?.skillPermissions),
+    permissionModelVersion: 2,
   };
 }
 
@@ -304,9 +306,23 @@ function normalizeAgentsSettings(
     }
   }
 
+  const permissionModelVersion = (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2 ? 2 : undefined;
+  const agentsPermission: FeaturePermission = permissionModelVersion === 2
+    ? normalizeFeaturePermission((value as Record<string, unknown> | undefined)?.agentsPermission, "custom")
+    : "custom";
+
+  const agentsEnabled = permissionModelVersion === 2
+    ? agentsPermission !== "deny"
+    : typeof value?.enabled === "boolean"
+      ? value.enabled
+      : true;
+
   return {
-    enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
+    enabled: agentsEnabled,
+    agentsPermission,
+    agentPermissions: normalizePermissionMap((value as Record<string, unknown> | undefined)?.agentPermissions),
     builtInAgentMaxNestingDepths,
+    permissionModelVersion: 2,
   };
 }
 
@@ -372,8 +388,6 @@ function normalizeChatFolders(value: unknown): ChatFolder[] {
           ? folder.createdAt
           : now;
 
-      const workspaceRoots = normalizeChatFolderWorkspaceRoots(folder.workspaceRoots);
-
       return {
         id,
         name:
@@ -385,7 +399,6 @@ function normalizeChatFolders(value: unknown): ChatFolder[] {
           typeof folder.updatedAt === "string" && folder.updatedAt.trim()
             ? folder.updatedAt
             : createdAt,
-        ...(workspaceRoots ? { workspaceRoots } : {}),
       } satisfies ChatFolder;
     })
     .filter((folder): folder is ChatFolder => folder !== undefined);
@@ -1041,11 +1054,11 @@ export async function openToolsFolder(): Promise<void> {
   throw new Error("Opening the tools folder requires the Electron app.");
 }
 
-export async function loadSkills(): Promise<LoadedSkillInfo[]> {
+export async function loadSkills(workspaceRoots: ChatWorkspaceRoot[] = []): Promise<LoadedSkillInfo[]> {
   const api = await ensureJsonStorageReady();
 
   if (api) {
-    return api.loadSkills();
+    return api.loadSkills({ workspaceRoots });
   }
 
   return [];

@@ -41,7 +41,8 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
   onRemoveRoot,
   onOpenRoot,
 }: WorkspaceRootsControlProps) {
-  const label = roots.length === 0 ? "No workspace" : roots.length === 1 ? roots[0].name : `${roots.length} workspaces`;
+  const visibleRoots = roots.filter((root) => !isAutomaticRoot(root));
+  const label = visibleRoots.length === 0 ? "Workspace" : visibleRoots[0].name;
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -49,44 +50,44 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
         <Button
           type="button"
           variant="outline"
-          size="icon"
           role="combobox"
           disabled={!activeChatExists || disabled}
           aria-expanded={open}
           className={cn(
-            "h-9 w-9 shrink-0",
-            roots.length === 0 && "text-muted-foreground",
+            "h-9 max-w-[13rem] shrink-0 gap-2 px-3",
+            visibleRoots.length === 0 && "text-muted-foreground",
           )}
           title={
             disabled
               ? "Wait until this chat finishes generating"
-              : roots.length > 0
-                ? `${label}: manage workspace folders for this chat`
-                : "Add a workspace folder for this chat"
+              : visibleRoots.length > 0
+                ? `${label}: manage workspace for this chat`
+                : "Select a workspace folder for this chat"
           }
-          aria-label="Manage workspace folders for this chat"
+          aria-label="Manage workspace folder for this chat"
         >
-          <FolderOpen className="size-4 opacity-70" />
+          <FolderOpen className="size-4 shrink-0 opacity-70" />
+          <span className="min-w-0 truncate">{label}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(26rem,calc(100vw-2rem))] p-0">
         <Command shouldFilter={false}>
           <CommandList>
-            <CommandGroup heading="Workspace folders">
+            <CommandGroup heading="Workspace">
               <CommandItem
                 value="add-workspace"
                 onSelect={onAddRoot}
                 className="cursor-pointer gap-2"
               >
                 <Plus className="size-4 shrink-0" />
-                <span>Add folder...</span>
+                <span>Select folder...</span>
               </CommandItem>
-              {roots.length === 0 ? (
+              {visibleRoots.length === 0 ? (
                 <div className="px-2 py-6 text-center text-sm text-muted-foreground">
-                  No workspace folder selected.
+                  No workspace selected. Relative paths use your user home folder.
                 </div>
               ) : (
-                roots.map((root) => {
+                visibleRoots.map((root) => {
                   const isAutomatic = isAutomaticRoot(root);
 
                   return (
@@ -129,7 +130,7 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 shrink-0"
-                          title="Remove from chat"
+                          title="Clear workspace"
                           onClick={(event) => {
                             event.preventDefault();
                             event.stopPropagation();

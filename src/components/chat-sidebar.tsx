@@ -102,8 +102,6 @@ type ChatSidebarProps = {
   onCreateFolder: (name: string) => void;
   onRenameFolder: (folderId: string, name: string) => void;
   onDeleteFolder: (folderId: string, mode: DeleteFolderMode) => void;
-  onAddFolderWorkspace: (folderId: string) => void;
-  onClearFolderWorkspaces: (folderId: string) => void;
   onMoveChatToFolder: (chatId: string, folderId: string) => void;
   onRemoveChatFromFolder: (chatId: string) => void;
 };
@@ -215,8 +213,6 @@ export const ChatSidebar = memo(function ChatSidebar({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
-  onAddFolderWorkspace,
-  onClearFolderWorkspaces,
   onMoveChatToFolder,
   onRemoveChatFromFolder,
 }: ChatSidebarProps) {
@@ -809,17 +805,6 @@ export const ChatSidebar = memo(function ChatSidebar({
                   >
                     <Edit3 className="size-4" />
                     Rename folder
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => onAddFolderWorkspace(folder.id)}>
-                    <FolderOpen className="size-4" />
-                    Add default workspace
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={!folder.workspaceRoots?.length}
-                    onClick={() => onClearFolderWorkspaces(folder.id)}
-                  >
-                    <X className="size-4" />
-                    Clear default workspaces
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem variant="destructive" onClick={() => setDeleteFolderTarget(folder)}>

@@ -3,9 +3,10 @@ import { useRef } from "react";
 import {
   ASK_USER_TOOL_NAME,
   isTaskToolName,
-  FILE_CREATE_TOOL_NAME,
-  FILE_DELETE_TOOL_NAME,
-  FILE_REPLACE_TEXT_TOOL_NAME,
+  READ_TOOL_NAME,
+  BASH_TOOL_NAME,
+  EDIT_TOOL_NAME,
+  WRITE_TOOL_NAME,
   LOAD_SKILL_TOOL_NAME,
   isFileToolName,
   requiresFileToolApproval,
@@ -17,7 +18,6 @@ import {
   parseAskUserRequestFromToolCall,
   parseFileToolApprovalRequestFromToolCall,
 } from "@/lib/ai-chat/builtin-tools";
-import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import type {
   AskUserRequest,
@@ -325,66 +325,70 @@ export function useToolExecution({
     });
   }
 
+  function stripSkillFrontmatter(content: string) {
+    const normalized = content.replace(/\r\n/g, "\n").replace(/^\uFEFF/, "");
+    const match = /^---\n[\s\S]*?\n---\n?/.exec(normalized);
+    return (match ? normalized.slice(match[0].length) : normalized).trim();
+  }
+
+  function buildLoadedSkillInstructions(skill: LoadedSkillInfo) {
+    const directory = skill.directoryPath || "";
+    const location = skill.manifestPath || skill.directoryPath || skill.name;
+    const body = stripSkillFrontmatter(skill.manifestContent || skill.instructions || "");
+
+    return [
+      `<skill name="${skill.name}" location="${location}">`,
+      directory
+        ? `References are relative to ${directory}.`
+        : "References are relative to the skill directory.",
+      "",
+      body,
+      "</skill>",
+    ]
+      .filter((part) => part !== undefined && part !== null && String(part).length > 0)
+      .join("\n\n");
+  }
+
   async function executeLoadSkillToolCall(
     toolCall: ChatToolCall,
-    chatId: string,
-    activeSkillNamesForRun: string[],
   ): Promise<ChatToolResult> {
     const argsText = toolCall.function.arguments.trim() || "{}";
     const args = JSON.parse(argsText);
 
     if (!args || typeof args !== "object" || Array.isArray(args)) {
-      throw new Error("load_skill arguments must be a JSON object.");
+      throw new Error("skill arguments must be a JSON object.");
     }
 
-    const rawSkillName = (args as Record<string, unknown>).skillName;
+    const rawSkillName = (args as Record<string, unknown>).name ?? (args as Record<string, unknown>).skillName;
     const skillName =
       typeof rawSkillName === "string" ? rawSkillName.trim() : "";
-    if (!skillName) throw new Error("load_skill requires skillName.");
+    if (!skillName) throw new Error("skill requires name.");
 
     const skill = availableSkillsByName.get(skillName);
     if (!skill) throw new Error(`Skill not found: ${skillName}`);
 
-    if (
-      !modelSelectableSkillNames.includes(skillName) &&
-      !activeSkillNamesForRun.includes(skillName)
-    ) {
-      throw new Error(
-        `Skill is not available for model loading in this chat: ${skillName}`,
-      );
-    }
-
+    const loadedInstructions = buildLoadedSkillInstructions(skill);
     const resultPayload = {
       ok: true,
-      status: activeSkillNamesForRun.includes(skillName)
-        ? "already_active"
-        : "loaded",
+      status: "loaded",
+      name: skillName,
       skillName,
-      instructions: skill.instructions,
-      recommendedToolNames: skill.recommendedToolNames ?? [],
-      ...(skill.directoryPath ? { directoryPath: skill.directoryPath } : {}),
+      location: skill.manifestPath ?? skill.directoryPath,
+      directoryPath: skill.directoryPath,
+      references: skill.directoryPath
+        ? `References are relative to ${skill.directoryPath}.`
+        : "References are relative to the skill directory.",
+      instructions: loadedInstructions,
+      recommendedToolNames: [],
     };
-
-    if (activeSkillNamesForRun.includes(skillName)) {
-      return {
-        toolCallId: toolCall.id,
-        toolName: LOAD_SKILL_TOOL_NAME,
-        content: JSON.stringify(resultPayload, null, 2),
-        loadedSkillName: skillName,
-        loadedSkillInstructions: skill.instructions,
-        loadedSkillRecommendedToolNames: skill.recommendedToolNames ?? [],
-      };
-    }
-
-    onSkillActivated(skillName, chatId);
 
     return {
       toolCallId: toolCall.id,
       toolName: LOAD_SKILL_TOOL_NAME,
       content: JSON.stringify(resultPayload, null, 2),
       loadedSkillName: skillName,
-      loadedSkillInstructions: skill.instructions,
-      loadedSkillRecommendedToolNames: skill.recommendedToolNames ?? [],
+      loadedSkillInstructions: loadedInstructions,
+      loadedSkillRecommendedToolNames: [],
     };
   }
 
@@ -393,13 +397,13 @@ export function useToolExecution({
     toolName: string,
     settings?: ChatFileToolAutoApproval,
   ) {
-    if (toolName === FILE_CREATE_TOOL_NAME) return settings?.create === true;
-    if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) {
-      return settings?.replaceText === true;
-    }
-    if (toolName === FILE_DELETE_TOOL_NAME) return settings?.delete === true;
+    if (toolName === READ_TOOL_NAME) return settings?.read === true;
+    if (toolName === BASH_TOOL_NAME) return settings?.bash === true;
+    if (toolName === EDIT_TOOL_NAME) return settings?.edit === true;
+    if (toolName === WRITE_TOOL_NAME) return settings?.write === true;
     return false;
   }
+
 
   function appendTerminalOutput(value: string, delta: string) {
     const maxChars = 100_000;
@@ -546,7 +550,7 @@ export function useToolExecution({
         executeExternalTool(
           toolName,
           args,
-          toolName === TERMINAL_EXEC_TOOL_NAME
+          toolName === BASH_TOOL_NAME
             ? {
                 workspaceRoots: options.workspaceRoots ?? workspaceRoots,
                 signal: options.signal,
@@ -606,31 +610,14 @@ export function useToolExecution({
         return executeTaskTool(toolCall, options.chatId);
       }
 
-      if (toolName === LOAD_SKILL_TOOL_NAME) {
-        return await executeLoadSkillToolCall(
-          toolCall,
-          options.chatId,
-          options.activeSkillNames ?? activeSkillNames,
-        );
-      }
-
       const customTool = loadedTools.find((candidate) => candidate.name === toolName);
 
       if (requiresToolApproval(toolName, customTool)) {
-        const effectiveAutoApproval =
-          options.fileToolAutoApproval ?? fileToolAutoApproval;
-        const autoApproved =
-          requiresFileToolApproval(toolName) &&
-          isFileToolCallAutoApproved(toolName, effectiveAutoApproval);
+        return await executeToolCallWithApproval(toolCall, options);
+      }
 
-        if (!autoApproved) {
-          return await executeToolCallWithApproval(toolCall, options);
-        }
-
-        parseFileToolApprovalRequestFromToolCall(
-          toolCall,
-          options.workspaceRoots ?? workspaceRoots,
-        );
+      if (toolName === LOAD_SKILL_TOOL_NAME) {
+        return await executeLoadSkillToolCall(toolCall);
       }
 
       return await executeExternalToolCall(toolCall, options);
@@ -707,7 +694,7 @@ export function useToolExecution({
         const argsText = toolCall.function.arguments.trim() || "{}";
         const args = JSON.parse(argsText);
 
-        if (toolCall.function.name === TERMINAL_EXEC_TOOL_NAME) {
+        if (toolCall.function.name === BASH_TOOL_NAME) {
           updateAssistantToolApprovalPartialResult(
             pendingRequest.chatId,
             pendingRequest.assistantMessageId,
@@ -724,32 +711,36 @@ export function useToolExecution({
           );
         }
 
-        const execution = await executeExternalTool(toolCall.function.name, args, {
-          workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,
-          signal: pendingRequest.signal,
-          ...(toolCall.function.name === TERMINAL_EXEC_TOOL_NAME
-            ? {
-                onTerminalStreamEvent: createTerminalStreamHandler(toolCall, {
-                  chatId: pendingRequest.chatId,
-                  assistantMessageId: pendingRequest.assistantMessageId,
-                  variantId: pendingRequest.variantId,
-                  approvalStepId: pendingRequest.stepId,
-                  approvalResponse: response,
-                }),
-              }
-            : {}),
-        });
+        if (toolCall.function.name === LOAD_SKILL_TOOL_NAME) {
+          toolResult = await executeLoadSkillToolCall(toolCall);
+        } else {
+          const execution = await executeExternalTool(toolCall.function.name, args, {
+            workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,
+            signal: pendingRequest.signal,
+            ...(toolCall.function.name === BASH_TOOL_NAME
+              ? {
+                  onTerminalStreamEvent: createTerminalStreamHandler(toolCall, {
+                    chatId: pendingRequest.chatId,
+                    assistantMessageId: pendingRequest.assistantMessageId,
+                    variantId: pendingRequest.variantId,
+                    approvalStepId: pendingRequest.stepId,
+                    approvalResponse: response,
+                  }),
+                }
+              : {}),
+          });
 
-        toolResult = {
-          toolCallId: toolCall.id,
-          toolName: execution.toolName || toolCall.function.name,
-          content: execution.content,
-          isError: execution.timedOut || execution.exitCode !== 0,
-          execution: execution.execution,
-          changePreview: execution.changePreview,
-          generatedFiles: execution.generatedFiles,
-          terminal: execution.terminal,
-        };
+          toolResult = {
+            toolCallId: toolCall.id,
+            toolName: execution.toolName || toolCall.function.name,
+            content: execution.content,
+            isError: execution.timedOut || execution.exitCode !== 0,
+            execution: execution.execution,
+            changePreview: execution.changePreview,
+            generatedFiles: execution.generatedFiles,
+            terminal: execution.terminal,
+          };
+        }
       }
 
       completeAssistantFileApprovalStep(

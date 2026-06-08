@@ -169,9 +169,8 @@ function buildAttachmentManifestBlock(attachments: ChatAttachment[]) {
   if (!lines.length) return "";
 
   return [
-    "The user attached files. They are available through the workspace file tools instead of being pasted into context.",
-    "Use rootId \"chat\" with file_find, file_read, file_search_text, document_convert, archive_extract, archive_create, or chat_file_create when needed.",
-    "For archives, do not assume they are already extracted; call archive_extract first if you need their contents.",
+    "The user attached files. If a selected workspace contains these files, use read to inspect them. Otherwise rely on the attachment content already sent in the message.",
+    "The available coding tools are read, bash, edit, and write. They do not use rootId.",
     "Attached files:",
     ...lines,
   ].join("\n");

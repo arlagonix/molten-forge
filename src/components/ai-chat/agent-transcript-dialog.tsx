@@ -43,56 +43,13 @@ import type {
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
-const AGENT_TRANSCRIPT_MENTION_PATTERN =
-  /(^|\s)@(tool|skill|agent):([A-Za-z0-9_-]+)(?=$|\s)/g;
-
 function HighlightedMentionContent({
   content,
-  isUser,
 }: {
   content: string;
   isUser: boolean;
 }) {
-  const parts: ReactNode[] = [];
-  const pattern = new RegExp(AGENT_TRANSCRIPT_MENTION_PATTERN);
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(content)) !== null) {
-    const prefix = match[1] ?? "";
-    const mentionType =
-      match[2] === "skill" ? "skill" : match[2] === "agent" ? "agent" : "tool";
-    const mentionName = match[3] ?? "";
-    const token = `@${mentionType}:${mentionName}`;
-    const tokenStartIndex = match.index + prefix.length;
-
-    if (tokenStartIndex > lastIndex) {
-      parts.push(content.slice(lastIndex, tokenStartIndex));
-    }
-
-    parts.push(
-      <span
-        key={`${tokenStartIndex}-${token}`}
-        className={cn(
-          "inline-flex items-center border px-1.5 py-0.5 font-mono text-[0.875em] font-medium leading-5",
-          isUser
-            ? "border-primary-foreground/25 bg-primary-foreground/15 text-primary-foreground"
-            : "border-primary/25 bg-primary/10 text-primary",
-        )}
-        title={`One-shot ${mentionType} for this request: ${mentionName}`}
-      >
-        {token}
-      </span>,
-    );
-
-    lastIndex = tokenStartIndex + token.length;
-  }
-
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex));
-  }
-
-  return <div className="whitespace-pre-wrap">{parts}</div>;
+  return <div className="whitespace-pre-wrap">{content}</div>;
 }
 
 function getToolStatus(toolResult?: ChatToolResult): ToolExecutionStatus {

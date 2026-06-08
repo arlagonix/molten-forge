@@ -14,7 +14,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
-import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
+import { BASH_TOOL_NAME } from "@/lib/ai-chat/file-tool-names";
 import type {
   AgentTask,
   AskUserOption,
@@ -1205,7 +1205,7 @@ export const ToolApprovalBlock = memo(function ToolApprovalBlock({
               </div>
             )}
 
-            {request.toolName === TERMINAL_EXEC_TOOL_NAME
+            {request.toolName === BASH_TOOL_NAME
               ? renderApprovalTerminalOutput(toolResult)
               : null}
           </div>

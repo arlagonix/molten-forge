@@ -105,7 +105,7 @@ function SettingsSelectRow({
         </div>
       </div>
       <Select value={value} onValueChange={onValueChange}>
-        <SelectTrigger className="h-8 w-28 shrink-0" aria-label={title}>
+        <SelectTrigger className="h-8 w-[6.25rem] shrink-0" aria-label={title}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent align="end">

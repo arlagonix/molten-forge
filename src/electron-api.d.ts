@@ -92,7 +92,6 @@ declare global {
       cleanupChatMessageWorkspace: (request: { chatId: string; messageId: string; generatedFileStoragePaths?: string[] }) => Promise<{ deleted: number }>;
       processAttachments: (request: AttachmentInput[] | { inputs: AttachmentInput[] }) => Promise<AttachmentProcessResult>;
       readAttachmentDataUrl: (request: { storagePath: string; mimeType?: string }) => Promise<string>;
-      materializeAttachments: (request: { chatId: string; messageId: string; attachments: ChatAttachment[] }) => Promise<AttachmentMaterializeResult>;
       exportAttachment: (request: { storagePath: string; name?: string }) => Promise<{ cancelled: boolean; path?: string }>;
       deleteUnusedAttachments: (request: ChatAttachment[] | { attachments?: ChatAttachment[]; storagePaths?: string[]; storagePath?: string }) => Promise<{ deleted: number }>;
       deleteTemporaryAttachments: (request: ChatAttachment[] | { attachments?: ChatAttachment[]; storagePaths?: string[]; storagePath?: string }) => Promise<{ deleted: number }>;
@@ -154,7 +153,7 @@ declare global {
       exportTool: (tool: LoadedToolInfo) => Promise<ToolExportResult>;
       exportTools: (tools: LoadedToolInfo[]) => Promise<ToolExportResult>;
       openToolsFolder: () => Promise<void>;
-      loadSkills: () => Promise<LoadedSkillInfo[]>;
+      loadSkills: (request?: { workspaceRoots?: ChatWorkspaceRoot[] }) => Promise<LoadedSkillInfo[]>;
       saveSkill: (skill: LoadedSkillInfo, previousName?: string) => Promise<LoadedSkillInfo>;
       deleteSkill: (skillName: string) => Promise<void>;
       importSkills: () => Promise<SkillImportResult>;
@@ -180,7 +179,6 @@ declare global {
         | { cancelled: false; path: string; name: string }
       >;
       openFolder: (folderPath: string) => Promise<void>;
-      ensureChatWorkspace: (chatId: string) => Promise<ChatWorkspaceRoot>;
     };
   }
 }

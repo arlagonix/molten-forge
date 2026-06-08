@@ -56,7 +56,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   BUILTIN_AGENT_NAMES,
@@ -82,9 +81,11 @@ import type {
   AgentContextMode,
   AgentImportResult,
   AgentsSettings,
+  FeaturePermission,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
+  Permission,
   ProviderConfig,
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
@@ -119,6 +120,89 @@ type AgentsDialogProps = {
 };
 
 const DEFAULT_AGENT_MAX_NESTING_DEPTH = 2;
+
+function getAgentsMasterPermission(
+  settings: AgentsSettings,
+): FeaturePermission {
+  return settings.agentsPermission ?? "custom";
+}
+
+function getAgentPermission(
+  settings: AgentsSettings,
+  agentName: string,
+): Permission {
+  if (settings.agentPermissions?.[agentName])
+    return settings.agentPermissions[agentName];
+  return settings.enabled === false ? "deny" : "ask";
+}
+
+function getDisplayedAgentPermission(
+  settings: AgentsSettings,
+  agentName: string,
+): Permission {
+  const masterPermission = getAgentsMasterPermission(settings);
+  return masterPermission === "custom"
+    ? getAgentPermission(settings, agentName)
+    : masterPermission;
+}
+
+function PermissionSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Permission;
+  onChange: (value: Permission) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as Permission)}
+      disabled={disabled}
+    >
+      <SelectTrigger
+        className="h-8 w-[6.25rem] shrink-0"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="allow">Allow</SelectItem>
+        <SelectItem value="ask">Ask</SelectItem>
+        <SelectItem value="deny">Deny</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function MasterPermissionSelect({
+  value,
+  onChange,
+}: {
+  value: FeaturePermission;
+  onChange: (value: FeaturePermission) => void;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as FeaturePermission)}
+    >
+      <SelectTrigger
+        className="h-8 w-27 shrink-0"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="custom">Custom</SelectItem>
+        <SelectItem value="allow">Allow</SelectItem>
+        <SelectItem value="ask">Ask</SelectItem>
+        <SelectItem value="deny">Deny</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
 
 function createBlankAgentDraft(): AgentDraft {
   return {
@@ -232,7 +316,10 @@ function formatAgentImportSummary(result: AgentImportResult) {
   ].join(" · ");
 }
 
-function createUniqueAgentCloneName(baseName: string, agents: LoadedAgentInfo[]) {
+function createUniqueAgentCloneName(
+  baseName: string,
+  agents: LoadedAgentInfo[],
+) {
   const existingNames = new Set(agents.map((agent) => agent.name));
   const normalizedBase = baseName.trim() || "agent";
 
@@ -285,6 +372,24 @@ export const AgentsDialog = memo(function AgentsDialog({
     ],
     [builtInAgents, loadedAgents],
   );
+  const groupedDisplayedAgents = useMemo(
+    () =>
+      [
+        {
+          title: "Built-in",
+          agents: displayedAgents.filter((agent) =>
+            isBuiltInAgentName(agent.name),
+          ),
+        },
+        {
+          title: "Custom",
+          agents: displayedAgents.filter(
+            (agent) => !isBuiltInAgentName(agent.name),
+          ),
+        },
+      ].filter((group) => group.agents.length > 0),
+    [displayedAgents],
+  );
   const selectedAgent = useMemo(
     () =>
       displayedAgents.find((agent) => agent.name === selectedAgentName) ?? null,
@@ -293,8 +398,11 @@ export const AgentsDialog = memo(function AgentsDialog({
   const selectedAgentIsBuiltIn = selectedAgent
     ? isBuiltInAgentName(selectedAgent.name)
     : false;
+  const agentsMasterPermission = getAgentsMasterPermission(agentsSettings);
+  const childPermissionsLocked = agentsMasterPermission !== "custom";
   const enabledAgentsCount = displayedAgents.filter(
-    (agent) => agent.enabled,
+    (agent) =>
+      getDisplayedAgentPermission(agentsSettings, agent.name) !== "deny",
   ).length;
 
   const visibleProviderGroups = useMemo(() => {
@@ -522,7 +630,9 @@ export const AgentsDialog = memo(function AgentsDialog({
   const toolSearchText = toolSearch.trim().toLowerCase();
   const visibleTools = toolSearchText
     ? availableTools.filter((tool) =>
-        `${tool.name} ${tool.description}`.toLowerCase().includes(toolSearchText),
+        `${tool.name} ${tool.description}`
+          .toLowerCase()
+          .includes(toolSearchText),
       )
     : availableTools;
   const toolsByName = useMemo(
@@ -543,6 +653,18 @@ export const AgentsDialog = memo(function AgentsDialog({
     [displayedAgents],
   );
 
+  function setAgentPermission(agentName: string, permission: Permission) {
+    onAgentsSettingsChange((current) => ({
+      ...current,
+      enabled: true,
+      permissionModelVersion: 2,
+      agentPermissions: {
+        ...(current.agentPermissions ?? {}),
+        [agentName]: permission,
+      },
+    }));
+  }
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -555,7 +677,7 @@ export const AgentsDialog = memo(function AgentsDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[400px_minmax(0,1fr)]">
             <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
@@ -566,42 +688,24 @@ export const AgentsDialog = memo(function AgentsDialog({
                 </span>
               </div>
 
-              <div
-                role="button"
-                tabIndex={0}
-                className="mb-3 flex cursor-pointer items-center justify-between gap-3 border bg-background px-3 py-2 text-base outline-none"
-                onClick={() =>
-                  onAgentsSettingsChange((current) => ({
-                    ...current,
-                    enabled: !current.enabled,
-                  }))
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    onAgentsSettingsChange((current) => ({
-                      ...current,
-                      enabled: !current.enabled,
-                    }));
-                  }
-                }}
-              >
+              <div className="mb-3 flex items-start justify-between gap-3 border bg-background px-3 py-2 text-base">
                 <span className="min-w-0">
-                  <span className="block font-medium">Enable agents globally</span>
-                  <span className="block select-none text-sm leading-5 text-muted-foreground">
-                    Disabled globally hides agents from manual and model calls.
+                  <span className="block font-medium">Agents</span>
+                  <span className="block text-sm leading-5 text-muted-foreground">
+                    Master permission for the whole agents feature. Modes can
+                    override it.
                   </span>
                 </span>
-                <Switch
-                  checked={agentsSettings.enabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onCheckedChange={(checked) =>
+                <MasterPermissionSelect
+                  value={agentsMasterPermission}
+                  onChange={(permission) =>
                     onAgentsSettingsChange((current) => ({
                       ...current,
-                      enabled: checked,
+                      enabled: permission !== "deny",
+                      agentsPermission: permission,
+                      permissionModelVersion: 2,
                     }))
                   }
-                  className="shrink-0 cursor-pointer"
                 />
               </div>
 
@@ -643,7 +747,9 @@ export const AgentsDialog = memo(function AgentsDialog({
                       <Upload className="size-4" />
                       Export all agents...
                     </DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => void openAgentStorageFolder()}>
+                    <DropdownMenuItem
+                      onSelect={() => void openAgentStorageFolder()}
+                    >
                       <FolderOpen className="size-4" />
                       Open agents folder
                     </DropdownMenuItem>
@@ -651,64 +757,54 @@ export const AgentsDialog = memo(function AgentsDialog({
                 </DropdownMenu>
               </div>
 
-              <div className="grid gap-1.5">
-                {displayedAgents.map((agent) => {
-                  const isAgentBuiltIn = isBuiltInAgentName(agent.name);
-
-                  return (
-                  <div
-                    key={agent.id}
-                    role="button"
-                    tabIndex={0}
-                    className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
-                      selectedAgent?.id === agent.id
-                        ? "border-primary/30 bg-accent text-accent-foreground"
-                        : "border-transparent hover:border-border hover:bg-muted/60",
-                    )}
-                    onClick={() => setSelectedAgentName(agent.name)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setSelectedAgentName(agent.name);
-                      }
-                    }}
-                  >
-                    <Bot className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-base leading-6">{agent.name}</div>
-                      <div className="line-clamp-2 text-sm leading-5 text-muted-foreground">
-                        {agent.description}
-                      </div>
-                    </div>
-                    {isAgentBuiltIn ? (
-                      <span className="mt-0.5 shrink-0 border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                        Built-in
-                      </span>
-                    ) : (
-                      <Switch
-                        checked={agent.enabled}
-                        onClick={(event) => event.stopPropagation()}
-                        onCheckedChange={async (checked) => {
-                          const updated = { ...agent, enabled: checked };
-                          try {
-                            const saved = await saveAgent(updated);
-                            onLoadedAgentsChange((current) =>
-                              current.map((item) => (item.id === saved.id ? saved : item)),
-                            );
-                            if (agentDraft?.id === saved.id)
-                              setAgentDraft(agentToDraft(saved));
-                          } catch (error) {
-                            showError("Failed to update agent", labelForError(error));
+              <div className="grid gap-3">
+                {groupedDisplayedAgents.map((group) => (
+                  <div key={group.title} className="grid gap-1.5">
+                    <Label className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {group.title}
+                    </Label>
+                    {group.agents.map((agent) => (
+                      <div
+                        key={agent.id}
+                        role="button"
+                        tabIndex={0}
+                        className={cn(
+                          "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
+                          selectedAgent?.id === agent.id
+                            ? "border-primary/30 bg-accent text-accent-foreground"
+                            : "border-transparent hover:border-border hover:bg-muted/60",
+                        )}
+                        onClick={() => setSelectedAgentName(agent.name)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setSelectedAgentName(agent.name);
                           }
                         }}
-                        className="mt-0.5 shrink-0 cursor-pointer"
-                        title={agent.enabled ? "Disable agent" : "Enable agent"}
-                      />
-                    )}
+                      >
+                        <Bot className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-base leading-6">
+                            {agent.name}
+                          </div>
+                          <div className="line-clamp-2 text-sm leading-5 text-muted-foreground">
+                            {agent.description}
+                          </div>
+                        </div>
+                        <PermissionSelect
+                          value={getDisplayedAgentPermission(
+                            agentsSettings,
+                            agent.name,
+                          )}
+                          disabled={childPermissionsLocked}
+                          onChange={(next) =>
+                            setAgentPermission(agent.name, next)
+                          }
+                        />
+                      </div>
+                    ))}
                   </div>
-                  );
-                })}
+                ))}
 
                 {displayedAgents.length === 0 && (
                   <div className="border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
@@ -727,10 +823,15 @@ export const AgentsDialog = memo(function AgentsDialog({
                       key={`${error.source}:${error.message}`}
                       className="border border-destructive/40 bg-destructive/5 px-2 py-1.5 text-sm leading-5"
                     >
-                      <div className="truncate font-medium text-destructive" title={error.source}>
+                      <div
+                        className="truncate font-medium text-destructive"
+                        title={error.source}
+                      >
                         {error.source}
                       </div>
-                      <div className="text-muted-foreground">{error.message}</div>
+                      <div className="text-muted-foreground">
+                        {error.message}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -749,38 +850,44 @@ export const AgentsDialog = memo(function AgentsDialog({
                             ? "Edit agent"
                             : "New agent"}
                       </Label>
-                      {selectedAgent && agentDraft && !selectedAgentIsBuiltIn && (
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              title="Agent options"
-                            >
-                              <MoreHorizontal className="size-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-44">
-                            <DropdownMenuItem onSelect={() => cloneCurrentAgent()}>
-                              <Copy className="size-4" />
-                              Clone
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onSelect={() => void exportCurrentAgent()}>
-                              <Upload className="size-4" />
-                              Export
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onSelect={() => void deleteCurrentAgent()}
-                            >
-                              <Trash2 className="size-4" />
-                              Delete
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      )}
+                      {selectedAgent &&
+                        agentDraft &&
+                        !selectedAgentIsBuiltIn && (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                title="Agent options"
+                              >
+                                <MoreHorizontal className="size-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                              <DropdownMenuItem
+                                onSelect={() => cloneCurrentAgent()}
+                              >
+                                <Copy className="size-4" />
+                                Clone
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onSelect={() => void exportCurrentAgent()}
+                              >
+                                <Upload className="size-4" />
+                                Export
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onSelect={() => void deleteCurrentAgent()}
+                              >
+                                <Trash2 className="size-4" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                     </div>
                   </div>
 
@@ -804,7 +911,11 @@ export const AgentsDialog = memo(function AgentsDialog({
                         <Textarea
                           id="agent-description"
                           value={agentDraft.description}
-                          onChange={(event) => updateAgentDraft({ description: event.target.value })}
+                          onChange={(event) =>
+                            updateAgentDraft({
+                              description: event.target.value,
+                            })
+                          }
                           placeholder="What this agent is good at and when the main model should call it."
                           disabled={selectedAgentIsBuiltIn}
                           className="min-h-24 leading-6"
@@ -813,7 +924,9 @@ export const AgentsDialog = memo(function AgentsDialog({
 
                       <div className="grid gap-2">
                         <div className="flex items-center justify-between gap-2">
-                          <Label htmlFor="agent-instructions">Instructions</Label>
+                          <Label htmlFor="agent-instructions">
+                            Instructions
+                          </Label>
                           <Button
                             type="button"
                             variant="ghost"
@@ -830,7 +943,9 @@ export const AgentsDialog = memo(function AgentsDialog({
                           id="agent-instructions"
                           value={agentDraft.instructions}
                           onChange={(event) =>
-                            updateAgentDraft({ instructions: event.target.value })
+                            updateAgentDraft({
+                              instructions: event.target.value,
+                            })
                           }
                           placeholder="Agent system prompt / instructions."
                           disabled={selectedAgentIsBuiltIn}
@@ -846,7 +961,9 @@ export const AgentsDialog = memo(function AgentsDialog({
                           onValueChange={(value) =>
                             updateAgentDraft({
                               contextMode:
-                                value === "full_chat" ? "full_chat" : "task_only",
+                                value === "full_chat"
+                                  ? "full_chat"
+                                  : "task_only",
                             })
                           }
                         >
@@ -903,7 +1020,10 @@ export const AgentsDialog = memo(function AgentsDialog({
                             align="start"
                             className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0"
                           >
-                            <Command shouldFilter={false} className="h-auto max-h-[min(24rem,var(--radix-popover-content-available-height))] overflow-hidden">
+                            <Command
+                              shouldFilter={false}
+                              className="h-auto max-h-[min(24rem,var(--radix-popover-content-available-height))] overflow-hidden"
+                            >
                               <CommandInput
                                 value={modelSearch}
                                 onValueChange={setModelSearch}
@@ -911,13 +1031,18 @@ export const AgentsDialog = memo(function AgentsDialog({
                               />
                               <CommandList
                                 className="max-h-80 overflow-y-auto overscroll-contain chat-message-scrollbar"
-                                onWheelCapture={(event) => event.stopPropagation()}
+                                onWheelCapture={(event) =>
+                                  event.stopPropagation()
+                                }
                               >
                                 <CommandGroup heading="Default">
                                   <CommandItem
                                     value="Use current chat model"
                                     onSelect={() => {
-                                      updateAgentDraft({ providerId: "", model: "" });
+                                      updateAgentDraft({
+                                        providerId: "",
+                                        model: "",
+                                      });
                                       setModelPickerOpen(false);
                                       setModelSearch("");
                                     }}
@@ -929,7 +1054,8 @@ export const AgentsDialog = memo(function AgentsDialog({
                                     <Check
                                       className={cn(
                                         "size-4",
-                                        !agentDraft.providerId && !agentDraft.model
+                                        !agentDraft.providerId &&
+                                          !agentDraft.model
                                           ? "opacity-100"
                                           : "opacity-0",
                                       )}
@@ -937,45 +1063,49 @@ export const AgentsDialog = memo(function AgentsDialog({
                                   </CommandItem>
                                 </CommandGroup>
                                 {visibleProviderGroups.length > 0 ? (
-                                  visibleProviderGroups.map(({ provider, models }) => (
-                                    <CommandGroup
-                                      key={provider.id}
-                                      heading={providerDisplayName(provider)}
-                                    >
-                                      {models.map((model) => (
-                                        <CommandItem
-                                          key={`${provider.id}:${model}`}
-                                          value={`${providerDisplayName(provider)} ${model}`}
-                                          onSelect={() => {
-                                            updateAgentDraft({
-                                              providerId: provider.id,
-                                              model,
-                                            });
-                                            setModelPickerOpen(false);
-                                            setModelSearch("");
-                                          }}
-                                          className="min-w-0 cursor-pointer"
-                                          title={`${providerDisplayName(provider)} · ${model}`}
-                                        >
-                                          <span className="min-w-0 flex-1 truncate">
-                                            {model}
-                                          </span>
-                                          <Check
-                                            className={cn(
-                                              "size-4",
-                                              agentDraft.providerId === provider.id &&
-                                                agentDraft.model === model
-                                                ? "opacity-100"
-                                                : "opacity-0",
-                                            )}
-                                          />
-                                        </CommandItem>
-                                      ))}
-                                    </CommandGroup>
-                                  ))
+                                  visibleProviderGroups.map(
+                                    ({ provider, models }) => (
+                                      <CommandGroup
+                                        key={provider.id}
+                                        heading={providerDisplayName(provider)}
+                                      >
+                                        {models.map((model) => (
+                                          <CommandItem
+                                            key={`${provider.id}:${model}`}
+                                            value={`${providerDisplayName(provider)} ${model}`}
+                                            onSelect={() => {
+                                              updateAgentDraft({
+                                                providerId: provider.id,
+                                                model,
+                                              });
+                                              setModelPickerOpen(false);
+                                              setModelSearch("");
+                                            }}
+                                            className="min-w-0 cursor-pointer"
+                                            title={`${providerDisplayName(provider)} · ${model}`}
+                                          >
+                                            <span className="min-w-0 flex-1 truncate">
+                                              {model}
+                                            </span>
+                                            <Check
+                                              className={cn(
+                                                "size-4",
+                                                agentDraft.providerId ===
+                                                  provider.id &&
+                                                  agentDraft.model === model
+                                                  ? "opacity-100"
+                                                  : "opacity-0",
+                                              )}
+                                            />
+                                          </CommandItem>
+                                        ))}
+                                      </CommandGroup>
+                                    ),
+                                  )
                                 ) : (
                                   <CommandEmpty>
-                                    No visible models. Enable models in Providers.
+                                    No visible models. Enable models in
+                                    Providers.
                                   </CommandEmpty>
                                 )}
                               </CommandList>
@@ -985,7 +1115,9 @@ export const AgentsDialog = memo(function AgentsDialog({
                       </div>
 
                       <div className="grid gap-2">
-                        <Label htmlFor="agent-max-nesting-depth">Max nesting depth</Label>
+                        <Label htmlFor="agent-max-nesting-depth">
+                          Max nesting depth
+                        </Label>
                         <Input
                           id="agent-max-nesting-depth"
                           type="number"
@@ -1000,76 +1132,142 @@ export const AgentsDialog = memo(function AgentsDialog({
 
                       {selectedAgentIsBuiltIn ? (
                         <div className="border bg-muted/25 px-3 py-2 text-sm leading-5 text-muted-foreground">
-                          Built-in agents mirror the current chat's effective tools, skills, and allowed agents at runtime, so only their max nesting depth is editable here.
+                          Built-in agents mirror the current chat's effective
+                          tools, skills, and allowed agents at runtime, so only
+                          their max nesting depth is editable here.
                         </div>
                       ) : (
                         <>
-                      <div className="grid gap-2">
-                        <Label>Loaded skills</Label>
-                        <Popover
-                          onOpenChange={(nextOpen) => {
-                            if (!nextOpen) setLoadedSkillSearch("");
-                          }}
-                        >
-                          <PopoverTrigger asChild>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              role="combobox"
-                              className="w-full justify-between px-3 text-left font-normal"
-                              disabled={availableSkills.length === 0}
+                          <div className="grid gap-2">
+                            <Label>Loaded skills</Label>
+                            <Popover
+                              onOpenChange={(nextOpen) => {
+                                if (!nextOpen) setLoadedSkillSearch("");
+                              }}
                             >
-                              <span
-                                className={cn(
-                                  "min-w-0 truncate",
-                                  agentDraft.loadedSkillNames.length === 0 && "text-muted-foreground",
-                                )}
+                              <PopoverTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  role="combobox"
+                                  className="w-full justify-between px-3 text-left font-normal"
+                                  disabled={availableSkills.length === 0}
+                                >
+                                  <span
+                                    className={cn(
+                                      "min-w-0 truncate",
+                                      agentDraft.loadedSkillNames.length ===
+                                        0 && "text-muted-foreground",
+                                    )}
+                                  >
+                                    {agentDraft.loadedSkillNames.length > 0
+                                      ? `${agentDraft.loadedSkillNames.length} loaded skill${agentDraft.loadedSkillNames.length === 1 ? "" : "s"}`
+                                      : availableSkills.length > 0
+                                        ? "Select loaded skills"
+                                        : "No skills are available"}
+                                  </span>
+                                  <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                align="start"
+                                className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0"
                               >
-                                {agentDraft.loadedSkillNames.length > 0
-                                  ? `${agentDraft.loadedSkillNames.length} loaded skill${agentDraft.loadedSkillNames.length === 1 ? "" : "s"}`
-                                  : availableSkills.length > 0
-                                    ? "Select loaded skills"
-                                    : "No skills are available"}
-                              </span>
-                              <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0">
-                            <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-                              <div className="border-b p-2">
-                                <Input
-                                  value={loadedSkillSearch}
-                                  onChange={(event) => setLoadedSkillSearch(event.target.value)}
-                                  placeholder="Search skills..."
-                                  className="h-9"
-                                />
-                              </div>
-                              <div
-                                className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
-                                onWheelCapture={(event) => event.stopPropagation()}
-                              >
-                                {visibleLoadedSkills.length > 0 ? (
-                                  visibleLoadedSkills.map((skill) => {
-                                    const checked = agentDraft.loadedSkillNames.includes(skill.name);
+                                <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+                                  <div className="border-b p-2">
+                                    <Input
+                                      value={loadedSkillSearch}
+                                      onChange={(event) =>
+                                        setLoadedSkillSearch(event.target.value)
+                                      }
+                                      placeholder="Search skills..."
+                                      className="h-9"
+                                    />
+                                  </div>
+                                  <div
+                                    className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
+                                    onWheelCapture={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                  >
+                                    {visibleLoadedSkills.length > 0 ? (
+                                      visibleLoadedSkills.map((skill) => {
+                                        const checked =
+                                          agentDraft.loadedSkillNames.includes(
+                                            skill.name,
+                                          );
+                                        return (
+                                          <div
+                                            key={skill.name}
+                                            role="button"
+                                            tabIndex={0}
+                                            className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
+                                            onClick={() =>
+                                              toggleLoadedSkill(skill.name)
+                                            }
+                                            onKeyDown={(event) => {
+                                              if (
+                                                event.key === "Enter" ||
+                                                event.key === " "
+                                              ) {
+                                                event.preventDefault();
+                                                toggleLoadedSkill(skill.name);
+                                              }
+                                            }}
+                                            title={skill.description}
+                                          >
+                                            <Checkbox
+                                              checked={checked}
+                                              tabIndex={-1}
+                                              className="mt-1 shrink-0 pointer-events-none"
+                                            />
+                                            <span className="min-w-0 flex-1">
+                                              <span className="block truncate font-medium">
+                                                {skill.name}
+                                              </span>
+                                              {skill.description && (
+                                                <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                                                  {skill.description}
+                                                </span>
+                                              )}
+                                            </span>
+                                          </div>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="px-3 py-6 text-center text-base text-muted-foreground">
+                                        No skills found.
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+
+                            {agentDraft.loadedSkillNames.length > 0 && (
+                              <div className="grid max-h-56 gap-1 overflow-y-auto border bg-muted/10 p-2">
+                                {agentDraft.loadedSkillNames.map(
+                                  (skillName) => {
+                                    const skill =
+                                      loadedSkillsByName.get(skillName);
                                     return (
                                       <div
-                                        key={skill.name}
-                                        role="button"
-                                        tabIndex={0}
-                                        className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
-                                        onClick={() => toggleLoadedSkill(skill.name)}
-                                        onKeyDown={(event) => {
-                                          if (event.key === "Enter" || event.key === " ") {
-                                            event.preventDefault();
-                                            toggleLoadedSkill(skill.name);
-                                          }
-                                        }}
-                                        title={skill.description}
+                                        key={skillName}
+                                        className="flex min-w-0 items-start gap-2 px-2 py-1.5 hover:bg-muted/70"
+                                        title={skill?.description}
                                       >
-                                        <Checkbox checked={checked} tabIndex={-1} className="mt-1 shrink-0 pointer-events-none" />
+                                        <Checkbox
+                                          checked
+                                          onCheckedChange={() =>
+                                            toggleLoadedSkill(skillName)
+                                          }
+                                          className="mt-1 shrink-0"
+                                        />
                                         <span className="min-w-0 flex-1">
-                                          <span className="block truncate font-medium">{skill.name}</span>
-                                          {skill.description && (
+                                          <span className="block truncate font-medium">
+                                            {skillName}
+                                          </span>
+                                          {skill?.description && (
                                             <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
                                               {skill.description}
                                             </span>
@@ -1077,242 +1275,295 @@ export const AgentsDialog = memo(function AgentsDialog({
                                         </span>
                                       </div>
                                     );
-                                  })
-                                ) : (
-                                  <div className="px-3 py-6 text-center text-base text-muted-foreground">
-                                    No skills found.
-                                  </div>
+                                  },
                                 )}
                               </div>
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-
-                        {agentDraft.loadedSkillNames.length > 0 && (
-                          <div className="grid max-h-56 gap-1 overflow-y-auto border bg-muted/10 p-2">
-                            {agentDraft.loadedSkillNames.map((skillName) => {
-                              const skill = loadedSkillsByName.get(skillName);
-                              return (
-                                <div key={skillName} className="flex min-w-0 items-start gap-2 px-2 py-1.5 hover:bg-muted/70" title={skill?.description}>
-                                  <Checkbox checked onCheckedChange={() => toggleLoadedSkill(skillName)} className="mt-1 shrink-0" />
-                                  <span className="min-w-0 flex-1">
-                                    <span className="block truncate font-medium">{skillName}</span>
-                                    {skill?.description && (
-                                      <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                                        {skill.description}
-                                      </span>
-                                    )}
-                                  </span>
-                                </div>
-                              );
-                            })}
+                            )}
                           </div>
-                        )}
-                      </div>
 
-                      <div className="grid gap-2">
-                        <Label>Allowed tools</Label>
-                          <Popover
-                            onOpenChange={(nextOpen) => {
-                              if (!nextOpen) setToolSearch("");
-                            }}
-                          >
-                            <PopoverTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                role="combobox"
-                                className="w-full justify-between px-3 text-left font-normal"
-                                disabled={availableTools.length === 0}
-                              >
-                                <span
-                                  className={cn(
-                                    "min-w-0 truncate",
-                                    agentDraft.allowedToolNames.length === 0 && "text-muted-foreground",
-                                  )}
+                          <div className="grid gap-2">
+                            <Label>Allowed tools</Label>
+                            <Popover
+                              onOpenChange={(nextOpen) => {
+                                if (!nextOpen) setToolSearch("");
+                              }}
+                            >
+                              <PopoverTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  role="combobox"
+                                  className="w-full justify-between px-3 text-left font-normal"
+                                  disabled={availableTools.length === 0}
                                 >
-                                  {agentDraft.allowedToolNames.length > 0
-                                    ? `${agentDraft.allowedToolNames.length} allowed tool${agentDraft.allowedToolNames.length === 1 ? "" : "s"}`
-                                    : availableTools.length > 0
-                                      ? "Select allowed tools"
-                                      : "No tools are available"}
-                                </span>
-                                <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0">
-                              <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-                                <div className="border-b p-2">
-                                  <Input value={toolSearch} onChange={(event) => setToolSearch(event.target.value)} placeholder="Search tools..." className="h-9" />
-                                </div>
-                                <div
-                                className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
-                                onWheelCapture={(event) => event.stopPropagation()}
+                                  <span
+                                    className={cn(
+                                      "min-w-0 truncate",
+                                      agentDraft.allowedToolNames.length ===
+                                        0 && "text-muted-foreground",
+                                    )}
+                                  >
+                                    {agentDraft.allowedToolNames.length > 0
+                                      ? `${agentDraft.allowedToolNames.length} allowed tool${agentDraft.allowedToolNames.length === 1 ? "" : "s"}`
+                                      : availableTools.length > 0
+                                        ? "Select allowed tools"
+                                        : "No tools are available"}
+                                  </span>
+                                  <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                align="start"
+                                className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0"
                               >
-                                  {visibleTools.length > 0 ? (
-                                    visibleTools.map((tool) => {
-                                      const checked = agentDraft.allowedToolNames.includes(tool.name);
-                                      return (
-                                        <div
-                                          key={tool.name}
-                                          role="button"
-                                          tabIndex={0}
-                                          className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
-                                          onClick={() => toggleAllowedTool(tool.name)}
-                                          onKeyDown={(event) => {
-                                            if (event.key === "Enter" || event.key === " ") {
-                                              event.preventDefault();
-                                              toggleAllowedTool(tool.name);
-                                            }
-                                          }}
-                                          title={tool.description}
-                                        >
-                                          <Checkbox checked={checked} tabIndex={-1} className="mt-1 shrink-0 pointer-events-none" />
-                                          <span className="min-w-0 flex-1">
-                                            <span className="block truncate font-medium">{tool.name}</span>
-                                            {tool.description && (
-                                              <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                                                {tool.description}
-                                              </span>
-                                            )}
-                                          </span>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <div className="px-3 py-6 text-center text-base text-muted-foreground">
-                                      No tools found.
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-
-                          {agentDraft.allowedToolNames.length > 0 && (
-                            <div className="grid max-h-56 gap-1 overflow-y-auto border bg-muted/10 p-2">
-                              {agentDraft.allowedToolNames.map((toolName) => {
-                                const tool = toolsByName.get(toolName);
-                                return (
-                                  <div key={toolName} className="flex min-w-0 items-start gap-2 px-2 py-1.5 hover:bg-muted/70" title={tool?.description}>
-                                    <Wrench className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                                    <span className="min-w-0 flex-1">
-                                      <span className="block truncate font-medium">{toolName}</span>
-                                      {tool?.description && (
-                                        <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                                          {tool.description}
-                                        </span>
-                                      )}
-                                    </span>
-                                    <Checkbox checked onCheckedChange={() => toggleAllowedTool(toolName)} className="mt-1 shrink-0" />
+                                <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+                                  <div className="border-b p-2">
+                                    <Input
+                                      value={toolSearch}
+                                      onChange={(event) =>
+                                        setToolSearch(event.target.value)
+                                      }
+                                      placeholder="Search tools..."
+                                      className="h-9"
+                                    />
                                   </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                      </div>
+                                  <div
+                                    className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
+                                    onWheelCapture={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                  >
+                                    {visibleTools.length > 0 ? (
+                                      visibleTools.map((tool) => {
+                                        const checked =
+                                          agentDraft.allowedToolNames.includes(
+                                            tool.name,
+                                          );
+                                        return (
+                                          <div
+                                            key={tool.name}
+                                            role="button"
+                                            tabIndex={0}
+                                            className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
+                                            onClick={() =>
+                                              toggleAllowedTool(tool.name)
+                                            }
+                                            onKeyDown={(event) => {
+                                              if (
+                                                event.key === "Enter" ||
+                                                event.key === " "
+                                              ) {
+                                                event.preventDefault();
+                                                toggleAllowedTool(tool.name);
+                                              }
+                                            }}
+                                            title={tool.description}
+                                          >
+                                            <Checkbox
+                                              checked={checked}
+                                              tabIndex={-1}
+                                              className="mt-1 shrink-0 pointer-events-none"
+                                            />
+                                            <span className="min-w-0 flex-1">
+                                              <span className="block truncate font-medium">
+                                                {tool.name}
+                                              </span>
+                                              {tool.description && (
+                                                <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                                                  {tool.description}
+                                                </span>
+                                              )}
+                                            </span>
+                                          </div>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="px-3 py-6 text-center text-base text-muted-foreground">
+                                        No tools found.
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
 
-                      <div className="grid gap-2">
-                        <Label>Allowed agents</Label>
-                          <Popover
-                            onOpenChange={(nextOpen) => {
-                              if (!nextOpen) setAgentSearch("");
-                            }}
-                          >
-                            <PopoverTrigger asChild>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                role="combobox"
-                                className="w-full justify-between px-3 text-left font-normal"
-                                disabled={displayedAgents.length <= 1}
-                              >
-                                <span
-                                  className={cn(
-                                    "min-w-0 truncate",
-                                    agentDraft.allowedAgentNames.length === 0 && "text-muted-foreground",
-                                  )}
+                            {agentDraft.allowedToolNames.length > 0 && (
+                              <div className="grid max-h-56 gap-1 overflow-y-auto border bg-muted/10 p-2">
+                                {agentDraft.allowedToolNames.map((toolName) => {
+                                  const tool = toolsByName.get(toolName);
+                                  return (
+                                    <div
+                                      key={toolName}
+                                      className="flex min-w-0 items-start gap-2 px-2 py-1.5 hover:bg-muted/70"
+                                      title={tool?.description}
+                                    >
+                                      <Wrench className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate font-medium">
+                                          {toolName}
+                                        </span>
+                                        {tool?.description && (
+                                          <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                                            {tool.description}
+                                          </span>
+                                        )}
+                                      </span>
+                                      <Checkbox
+                                        checked
+                                        onCheckedChange={() =>
+                                          toggleAllowedTool(toolName)
+                                        }
+                                        className="mt-1 shrink-0"
+                                      />
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="grid gap-2">
+                            <Label>Allowed agents</Label>
+                            <Popover
+                              onOpenChange={(nextOpen) => {
+                                if (!nextOpen) setAgentSearch("");
+                              }}
+                            >
+                              <PopoverTrigger asChild>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  role="combobox"
+                                  className="w-full justify-between px-3 text-left font-normal"
+                                  disabled={displayedAgents.length <= 1}
                                 >
-                                  {agentDraft.allowedAgentNames.length > 0
-                                    ? `${agentDraft.allowedAgentNames.length} allowed agent${agentDraft.allowedAgentNames.length === 1 ? "" : "s"}`
-                                    : displayedAgents.length > 1
-                                      ? "Select allowed agents"
-                                      : "No other agents are available"}
-                                </span>
-                                <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0">
-                              <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-                                <div className="border-b p-2">
-                                  <Input value={agentSearch} onChange={(event) => setAgentSearch(event.target.value)} placeholder="Search agents..." className="h-9" />
-                                </div>
-                                <div
-                                className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
-                                onWheelCapture={(event) => event.stopPropagation()}
+                                  <span
+                                    className={cn(
+                                      "min-w-0 truncate",
+                                      agentDraft.allowedAgentNames.length ===
+                                        0 && "text-muted-foreground",
+                                    )}
+                                  >
+                                    {agentDraft.allowedAgentNames.length > 0
+                                      ? `${agentDraft.allowedAgentNames.length} allowed agent${agentDraft.allowedAgentNames.length === 1 ? "" : "s"}`
+                                      : displayedAgents.length > 1
+                                        ? "Select allowed agents"
+                                        : "No other agents are available"}
+                                  </span>
+                                  <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
+                                </Button>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                align="start"
+                                className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0"
                               >
-                                  {visibleAgents.length > 0 ? (
-                                    visibleAgents.map((agent) => {
-                                      const checked = agentDraft.allowedAgentNames.includes(agent.name);
-                                      return (
-                                        <div
-                                          key={agent.name}
-                                          role="button"
-                                          tabIndex={0}
-                                          className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
-                                          onClick={() => toggleAllowedAgent(agent.name)}
-                                          onKeyDown={(event) => {
-                                            if (event.key === "Enter" || event.key === " ") {
-                                              event.preventDefault();
-                                              toggleAllowedAgent(agent.name);
-                                            }
-                                          }}
-                                          title={agent.description}
-                                        >
-                                          <Checkbox checked={checked} tabIndex={-1} className="mt-1 shrink-0 pointer-events-none" />
-                                          <span className="min-w-0 flex-1">
-                                            <span className="block truncate font-medium">{agent.name}</span>
-                                            {agent.description && (
-                                              <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                                                {agent.description}
-                                              </span>
-                                            )}
-                                          </span>
-                                        </div>
-                                      );
-                                    })
-                                  ) : (
-                                    <div className="px-3 py-6 text-center text-base text-muted-foreground">
-                                      No agents found.
-                                    </div>
-                                  )}
-                                </div>
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-
-                          {agentDraft.allowedAgentNames.length > 0 && (
-                            <div className="grid max-h-56 gap-1 overflow-y-auto border bg-muted/10 p-2">
-                              {agentDraft.allowedAgentNames.map((agentName) => {
-                                const agent = agentsByName.get(agentName);
-                                return (
-                                  <div key={agentName} className="flex min-w-0 items-start gap-2 px-2 py-1.5 hover:bg-muted/70" title={agent?.description}>
-                                    <Bot className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                                    <span className="min-w-0 flex-1">
-                                      <span className="block truncate font-medium">{agentName}</span>
-                                      {agent?.description && (
-                                        <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                                          {agent.description}
-                                        </span>
-                                      )}
-                                    </span>
-                                    <Checkbox checked onCheckedChange={() => toggleAllowedAgent(agentName)} className="mt-1 shrink-0" />
+                                <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
+                                  <div className="border-b p-2">
+                                    <Input
+                                      value={agentSearch}
+                                      onChange={(event) =>
+                                        setAgentSearch(event.target.value)
+                                      }
+                                      placeholder="Search agents..."
+                                      className="h-9"
+                                    />
                                   </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                      </div>
+                                  <div
+                                    className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
+                                    onWheelCapture={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                  >
+                                    {visibleAgents.length > 0 ? (
+                                      visibleAgents.map((agent) => {
+                                        const checked =
+                                          agentDraft.allowedAgentNames.includes(
+                                            agent.name,
+                                          );
+                                        return (
+                                          <div
+                                            key={agent.name}
+                                            role="button"
+                                            tabIndex={0}
+                                            className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
+                                            onClick={() =>
+                                              toggleAllowedAgent(agent.name)
+                                            }
+                                            onKeyDown={(event) => {
+                                              if (
+                                                event.key === "Enter" ||
+                                                event.key === " "
+                                              ) {
+                                                event.preventDefault();
+                                                toggleAllowedAgent(agent.name);
+                                              }
+                                            }}
+                                            title={agent.description}
+                                          >
+                                            <Checkbox
+                                              checked={checked}
+                                              tabIndex={-1}
+                                              className="mt-1 shrink-0 pointer-events-none"
+                                            />
+                                            <span className="min-w-0 flex-1">
+                                              <span className="block truncate font-medium">
+                                                {agent.name}
+                                              </span>
+                                              {agent.description && (
+                                                <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                                                  {agent.description}
+                                                </span>
+                                              )}
+                                            </span>
+                                          </div>
+                                        );
+                                      })
+                                    ) : (
+                                      <div className="px-3 py-6 text-center text-base text-muted-foreground">
+                                        No agents found.
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+
+                            {agentDraft.allowedAgentNames.length > 0 && (
+                              <div className="grid max-h-56 gap-1 overflow-y-auto border bg-muted/10 p-2">
+                                {agentDraft.allowedAgentNames.map(
+                                  (agentName) => {
+                                    const agent = agentsByName.get(agentName);
+                                    return (
+                                      <div
+                                        key={agentName}
+                                        className="flex min-w-0 items-start gap-2 px-2 py-1.5 hover:bg-muted/70"
+                                        title={agent?.description}
+                                      >
+                                        <Bot className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                                        <span className="min-w-0 flex-1">
+                                          <span className="block truncate font-medium">
+                                            {agentName}
+                                          </span>
+                                          {agent?.description && (
+                                            <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+                                              {agent.description}
+                                            </span>
+                                          )}
+                                        </span>
+                                        <Checkbox
+                                          checked
+                                          onCheckedChange={() =>
+                                            toggleAllowedAgent(agentName)
+                                          }
+                                          className="mt-1 shrink-0"
+                                        />
+                                      </div>
+                                    );
+                                  },
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </>
                       )}
                     </div>
@@ -1321,7 +1572,9 @@ export const AgentsDialog = memo(function AgentsDialog({
                   <DialogFooter className="shrink-0 border-t bg-background px-5 py-4">
                     {selectedAgentIsBuiltIn ? (
                       <div className="w-full text-sm leading-5 text-muted-foreground">
-                        Built-in agents are read-only. They are always available when agents are enabled and mirror the current chat's effective tools and skills.
+                        Built-in agents are read-only. They are always available
+                        when agents are enabled and mirror the current chat's
+                        effective tools and skills.
                       </div>
                     ) : (
                       <>
@@ -1329,7 +1582,8 @@ export const AgentsDialog = memo(function AgentsDialog({
                           type="button"
                           variant="outline"
                           onClick={() => {
-                            if (selectedAgent) setAgentDraft(agentToDraft(selectedAgent));
+                            if (selectedAgent)
+                              setAgentDraft(agentToDraft(selectedAgent));
                             else setAgentDraft(createBlankAgentDraft());
                           }}
                           disabled={!hasAgentDraftChanges || isSavingAgent}

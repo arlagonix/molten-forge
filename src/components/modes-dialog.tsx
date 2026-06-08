@@ -1,7 +1,4 @@
 import {
-  BookOpen,
-  Bot,
-  ChevronDown,
   Copy,
   Layers3,
   Maximize2,
@@ -9,13 +6,11 @@ import {
   Plus,
   Sparkles,
   Trash2,
-  Wrench,
 } from "lucide-react";
-import type { Dispatch, ReactNode, SetStateAction } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { memo, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -34,25 +29,35 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  DEFAULT_PERMISSION,
+  FEATURE_PERMISSION_KEY,
   getBuiltInModeDefaults,
-  modeToEditableCapabilities,
+  normalizeModePermissionMap,
   normalizeModesState,
-  updateBuiltInModeWithReset,
 } from "@/lib/ai-chat/modes";
 import type {
+  AgentsSettings,
   LoadedAgentInfo,
   LoadedModeInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   ModeBuiltInId,
+  ModeFeaturePermission,
+  ModePermission,
+  ModePermissionMap,
   ModesState,
+  Permission,
+  SkillsSettings,
+  ToolsSettings,
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
@@ -64,13 +69,11 @@ type ModesDialogProps = {
   availableTools: LoadedToolInfo[];
   availableSkills: LoadedSkillInfo[];
   availableAgents: LoadedAgentInfo[];
+  toolsSettings: ToolsSettings;
+  skillsSettings: SkillsSettings;
+  agentsSettings: AgentsSettings;
   showSuccess: (message: string, description?: string) => void;
   showError: (message: string, description?: string) => void;
-};
-
-type CapabilityItem = {
-  name: string;
-  description?: string;
 };
 
 type ModeDraft = {
@@ -81,56 +84,27 @@ type ModeDraft = {
   instructions: string;
   builtIn?: ModeBuiltInId;
   usesDefaultCapabilities?: boolean;
-  allowedToolNames: string[];
-  allowedSkillNames: string[];
-  allowedAgentNames: string[];
+  toolPermissions: ModePermissionMap;
+  skillPermissions: ModePermissionMap;
+  agentPermissions: ModePermissionMap;
 };
 
-type CapabilityPickerProps = {
-  title: string;
-  selectedLabel: string;
-  icon: ReactNode;
-  placeholder: string;
-  emptyLabel: string;
-  items: CapabilityItem[];
-  selectedNames: string[];
-  searchValue: string;
-  onSearchValueChange: (value: string) => void;
-  onToggle: (name: string) => void;
-};
-
-function normalizeNameList(names: string[]) {
-  return [...new Set(names.map((name) => name.trim()).filter(Boolean))];
-}
-
-function sortedNamesEqual(left: string[], right: string[]) {
-  return JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
+function normalizeModesForState(state: ModesState) {
+  return normalizeModesState(state).modes;
 }
 
 function createUniqueModeName(baseName: string, modes: LoadedModeInfo[]) {
   const existingNames = new Set(
     modes.map((mode) => mode.name.trim().toLowerCase()),
   );
-  const normalizedBaseName = baseName.trim() || "mode";
-
-  if (!existingNames.has(normalizedBaseName.toLowerCase())) {
-    return normalizedBaseName;
-  }
-
+  const base = baseName.trim() || "mode";
+  if (!existingNames.has(base.toLowerCase())) return base;
   for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${normalizedBaseName} ${index}`;
+    const candidate = `${base} ${index}`;
     if (!existingNames.has(candidate.toLowerCase())) return candidate;
   }
-
-  return `${normalizedBaseName} ${Date.now()}`;
+  return `${base} ${Date.now()}`;
 }
-
-function matchesSearch(search: string, ...values: Array<string | undefined>) {
-  const query = search.trim().toLowerCase();
-  if (!query) return true;
-  return values.some((value) => value?.toLowerCase().includes(query));
-}
-
 
 function createBlankModeDraft(): ModeDraft {
   return {
@@ -140,22 +114,13 @@ function createBlankModeDraft(): ModeDraft {
     description: "",
     instructions: "",
     usesDefaultCapabilities: false,
-    allowedToolNames: [],
-    allowedSkillNames: [],
-    allowedAgentNames: [],
+    toolPermissions: {},
+    skillPermissions: {},
+    agentPermissions: {},
   };
 }
 
-function modeToDraft(
-  mode: LoadedModeInfo,
-  context: {
-    availableTools: LoadedToolInfo[];
-    availableSkills: LoadedSkillInfo[];
-    availableAgents: LoadedAgentInfo[];
-  },
-): ModeDraft {
-  const capabilities = modeToEditableCapabilities(mode, context);
-
+function modeToDraft(mode: LoadedModeInfo): ModeDraft {
   return {
     id: mode.id,
     name: mode.name,
@@ -164,15 +129,15 @@ function modeToDraft(
     instructions: mode.instructions ?? "",
     builtIn: mode.builtIn,
     usesDefaultCapabilities: mode.usesDefaultCapabilities,
-    allowedToolNames: capabilities.toolNames,
-    allowedSkillNames: capabilities.skillNames,
-    allowedAgentNames: capabilities.agentNames,
+    toolPermissions: normalizeModePermissionMap(mode.toolPermissions),
+    skillPermissions: normalizeModePermissionMap(mode.skillPermissions),
+    agentPermissions: normalizeModePermissionMap(mode.agentPermissions),
   };
 }
 
 function draftToMode(
   draft: ModeDraft,
-  enabled: boolean = draft.enabled,
+  enabled = draft.enabled,
 ): LoadedModeInfo {
   return {
     id: draft.id,
@@ -184,196 +149,325 @@ function draftToMode(
     usesDefaultCapabilities: draft.builtIn
       ? draft.usesDefaultCapabilities !== false
       : false,
-    allowedToolNames: normalizeNameList(draft.allowedToolNames),
-    allowedSkillNames: normalizeNameList(draft.allowedSkillNames),
-    allowedAgentNames: normalizeNameList(draft.allowedAgentNames),
+    allowedToolNames: Object.entries(draft.toolPermissions)
+      .filter(
+        ([name, p]) =>
+          name !== FEATURE_PERMISSION_KEY &&
+          p !== "deny" &&
+          p !== "global" &&
+          p !== "custom",
+      )
+      .map(([name]) => name),
+    allowedSkillNames: Object.entries(draft.skillPermissions)
+      .filter(
+        ([name, p]) =>
+          name !== FEATURE_PERMISSION_KEY &&
+          p !== "deny" &&
+          p !== "global" &&
+          p !== "custom",
+      )
+      .map(([name]) => name),
+    allowedAgentNames: Object.entries(draft.agentPermissions)
+      .filter(
+        ([name, p]) =>
+          name !== FEATURE_PERMISSION_KEY &&
+          p !== "deny" &&
+          p !== "global" &&
+          p !== "custom",
+      )
+      .map(([name]) => name),
+    toolPermissions: draft.toolPermissions,
+    skillPermissions: draft.skillPermissions,
+    agentPermissions: draft.agentPermissions,
+    permissionModelVersion: 2,
   };
-}
-
-function areModeDraftsEqual(left: ModeDraft, right: ModeDraft) {
-  return (
-    left.id === right.id &&
-    left.name === right.name &&
-    left.enabled === right.enabled &&
-    left.description === right.description &&
-    left.instructions === right.instructions &&
-    left.builtIn === right.builtIn &&
-    (left.usesDefaultCapabilities !== false) ===
-      (right.usesDefaultCapabilities !== false) &&
-    sortedNamesEqual(left.allowedToolNames, right.allowedToolNames) &&
-    sortedNamesEqual(left.allowedSkillNames, right.allowedSkillNames) &&
-    sortedNamesEqual(left.allowedAgentNames, right.allowedAgentNames)
-  );
 }
 
 function validateModeDraft(draft: ModeDraft, modes: LoadedModeInfo[]) {
   const name = draft.name.trim();
-
   if (!name) throw new Error("Mode name is required.");
-
   const duplicate = modes.find(
     (mode) =>
-      mode.id !== draft.id && mode.name.trim().toLowerCase() === name.toLowerCase(),
+      mode.id !== draft.id &&
+      mode.name.trim().toLowerCase() === name.toLowerCase(),
   );
   if (duplicate) throw new Error(`A mode named "${name}" already exists.`);
 }
 
-function CapabilityPicker({
-  title,
-  selectedLabel,
-  icon,
-  placeholder,
-  emptyLabel,
-  items,
-  selectedNames,
-  searchValue,
-  onSearchValueChange,
-  onToggle,
-}: CapabilityPickerProps) {
-  const [open, setOpen] = useState(false);
-  const selectedNameSet = useMemo(() => new Set(selectedNames), [selectedNames]);
-  const visibleItems = useMemo(
-    () =>
-      items.filter((item) => matchesSearch(searchValue, item.name, item.description)),
-    [items, searchValue],
-  );
-  const itemsByName = useMemo(
-    () => new Map(items.map((item) => [item.name, item] as const)),
-    [items],
-  );
+function hasDraftChanges(
+  current: ModeDraft | null,
+  saved: ModeDraft | null,
+  isCreating: boolean,
+) {
+  if (!current) return false;
+  if (isCreating || !saved) {
+    return (
+      Boolean(
+        current.name.trim() ||
+        current.description.trim() ||
+        current.instructions.trim(),
+      ) ||
+      Object.keys(current.toolPermissions).length > 0 ||
+      Object.keys(current.skillPermissions).length > 0 ||
+      Object.keys(current.agentPermissions).length > 0
+    );
+  }
+  return JSON.stringify(current) !== JSON.stringify(saved);
+}
 
+function getToolGlobalPermission(
+  settings: ToolsSettings,
+  name: string,
+): Permission {
+  const masterPermission = settings.toolsPermission ?? "custom";
+  if (masterPermission !== "custom") return masterPermission;
+  return settings.toolPermissions?.[name] ?? DEFAULT_PERMISSION;
+}
+
+function getSkillGlobalPermission(
+  settings: SkillsSettings,
+  name: string,
+): Permission {
+  const masterPermission = settings.skillsPermission ?? "custom";
+  if (masterPermission !== "custom") return masterPermission;
   return (
-    <div className="grid gap-2">
-      <Label>{title}</Label>
-      <Popover
-        open={open}
-        onOpenChange={(nextOpen) => {
-          setOpen(nextOpen);
-          if (!nextOpen) onSearchValueChange("");
-        }}
-      >
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            role="combobox"
-            className="w-full justify-between px-3 text-left font-normal"
-            disabled={items.length === 0}
-          >
-            <span
-              className={cn(
-                "min-w-0 truncate",
-                selectedNames.length === 0 && "text-muted-foreground",
-              )}
-            >
-              {selectedNames.length > 0
-                ? `${selectedNames.length} ${selectedLabel}${selectedNames.length === 1 ? "" : "s"}`
-                : items.length > 0
-                  ? placeholder
-                  : emptyLabel}
-            </span>
-            <ChevronDown className="ml-2 size-4 shrink-0 opacity-50" />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          className="w-[var(--radix-popover-trigger-width)] max-w-[var(--radix-popover-trigger-width)] p-0"
-        >
-          <div className="grid max-h-[min(24rem,var(--radix-popover-content-available-height))] min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden">
-            <div className="border-b p-2">
-              <Input
-                value={searchValue}
-                onChange={(event) => onSearchValueChange(event.target.value)}
-                placeholder={placeholder}
-                className="h-9"
-                autoFocus
-              />
-            </div>
-            <div
-              className="max-h-80 overflow-y-auto overscroll-contain p-1 chat-message-scrollbar"
-              onWheelCapture={(event) => event.stopPropagation()}
-            >
-              {visibleItems.length > 0 ? (
-                visibleItems.map((item) => {
-                  const checked = selectedNameSet.has(item.name);
-
-                  return (
-                    <div
-                      key={item.name}
-                      role="button"
-                      tabIndex={0}
-                      className="flex w-full min-w-0 cursor-pointer items-start gap-2 px-2 py-2 text-left hover:bg-accent hover:text-accent-foreground focus-visible:outline-none"
-                      onClick={() => onToggle(item.name)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          onToggle(item.name);
-                        }
-                      }}
-                      title={item.description}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        tabIndex={-1}
-                        className="pointer-events-none mt-1 shrink-0"
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate font-medium">{item.name}</span>
-                        {item.description ? (
-                          <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                            {item.description}
-                          </span>
-                        ) : null}
-                      </span>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="px-3 py-6 text-center text-base text-muted-foreground">
-                  No matches found.
-                </div>
-              )}
-            </div>
-          </div>
-        </PopoverContent>
-      </Popover>
-
-      {selectedNames.length > 0 ? (
-        <div className="grid max-h-56 gap-1 overflow-y-auto border bg-muted/10 p-2">
-          {selectedNames.map((name) => {
-            const item = itemsByName.get(name);
-
-            return (
-              <div
-                key={name}
-                className="flex min-w-0 items-start gap-2 px-2 py-1.5 hover:bg-muted/70"
-                title={item?.description}
-              >
-                <span className="mt-1 shrink-0 text-muted-foreground">{icon}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{name}</span>
-                  {item?.description ? (
-                    <span className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
-                      {item.description}
-                    </span>
-                  ) : null}
-                </span>
-                <Checkbox
-                  checked
-                  onCheckedChange={() => onToggle(name)}
-                  className="mt-1 shrink-0"
-                />
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
+    settings.skillPermissions?.[name] ??
+    (settings.enabled === false ? "deny" : DEFAULT_PERMISSION)
   );
 }
 
-function normalizeModesForState(state: ModesState) {
-  return normalizeModesState(state).modes;
+function getAgentGlobalPermission(
+  settings: AgentsSettings,
+  name: string,
+): Permission {
+  const masterPermission = settings.agentsPermission ?? "custom";
+  if (masterPermission !== "custom") return masterPermission;
+  return (
+    settings.agentPermissions?.[name] ??
+    (settings.enabled === false ? "deny" : DEFAULT_PERMISSION)
+  );
+}
+
+function PermissionSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ModePermission;
+  onChange: (value: ModePermission) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as ModePermission)}
+      disabled={disabled}
+    >
+      <SelectTrigger className="h-8 w-27 shrink-0">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="global">Global</SelectItem>
+        <SelectItem value="allow">Allow</SelectItem>
+        <SelectItem value="ask">Ask</SelectItem>
+        <SelectItem value="deny">Deny</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function FeaturePermissionSelect({
+  value,
+  onChange,
+}: {
+  value: ModeFeaturePermission;
+  onChange: (value: ModeFeaturePermission) => void;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as ModeFeaturePermission)}
+    >
+      <SelectTrigger className="h-8 w-27 shrink-0">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="custom">Custom</SelectItem>
+        <SelectItem value="global">Global</SelectItem>
+        <SelectItem value="allow">Allow</SelectItem>
+        <SelectItem value="ask">Ask</SelectItem>
+        <SelectItem value="deny">Deny</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function formatPermission(permission: Permission) {
+  if (permission === "allow") return "Allow";
+  if (permission === "ask") return "Ask";
+  return "Deny";
+}
+
+function formatModeFeaturePermission(permission: ModeFeaturePermission) {
+  if (permission === "custom") return "Custom";
+  if (permission === "global") return "Global";
+  return formatPermission(permission);
+}
+
+function getModeSourceText({
+  modeName,
+  modePermission,
+  globalPermission,
+  masterPermission,
+}: {
+  modeName: string;
+  modePermission: ModePermission | undefined;
+  globalPermission: Permission;
+  masterPermission: ModeFeaturePermission;
+}) {
+  if (masterPermission === "global") {
+    return `Mode "${modeName}" master uses global: ${formatPermission(globalPermission)}`;
+  }
+  if (masterPermission !== "custom") {
+    return `Mode "${modeName}" master forces: ${formatPermission(masterPermission)}`;
+  }
+  if (!modePermission || modePermission === "global") {
+    return `Uses global setting: ${formatPermission(globalPermission)}`;
+  }
+  if (modePermission === globalPermission) {
+    return `Mode "${modeName}" matches global: ${formatPermission(globalPermission)}`;
+  }
+  return `Mode "${modeName}" overrides global: ${formatPermission(globalPermission)} → ${formatPermission(modePermission)}`;
+}
+
+function getDisplayedModePermission(
+  permissions: ModePermissionMap,
+  itemName: string,
+): ModePermission {
+  const masterPermission = permissions[FEATURE_PERMISSION_KEY] ?? "custom";
+  if (masterPermission === "global") return "global";
+  if (masterPermission !== "custom") return masterPermission;
+  const itemPermission = permissions[itemName];
+  return itemPermission === "allow" ||
+    itemPermission === "ask" ||
+    itemPermission === "deny" ||
+    itemPermission === "global"
+    ? itemPermission
+    : "global";
+}
+
+function PermissionRows({
+  title,
+  items,
+  permissions,
+  globalPermissionFor,
+  modeName,
+  onChange,
+  onReset,
+  featureRow,
+}: {
+  title: string;
+  items: Array<{ name: string; description?: string }>;
+  permissions: ModePermissionMap;
+  globalPermissionFor: (name: string) => Permission;
+  modeName: string;
+  onChange: (name: string, permission: ModeFeaturePermission) => void;
+  onReset: () => void;
+  featureRow: {
+    key: string;
+    label: string;
+    description: string;
+  };
+}) {
+  const masterPermission = permissions[FEATURE_PERMISSION_KEY] ?? "custom";
+  const childPermissionsLocked = masterPermission !== "custom";
+
+  const renderRow = (item: { name: string; description?: string }) => {
+    const globalPermission = globalPermissionFor(item.name);
+    const modePermission = permissions[item.name];
+    const value = getDisplayedModePermission(permissions, item.name);
+    return (
+      <div
+        key={item.name}
+        className="flex min-w-0 items-start gap-3 border bg-card px-3 py-2"
+      >
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-base font-medium leading-6">
+            {item.name}
+          </div>
+          <div className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+            {item.description || "No description."}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {getModeSourceText({
+              modeName,
+              modePermission:
+                modePermission === "global" ||
+                modePermission === "allow" ||
+                modePermission === "ask" ||
+                modePermission === "deny"
+                  ? modePermission
+                  : undefined,
+              globalPermission,
+              masterPermission,
+            })}
+          </div>
+        </div>
+        <PermissionSelect
+          value={value}
+          disabled={childPermissionsLocked}
+          onChange={(permission) => onChange(item.name, permission)}
+        />
+      </div>
+    );
+  };
+
+  return (
+    <section className="grid gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+        </Label>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 px-2 text-sm"
+          onClick={onReset}
+        >
+          Reset
+        </Button>
+      </div>
+      <div className="grid gap-1.5">
+        <div className="flex min-w-0 items-start gap-3 border bg-card px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-base font-medium leading-6">
+              {featureRow.label}
+            </div>
+            <div className="mt-0.5 line-clamp-2 text-sm leading-5 text-muted-foreground">
+              {featureRow.description}
+            </div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {masterPermission === "custom"
+                ? "Child permissions are custom."
+                : `Child permissions are forced to ${formatModeFeaturePermission(masterPermission)}.`}
+            </div>
+          </div>
+          <FeaturePermissionSelect
+            value={masterPermission}
+            onChange={(permission) => onChange(featureRow.key, permission)}
+          />
+        </div>
+        {items.length > 0 ? (
+          items.map((item) => renderRow(item))
+        ) : (
+          <div className="border border-dashed px-3 py-4 text-sm text-muted-foreground">
+            No {title.toLowerCase()} available.
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 export const ModesDialog = memo(function ModesDialog({
@@ -384,6 +478,9 @@ export const ModesDialog = memo(function ModesDialog({
   availableTools,
   availableSkills,
   availableAgents,
+  toolsSettings,
+  skillsSettings,
+  agentsSettings,
   showSuccess,
   showError,
 }: ModesDialogProps) {
@@ -391,95 +488,59 @@ export const ModesDialog = memo(function ModesDialog({
   const [modeDraft, setModeDraft] = useState<ModeDraft | null>(null);
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [instructionsEditorOpen, setInstructionsEditorOpen] = useState(false);
-  const [toolSearch, setToolSearch] = useState("");
-  const [skillSearch, setSkillSearch] = useState("");
-  const [agentSearch, setAgentSearch] = useState("");
 
   const modes = useMemo(() => normalizeModesForState(modesState), [modesState]);
   const selectedMode = useMemo(
     () => modes.find((mode) => mode.id === selectedModeId) ?? null,
     [modes, selectedModeId],
   );
-  const enabledModesCount = modes.filter((mode) => mode.enabled).length;
-
-  const modeCapabilityContext = useMemo(
-    () => ({ availableTools, availableSkills, availableAgents }),
-    [availableAgents, availableSkills, availableTools],
-  );
-
-  const selectedCapabilities = useMemo(
-    () =>
-      modeDraft
-        ? modeToEditableCapabilities(draftToMode(modeDraft), modeCapabilityContext)
-        : { toolNames: [], skillNames: [], agentNames: [] },
-    [modeCapabilityContext, modeDraft],
-  );
-
   const savedDraft = useMemo(
-    () =>
-      selectedMode && !isCreatingMode
-        ? modeToDraft(selectedMode, modeCapabilityContext)
-        : null,
-    [isCreatingMode, modeCapabilityContext, selectedMode],
+    () => (selectedMode && !isCreatingMode ? modeToDraft(selectedMode) : null),
+    [isCreatingMode, selectedMode],
   );
-
-  const hasModeDraftChanges = useMemo(() => {
-    if (!modeDraft) return false;
-    if (isCreatingMode || !savedDraft) {
-      return (
-        Boolean(modeDraft.name.trim()) ||
-        Boolean(modeDraft.description.trim()) ||
-        Boolean(modeDraft.instructions.trim()) ||
-        modeDraft.allowedToolNames.length > 0 ||
-        modeDraft.allowedSkillNames.length > 0 ||
-        modeDraft.allowedAgentNames.length > 0
-      );
-    }
-    return !areModeDraftsEqual(modeDraft, savedDraft);
-  }, [isCreatingMode, modeDraft, savedDraft]);
+  const enabledModesCount = modes.filter((mode) => mode.enabled).length;
+  const hasChanges = hasDraftChanges(modeDraft, savedDraft, isCreatingMode);
 
   const toolItems = useMemo(
-    () => availableTools.map((tool) => ({ name: tool.name, description: tool.description })),
+    () =>
+      availableTools.map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+      })),
     [availableTools],
   );
   const skillItems = useMemo(
-    () => availableSkills.map((skill) => ({ name: skill.name, description: skill.description })),
+    () =>
+      availableSkills.map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+      })),
     [availableSkills],
   );
   const agentItems = useMemo(
-    () => availableAgents.map((agent) => ({ name: agent.name, description: agent.description })),
+    () =>
+      availableAgents.map((agent) => ({
+        name: agent.name,
+        description: agent.description,
+      })),
     [availableAgents],
   );
 
   useEffect(() => {
     if (!open || isCreatingMode) return;
-
-    if (selectedModeId && !modes.some((mode) => mode.id === selectedModeId)) {
-      const fallbackMode = modes[0] ?? null;
-      setSelectedModeId(fallbackMode?.id ?? null);
-      setModeDraft(fallbackMode ? modeToDraft(fallbackMode, modeCapabilityContext) : null);
+    const mode = selectedModeId
+      ? modes.find((candidate) => candidate.id === selectedModeId)
+      : modes[0];
+    if (!mode) {
+      setSelectedModeId(null);
+      setModeDraft(null);
       return;
     }
-
-    if (!selectedModeId) {
-      const fallbackMode = modes[0] ?? null;
-      setSelectedModeId(fallbackMode?.id ?? null);
-      setModeDraft(fallbackMode ? modeToDraft(fallbackMode, modeCapabilityContext) : null);
-      return;
+    if (!selectedModeId || !selectedMode || !modeDraft) {
+      setSelectedModeId(mode.id);
+      setModeDraft(modeToDraft(mode));
     }
-
-    if (!modeDraft && selectedMode) {
-      setModeDraft(modeToDraft(selectedMode, modeCapabilityContext));
-    }
-  }, [
-    open,
-    isCreatingMode,
-    modeCapabilityContext,
-    modeDraft,
-    modes,
-    selectedMode,
-    selectedModeId,
-  ]);
+  }, [isCreatingMode, modeDraft, modes, open, selectedMode, selectedModeId]);
 
   function updateModes(updater: (modes: LoadedModeInfo[]) => LoadedModeInfo[]) {
     onModesStateChange((current) =>
@@ -491,6 +552,45 @@ export const ModesDialog = memo(function ModesDialog({
     setModeDraft((current) => (current ? { ...current, ...patch } : current));
   }
 
+  function updatePermission(
+    kind: "tool" | "skill" | "agent",
+    name: string,
+    permission: ModeFeaturePermission,
+  ) {
+    if (!modeDraft) return;
+    const key =
+      kind === "tool"
+        ? "toolPermissions"
+        : kind === "skill"
+          ? "skillPermissions"
+          : "agentPermissions";
+    const nextPermissions = { ...(modeDraft[key] ?? {}) };
+    if (name === FEATURE_PERMISSION_KEY) {
+      nextPermissions[name] = permission;
+    } else if (permission === "global") {
+      delete nextPermissions[name];
+    } else if (permission !== "custom") {
+      nextPermissions[name] = permission;
+    }
+    updateModeDraft({
+      usesDefaultCapabilities: false,
+      [key]: nextPermissions,
+    } as Partial<ModeDraft>);
+  }
+
+  function resetPermissionSection(kind: "tool" | "skill" | "agent") {
+    const key =
+      kind === "tool"
+        ? "toolPermissions"
+        : kind === "skill"
+          ? "skillPermissions"
+          : "agentPermissions";
+    updateModeDraft({
+      usesDefaultCapabilities: false,
+      [key]: {},
+    } as Partial<ModeDraft>);
+  }
+
   function addMode() {
     setSelectedModeId(null);
     setIsCreatingMode(true);
@@ -499,27 +599,21 @@ export const ModesDialog = memo(function ModesDialog({
 
   function cloneCurrentMode() {
     if (!modeDraft) return;
-
-    const mode: LoadedModeInfo = {
-      ...draftToMode(modeDraft, true),
+    const clone = {
+      ...modeDraft,
       id: `mode-${Date.now()}-${Math.random().toString(16).slice(2)}`,
       builtIn: undefined,
       usesDefaultCapabilities: false,
       name: createUniqueModeName(`${modeDraft.name} copy`, modes),
       enabled: true,
-      allowedToolNames: selectedCapabilities.toolNames,
-      allowedSkillNames: selectedCapabilities.skillNames,
-      allowedAgentNames: selectedCapabilities.agentNames,
     };
-
     setSelectedModeId(null);
     setIsCreatingMode(true);
-    setModeDraft(modeToDraft(mode, modeCapabilityContext));
+    setModeDraft(clone);
   }
 
   function deleteCurrentMode() {
     if (!selectedMode || selectedMode.builtIn) return;
-
     updateModes((currentModes) =>
       currentModes.filter((mode) => mode.id !== selectedMode.id),
     );
@@ -534,86 +628,52 @@ export const ModesDialog = memo(function ModesDialog({
       showError("At least one mode must stay enabled.");
       return;
     }
-
     updateModes((currentModes) =>
       currentModes.map((currentMode) =>
-        currentMode.id === mode.id ? { ...currentMode, enabled: checked } : currentMode,
+        currentMode.id === mode.id
+          ? { ...currentMode, enabled: checked }
+          : currentMode,
       ),
     );
   }
 
-  function toggleCapability(kind: "tool" | "skill" | "agent", name: string) {
-    if (!modeDraft) return;
-
-    const key =
-      kind === "tool"
-        ? "allowedToolNames"
-        : kind === "skill"
-          ? "allowedSkillNames"
-          : "allowedAgentNames";
-    const source =
-      kind === "tool"
-        ? selectedCapabilities.toolNames
-        : kind === "skill"
-          ? selectedCapabilities.skillNames
-          : selectedCapabilities.agentNames;
-    const names = new Set(source);
-    if (names.has(name)) names.delete(name);
-    else names.add(name);
-
-    updateModeDraft({
-      usesDefaultCapabilities: false,
-      [key]: [...names],
-    } as Partial<ModeDraft>);
-  }
-
   function resetModeDraft() {
     if (!modeDraft) return;
-
     if (modeDraft.builtIn) {
-      const resetMode = updateBuiltInModeWithReset(
-        getBuiltInModeDefaults(modeDraft.builtIn),
-        modeCapabilityContext,
-      );
       setModeDraft(
-        modeToDraft(
-          { ...resetMode, enabled: selectedMode?.enabled ?? modeDraft.enabled },
-          modeCapabilityContext,
-        ),
+        modeToDraft({
+          ...getBuiltInModeDefaults(modeDraft.builtIn),
+          enabled: selectedMode?.enabled ?? modeDraft.enabled,
+        }),
       );
       return;
     }
-
-    if (isCreatingMode) {
-      setModeDraft(createBlankModeDraft());
-      return;
-    }
-
-    if (savedDraft) setModeDraft(savedDraft);
+    if (isCreatingMode) setModeDraft(createBlankModeDraft());
+    else if (savedDraft) setModeDraft(savedDraft);
   }
 
   function saveCurrentModeDraft() {
     if (!modeDraft) return;
-
     try {
       validateModeDraft(modeDraft, modes);
-      const mode = draftToMode(modeDraft, selectedMode?.enabled ?? modeDraft.enabled);
-
+      const mode = draftToMode(
+        modeDraft,
+        selectedMode?.enabled ?? modeDraft.enabled,
+      );
       if (isCreatingMode || !selectedMode) {
         updateModes((currentModes) => [...currentModes, mode]);
         setSelectedModeId(mode.id);
         setIsCreatingMode(false);
-        setModeDraft(modeToDraft(mode, modeCapabilityContext));
+        setModeDraft(modeToDraft(mode));
         showSuccess("Mode created.");
         return;
       }
-
       updateModes((currentModes) =>
         currentModes.map((currentMode) =>
           currentMode.id === selectedMode.id ? mode : currentMode,
         ),
       );
-      setModeDraft(modeToDraft(mode, modeCapabilityContext));
+      setModeDraft(modeToDraft(mode));
       showSuccess("Mode saved.");
     } catch (error) {
       showError(
@@ -626,7 +686,7 @@ export const ModesDialog = memo(function ModesDialog({
   function selectMode(mode: LoadedModeInfo) {
     setSelectedModeId(mode.id);
     setIsCreatingMode(false);
-    setModeDraft(modeToDraft(mode, modeCapabilityContext));
+    setModeDraft(modeToDraft(mode));
     setInstructionsEditorOpen(false);
   }
 
@@ -637,12 +697,12 @@ export const ModesDialog = memo(function ModesDialog({
           <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
             <DialogTitle>Modes</DialogTitle>
             <DialogDescription>
-              Define chat modes with their own instructions and default tools,
+              Define mode instructions and permission overrides for tools,
               skills, and agents.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[400px_minmax(0,1fr)]">
             <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
@@ -652,7 +712,6 @@ export const ModesDialog = memo(function ModesDialog({
                   {enabledModesCount}/{modes.length} enabled
                 </span>
               </div>
-
               <Button
                 type="button"
                 variant="secondary"
@@ -660,56 +719,63 @@ export const ModesDialog = memo(function ModesDialog({
                 className="mb-3 w-full"
                 onClick={addMode}
               >
-                <Plus className="size-4" />
-                Add mode
+                <Plus className="size-4" /> Add mode
               </Button>
-
-              <div className="grid gap-1.5">
-                {modes.map((mode) => {
-                  const selected = selectedMode?.id === mode.id && !isCreatingMode;
-
-                  return (
-                    <div
-                      key={mode.id}
-                      role="button"
-                      tabIndex={0}
-                      className={cn(
-                        "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
-                        selected
-                          ? "border-primary/30 bg-accent text-accent-foreground"
-                          : "border-transparent hover:border-border hover:bg-muted/60",
-                      )}
-                      onClick={() => selectMode(mode)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          selectMode(mode);
-                        }
-                      }}
-                    >
-                      <Layers3 className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex min-w-0 items-center gap-1.5 text-base leading-6">
-                          <span className="truncate">{mode.name}</span>
-                          {mode.builtIn ? (
-                            <span className="shrink-0 border border-primary/25 bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
-                              Built-in
-                            </span>
-                          ) : null}
-                        </div>
-                        <div className="line-clamp-2 text-sm leading-5 text-muted-foreground">
-                          {mode.description || "No description."}
-                        </div>
-                      </div>
-                      <Switch
-                        checked={mode.enabled}
-                        onClick={(event) => event.stopPropagation()}
-                        onCheckedChange={(checked) => toggleModeEnabled(mode, checked)}
-                        className="mt-0.5 shrink-0 cursor-pointer"
-                      />
+              <div className="grid gap-3">
+                {[
+                  {
+                    title: "Built-in",
+                    modes: modes.filter((mode) => mode.builtIn),
+                  },
+                  {
+                    title: "Custom",
+                    modes: modes.filter((mode) => !mode.builtIn),
+                  },
+                ]
+                  .filter((group) => group.modes.length > 0)
+                  .map((group) => (
+                    <div key={group.title} className="grid gap-1.5">
+                      <Label className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        {group.title}
+                      </Label>
+                      {group.modes.map((mode) => {
+                        const selected =
+                          selectedMode?.id === mode.id && !isCreatingMode;
+                        return (
+                          <div
+                            key={mode.id}
+                            role="button"
+                            tabIndex={0}
+                            className={cn(
+                              "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
+                              selected
+                                ? "border-primary/30 bg-accent text-accent-foreground"
+                                : "border-transparent hover:border-border hover:bg-muted/60",
+                            )}
+                            onClick={() => selectMode(mode)}
+                          >
+                            <Layers3 className="mt-1 size-4 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-base leading-6">
+                                {mode.name}
+                              </div>
+                              <div className="line-clamp-2 text-sm leading-5 text-muted-foreground">
+                                {mode.description || "No description."}
+                              </div>
+                            </div>
+                            <Switch
+                              checked={mode.enabled}
+                              onClick={(event) => event.stopPropagation()}
+                              onCheckedChange={(checked) =>
+                                toggleModeEnabled(mode, checked)
+                              }
+                              className="mt-0.5 shrink-0 cursor-pointer"
+                            />
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  ))}
               </div>
             </aside>
 
@@ -767,11 +833,12 @@ export const ModesDialog = memo(function ModesDialog({
                         <Input
                           id="mode-name"
                           value={modeDraft.name}
-                          onChange={(event) => updateModeDraft({ name: event.target.value })}
+                          onChange={(event) =>
+                            updateModeDraft({ name: event.target.value })
+                          }
                           placeholder="Mode name"
                         />
                       </div>
-
                       <div className="grid gap-2">
                         <Label htmlFor="mode-description">Description</Label>
                         <Textarea
@@ -784,10 +851,11 @@ export const ModesDialog = memo(function ModesDialog({
                           className="min-h-24 leading-6"
                         />
                       </div>
-
                       <div className="grid gap-2">
                         <div className="flex items-center justify-between gap-2">
-                          <Label htmlFor="mode-instructions">Instructions</Label>
+                          <Label htmlFor="mode-instructions">
+                            Instructions
+                          </Label>
                           <Button
                             type="button"
                             variant="ghost"
@@ -803,56 +871,71 @@ export const ModesDialog = memo(function ModesDialog({
                           id="mode-instructions"
                           value={modeDraft.instructions}
                           onChange={(event) =>
-                            updateModeDraft({ instructions: event.target.value })
+                            updateModeDraft({
+                              instructions: event.target.value,
+                            })
                           }
                           placeholder="Optional mode-specific instructions added to the system prompt."
                           className="min-h-72 text-sm leading-6"
                         />
                       </div>
 
-                      {modeDraft.builtIn && modeDraft.usesDefaultCapabilities !== false ? (
-                        <div className="border bg-muted/25 px-3 py-2 text-sm leading-5 text-muted-foreground">
-                          This built-in mode is using its dynamic default capabilities. Changing a capability below turns it into a custom override. Reset restores the built-in behavior.
-                        </div>
-                      ) : null}
-
-                      <CapabilityPicker
-                        title="Allowed tools"
-                        selectedLabel="allowed tool"
-                        icon={<Wrench className="size-4" />}
-                        placeholder="Select allowed tools"
-                        emptyLabel="No tools are available"
+                      <PermissionRows
+                        title="Tools"
                         items={toolItems}
-                        selectedNames={selectedCapabilities.toolNames}
-                        searchValue={toolSearch}
-                        onSearchValueChange={setToolSearch}
-                        onToggle={(name) => toggleCapability("tool", name)}
+                        permissions={modeDraft.toolPermissions}
+                        globalPermissionFor={(name) =>
+                          getToolGlobalPermission(toolsSettings, name)
+                        }
+                        modeName={modeDraft.name || "Mode"}
+                        onChange={(name, permission) =>
+                          updatePermission("tool", name, permission)
+                        }
+                        onReset={() => resetPermissionSection("tool")}
+                        featureRow={{
+                          key: FEATURE_PERMISSION_KEY,
+                          label: "Tools",
+                          description:
+                            "Master permission for the whole tools feature.",
+                        }}
                       />
-
-                      <CapabilityPicker
-                        title="Allowed skills"
-                        selectedLabel="allowed skill"
-                        icon={<BookOpen className="size-4" />}
-                        placeholder="Select allowed skills"
-                        emptyLabel="No skills are available"
+                      <PermissionRows
+                        title="Skills"
                         items={skillItems}
-                        selectedNames={selectedCapabilities.skillNames}
-                        searchValue={skillSearch}
-                        onSearchValueChange={setSkillSearch}
-                        onToggle={(name) => toggleCapability("skill", name)}
+                        permissions={modeDraft.skillPermissions}
+                        globalPermissionFor={(name) =>
+                          getSkillGlobalPermission(skillsSettings, name)
+                        }
+                        modeName={modeDraft.name || "Mode"}
+                        onChange={(name, permission) =>
+                          updatePermission("skill", name, permission)
+                        }
+                        onReset={() => resetPermissionSection("skill")}
+                        featureRow={{
+                          key: FEATURE_PERMISSION_KEY,
+                          label: "Skills",
+                          description:
+                            "Master permission for the whole skills feature.",
+                        }}
                       />
-
-                      <CapabilityPicker
-                        title="Allowed agents"
-                        selectedLabel="allowed agent"
-                        icon={<Bot className="size-4" />}
-                        placeholder="Select allowed agents"
-                        emptyLabel="No agents are available"
+                      <PermissionRows
+                        title="Agents"
                         items={agentItems}
-                        selectedNames={selectedCapabilities.agentNames}
-                        searchValue={agentSearch}
-                        onSearchValueChange={setAgentSearch}
-                        onToggle={(name) => toggleCapability("agent", name)}
+                        permissions={modeDraft.agentPermissions}
+                        globalPermissionFor={(name) =>
+                          getAgentGlobalPermission(agentsSettings, name)
+                        }
+                        modeName={modeDraft.name || "Mode"}
+                        onChange={(name, permission) =>
+                          updatePermission("agent", name, permission)
+                        }
+                        onReset={() => resetPermissionSection("agent")}
+                        featureRow={{
+                          key: FEATURE_PERMISSION_KEY,
+                          label: "Agents",
+                          description:
+                            "Master permission for the whole agents feature.",
+                        }}
                       />
                     </div>
                   </div>
@@ -862,14 +945,14 @@ export const ModesDialog = memo(function ModesDialog({
                       type="button"
                       variant="outline"
                       onClick={resetModeDraft}
-                      disabled={!modeDraft.builtIn && !hasModeDraftChanges}
+                      disabled={!modeDraft.builtIn && !hasChanges}
                     >
                       Reset
                     </Button>
                     <Button
                       type="button"
                       onClick={saveCurrentModeDraft}
-                      disabled={!hasModeDraftChanges}
+                      disabled={!hasChanges}
                     >
                       Save
                     </Button>
@@ -884,7 +967,7 @@ export const ModesDialog = memo(function ModesDialog({
                     </div>
                     <p className="text-base leading-6">
                       Create a mode or select one from the list to edit its
-                      instructions and default capabilities.
+                      instructions and permissions.
                     </p>
                   </div>
                 </div>
@@ -895,7 +978,10 @@ export const ModesDialog = memo(function ModesDialog({
       </Dialog>
 
       {modeDraft ? (
-        <Dialog open={instructionsEditorOpen} onOpenChange={setInstructionsEditorOpen}>
+        <Dialog
+          open={instructionsEditorOpen}
+          onOpenChange={setInstructionsEditorOpen}
+        >
           <DialogContent className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col gap-4 p-5 sm:max-w-6xl">
             <DialogHeader className="pr-8">
               <DialogTitle>Edit instructions</DialogTitle>
@@ -903,7 +989,6 @@ export const ModesDialog = memo(function ModesDialog({
                 Edit the selected mode instructions in a larger focused editor.
               </DialogDescription>
             </DialogHeader>
-
             <Textarea
               value={modeDraft.instructions}
               onChange={(event) =>
@@ -912,9 +997,11 @@ export const ModesDialog = memo(function ModesDialog({
               placeholder="Optional mode-specific instructions added to the system prompt."
               className="min-h-0 flex-1 resize-none text-sm leading-6"
             />
-
             <DialogFooter>
-              <Button type="button" onClick={() => setInstructionsEditorOpen(false)}>
+              <Button
+                type="button"
+                onClick={() => setInstructionsEditorOpen(false)}
+              >
                 Done
               </Button>
             </DialogFooter>

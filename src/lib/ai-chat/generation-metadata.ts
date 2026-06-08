@@ -195,10 +195,12 @@ export function createStreamingAssistantMessage({
   assistantMessageId,
   variantId,
   responseStartedAt,
+  modeName,
 }: {
   assistantMessageId: string;
   variantId: string;
   responseStartedAt: string;
+  modeName?: string;
 }): ChatMessage {
   return {
     id: assistantMessageId,
@@ -212,6 +214,7 @@ export function createStreamingAssistantMessage({
         createdAt: responseStartedAt,
         metrics: {
           startedAt: responseStartedAt,
+          modeName,
         },
         processSteps: [],
       },
@@ -224,9 +227,11 @@ export function createStreamingAssistantMessage({
 export function createStreamingAssistantVariant({
   variantId,
   responseStartedAt,
+  modeName,
 }: {
   variantId: string;
   responseStartedAt: string;
+  modeName?: string;
 }): ChatAssistantVariant {
   return {
     id: variantId,
@@ -236,6 +241,7 @@ export function createStreamingAssistantVariant({
     createdAt: responseStartedAt,
     metrics: {
       startedAt: responseStartedAt,
+      modeName,
     },
     processSteps: [],
   };

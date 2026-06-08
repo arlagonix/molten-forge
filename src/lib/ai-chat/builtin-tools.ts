@@ -1,16 +1,11 @@
 import {
-  FILE_READ_TOOL_NAME,
-  FILE_FIND_TOOL_NAME,
-  FILE_SEARCH_TEXT_TOOL_NAME,
-  FILE_REPLACE_TEXT_TOOL_NAME,
-  FILE_CREATE_TOOL_NAME,
-  FILE_DELETE_TOOL_NAME,
-  ARCHIVE_EXTRACT_TOOL_NAME,
-  ARCHIVE_CREATE_TOOL_NAME,
-  DOCUMENT_CONVERT_TOOL_NAME,
-  CHAT_FILE_CREATE_TOOL_NAME,
+  READ_TOOL_NAME,
+  BASH_TOOL_NAME,
+  EDIT_TOOL_NAME,
+  WRITE_TOOL_NAME,
   FILE_TOOL_NAMES,
   isFileToolName,
+  isLegacyFileToolName,
   requiresFileToolApproval,
 } from "@/lib/ai-chat/file-tool-names";
 import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
@@ -40,38 +35,52 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   taskToolsEnabled: true,
   loadSkillEnabled: true,
   webFetchEnabled: false,
-  terminalExecEnabled: false,
-  fileReadEnabled: true,
-  fileFindEnabled: true,
-  fileSearchTextEnabled: true,
-  fileReplaceTextEnabled: false,
-  fileCreateEnabled: true,
-  fileDeleteEnabled: false,
-  archiveExtractEnabled: true,
-  archiveCreateEnabled: true,
-  documentConvertEnabled: true,
-  chatFileCreateEnabled: true,
-  fileReplaceTextAutoApproveEnabled: false,
-  fileCreateAutoApproveEnabled: false,
-  fileDeleteAutoApproveEnabled: false,
+  readEnabled: true,
+  bashEnabled: true,
+  editEnabled: true,
+  writeEnabled: true,
+  readAutoApproveEnabled: false,
+  bashAutoApproveEnabled: false,
+  editAutoApproveEnabled: false,
+  writeAutoApproveEnabled: false,
+  toolsPermission: "custom",
+  permissionModelVersion: 2,
+  toolPermissions: {
+    ask_user: "allow",
+    update_tasks: "allow",
+    skill: "ask",
+    web_fetch: "deny",
+    read: "ask",
+    bash: "ask",
+    edit: "ask",
+    write: "ask",
+    call_agent: "ask",
+  },
 };
 
 export function buildFileToolAutoApprovalFromToolsSettings(
   settings: ToolsSettings,
 ): ChatFileToolAutoApproval {
   return {
-    create: settings.fileCreateAutoApproveEnabled === true,
-    replaceText: settings.fileReplaceTextAutoApproveEnabled === true,
-    delete: settings.fileDeleteAutoApproveEnabled === true,
+    read: settings.readAutoApproveEnabled === true,
+    bash: settings.bashAutoApproveEnabled === true,
+    edit: settings.editAutoApproveEnabled === true,
+    write: settings.writeAutoApproveEnabled === true,
   };
 }
 
 export const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   enabled: true,
+  skillsPermission: "custom",
+  permissionModelVersion: 2,
+  skillPermissions: {},
 };
 
 export const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
   enabled: true,
+  agentsPermission: "custom",
+  permissionModelVersion: 2,
+  agentPermissions: {},
   builtInAgentMaxNestingDepths: {},
 };
 
@@ -88,7 +97,7 @@ const LEGACY_TASK_TOOL_NAMES = [
   "get_tasks_list",
   "clear_tasks_list",
 ] as const;
-export const LOAD_SKILL_TOOL_NAME = "load_skill";
+export const LOAD_SKILL_TOOL_NAME = "skill";
 export const WEB_FETCH_TOOL_NAME = "web_fetch";
 export const CALL_AGENT_TOOL_NAME = "call_agent";
 export const ASK_USER_CUSTOM_ANSWER_ID = "__custom__";
@@ -122,25 +131,20 @@ export const CALL_AGENT_TOOL: LoadedToolInfo = {
 };
 
 export {
-  FILE_READ_TOOL_NAME,
-  FILE_FIND_TOOL_NAME,
-  FILE_SEARCH_TEXT_TOOL_NAME,
-  FILE_REPLACE_TEXT_TOOL_NAME,
-  FILE_CREATE_TOOL_NAME,
-  FILE_DELETE_TOOL_NAME,
-  ARCHIVE_EXTRACT_TOOL_NAME,
-  ARCHIVE_CREATE_TOOL_NAME,
-  DOCUMENT_CONVERT_TOOL_NAME,
-  CHAT_FILE_CREATE_TOOL_NAME,
+  READ_TOOL_NAME,
+  BASH_TOOL_NAME,
+  EDIT_TOOL_NAME,
+  WRITE_TOOL_NAME,
   FILE_TOOL_NAMES,
   isFileToolName,
   requiresFileToolApproval,
 };
 
+
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
-const TOOL_MENTION_PATTERN = /(^|\s)@tool:([A-Za-z0-9_-]+)(?=$|\s)/g;
-const SKILL_MENTION_PATTERN = /(^|\s)@skill:([A-Za-z0-9_-]+)(?=$|\s)/g;
-const AGENT_MENTION_PATTERN = /(^|\s)@agent:([A-Za-z0-9_-]+)(?=$|\s)/g;
+const TOOL_MENTION_PATTERN = /a^/g;
+const SKILL_MENTION_PATTERN = /a^/g;
+const AGENT_MENTION_PATTERN = /a^/g;
 const MAX_ASK_USER_QUESTIONS = 5;
 const MAX_ASK_USER_OPTIONS = 8;
 const MAX_ASK_USER_TITLE_LENGTH = 120;
@@ -295,46 +299,55 @@ export const WEB_FETCH_TOOL: LoadedToolInfo = {
   timeoutMs: 0,
 };
 
-export const TERMINAL_EXEC_TOOL: LoadedToolInfo = {
-  id: "builtin-terminal-exec",
-  name: TERMINAL_EXEC_TOOL_NAME,
+export const READ_TOOL: LoadedToolInfo = {
+  id: "builtin-read",
+  name: READ_TOOL_NAME,
   enabled: true,
   description:
-    "Run a foreground terminal command inside one approved workspace root. Requires user approval by default. Use this for project-local coding workflows such as checking files, running tests, building the project, or inspecting tool output. Prefer web_fetch for simple web reads instead of curl/wget. The command streams stdout/stderr, has a timeout, returns an exit code, and cannot choose a cwd outside the selected workspace root.",
+    "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are returned as data URLs. For text files, output is truncated to 2000 lines or 128KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+  parameters: {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      path: {
+        type: "string",
+        description: "Path to the file to read (relative to the selected workspace or absolute).",
+      },
+      offset: {
+        type: "number",
+        description: "Line number to start reading from (1-indexed).",
+      },
+      limit: {
+        type: "number",
+        description: "Maximum number of lines to read.",
+      },
+    },
+    required: ["path"],
+  },
+  command: "",
+  args: [],
+  input: "none",
+  timeoutMs: 0,
+  requiresApproval: true,
+};
+
+export const BASH_TOOL: LoadedToolInfo = {
+  id: "builtin-bash",
+  name: BASH_TOOL_NAME,
+  enabled: true,
+  description:
+    "Execute a bash command in the selected workspace. Returns stdout and stderr. Output is truncated to the last 2000 lines or 128KB (whichever is hit first). Optionally provide a timeout in seconds.",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
       command: {
         type: "string",
-        description:
-          "Exact shell command to run. Keep it focused and non-interactive. The user sees and approves this exact command before execution.",
+        description: "Bash command to execute.",
       },
-      rootId: {
-        type: "string",
-        description:
-          "Optional workspace root id. Required when the chat has multiple workspace roots.",
-      },
-      cwd: {
-        type: "string",
-        description:
-          "Optional working directory inside the selected workspace root. Defaults to the root. Use a relative path when possible.",
-      },
-      shell: {
-        type: "string",
-        enum: ["auto", "powershell", "cmd", "bash", "sh"],
-        description:
-          "Shell to use. Defaults to auto. On Windows auto uses PowerShell; on macOS/Linux auto uses sh. cmd is Windows-only. bash requires bash to be installed.",
-      },
-      timeoutMs: {
+      timeout: {
         type: "number",
-        description:
-          "Optional timeout in milliseconds. Defaults to 120000 and is capped by the app.",
-      },
-      maxOutputChars: {
-        type: "number",
-        description:
-          "Optional maximum stdout/stderr characters returned to the model context using head+tail truncation. Defaults to 20000.",
+        description: "Timeout in seconds (optional, no default timeout).",
       },
     },
     required: ["command"],
@@ -346,223 +359,69 @@ export const TERMINAL_EXEC_TOOL: LoadedToolInfo = {
   requiresApproval: true,
 };
 
-export const FILE_READ_TOOL: LoadedToolInfo = {
-  id: "builtin-file-read",
-  name: FILE_READ_TOOL_NAME,
+export const EDIT_TOOL: LoadedToolInfo = {
+  id: "builtin-edit",
+  name: EDIT_TOOL_NAME,
   enabled: true,
   description:
-    "Read a UTF-8 text file from one of the chat workspace folders. By default, reads the whole file. For targeted or large-file reads, provide offset and/or limit. If offset is provided without limit, returns a 100-line window. The result includes startLine, endLine, totalLines, and nextOffset; nextOffset is null at the end of the selected range/file. The tool cannot read outside approved workspace roots.",
+    "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
       path: {
         type: "string",
-        description:
-          "File path to read. Prefer a path relative to the workspace root.",
+        description: "Path to the file to edit (relative to the selected workspace or absolute).",
       },
-      rootId: {
-        type: "string",
+      edits: {
+        type: "array",
         description:
-          "Optional workspace root id. Use this when the chat has multiple workspace roots and the relative path could be ambiguous.",
-      },
-      offset: {
-        type: "number",
-        description:
-          "Optional 1-based starting line number. When provided without limit, reads 100 lines. Use nextOffset from the previous result to continue reading.",
-      },
-      limit: {
-        type: "number",
-        description:
-          "Optional number of lines to read, up to 10000. Omit offset and limit to read the whole file.",
+          "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead.",
+        minItems: 1,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            oldText: {
+              type: "string",
+              description:
+                "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call.",
+            },
+            newText: {
+              type: "string",
+              description: "Replacement text for this targeted edit.",
+            },
+          },
+          required: ["oldText", "newText"],
+        },
       },
     },
-    required: ["path"],
+    required: ["path", "edits"],
   },
   command: "",
   args: [],
   input: "none",
   timeoutMs: 0,
+  requiresApproval: true,
 };
 
-export const FILE_FIND_TOOL: LoadedToolInfo = {
-  id: "builtin-file-find",
-  name: FILE_FIND_TOOL_NAME,
+export const WRITE_TOOL: LoadedToolInfo = {
+  id: "builtin-write",
+  name: WRITE_TOOL_NAME,
   enabled: true,
   description:
-    "Find files or folders by name/path inside the chat workspace. Use this before reading when you do not know the exact path.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      query: {
-        type: "string",
-        description:
-          "Case-insensitive text to match against file and folder names or relative paths. Omit or use an empty string to list top-level entries.",
-      },
-      rootId: {
-        type: "string",
-        description:
-          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
-      },
-      include: {
-        type: "array",
-        description:
-          "Optional file extensions to include, such as .ts or .tsx.",
-        items: { type: "string" },
-      },
-      exclude: {
-        type: "array",
-        description:
-          "Optional relative path/name fragments to skip in addition to default excludes.",
-        items: { type: "string" },
-      },
-      maxResults: { type: "number" },
-    },
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const FILE_SEARCH_TEXT_TOOL: LoadedToolInfo = {
-  id: "builtin-file-search-text",
-  name: FILE_SEARCH_TEXT_TOOL_NAME,
-  enabled: true,
-  description:
-    "Search text file contents inside the chat workspace and return matching paths, line numbers, and snippets. Uses plain substring search, not regex. Provide path to search inside one specific file; startLine/endLine can narrow the search to a line range only when path is provided.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      query: {
-        type: "string",
-        description: "Plain text to search for in files.",
-      },
-      rootId: {
-        type: "string",
-        description:
-          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
-      },
-      path: {
-        type: "string",
-        description:
-          "Optional file path to search inside a single file. Prefer a path relative to the workspace root.",
-      },
-      startLine: {
-        type: "number",
-        description:
-          "Optional 1-based start line for file-local search. Only valid when path is provided.",
-      },
-      endLine: {
-        type: "number",
-        description:
-          "Optional 1-based end line for file-local search. Only valid when path is provided.",
-      },
-      include: {
-        type: "array",
-        description:
-          "Optional file extensions to include, such as .ts or .tsx.",
-        items: { type: "string" },
-      },
-      exclude: {
-        type: "array",
-        description:
-          "Optional relative path/name fragments to skip in addition to default excludes.",
-        items: { type: "string" },
-      },
-      caseSensitive: { type: "boolean" },
-      maxResults: { type: "number" },
-    },
-    required: ["query"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const FILE_REPLACE_TEXT_TOOL: LoadedToolInfo = {
-  id: "builtin-file-replace-text",
-  name: FILE_REPLACE_TEXT_TOOL_NAME,
-  enabled: true,
-  description:
-    "Replace exact text in a UTF-8 text file inside the chat workspace. Requires user confirmation before writing. Use only after reading the target file or matching context. By default oldText must match exactly once; include enough surrounding context to make it unique. To replace several occurrences, set expectedReplacements to the exact match count. Optional startLine/endLine limit the oldText search and replacement to that line range.",
+    "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
   parameters: {
     type: "object",
     additionalProperties: false,
     properties: {
       path: {
         type: "string",
-        description:
-          "File path to update. Prefer a path relative to the workspace root.",
-      },
-      rootId: {
-        type: "string",
-        description:
-          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
-      },
-      startLine: {
-        type: "number",
-        description:
-          "Optional 1-based start line. When provided, oldText is searched and replaced only inside this line range.",
-      },
-      endLine: {
-        type: "number",
-        description:
-          "Optional 1-based end line. When provided, oldText is searched and replaced only inside this line range.",
-      },
-      oldText: {
-        type: "string",
-        description: "Exact text currently present in the file.",
-      },
-      newText: {
-        type: "string",
-        description: "Replacement text to write.",
-      },
-      expectedReplacements: {
-        type: "number",
-        description:
-          "Exact number of replacements expected. Required when oldText appears more than once; the tool fails if the actual count differs. When omitted, oldText must match exactly once.",
-      },
-    },
-    required: ["path", "oldText", "newText"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const FILE_CREATE_TOOL: LoadedToolInfo = {
-  id: "builtin-file-create",
-  name: FILE_CREATE_TOOL_NAME,
-  enabled: true,
-  description:
-    "Create a new UTF-8 text file inside the chat workspace. Requires user confirmation before writing and fails if the file already exists.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      path: {
-        type: "string",
-        description:
-          "New file path to create. Prefer a path relative to the workspace root.",
-      },
-      rootId: {
-        type: "string",
-        description:
-          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
+        description: "Path to the file to write (relative to the selected workspace or absolute).",
       },
       content: {
         type: "string",
-        description: "UTF-8 text content to write to the new file.",
-      },
-      createParents: {
-        type: "boolean",
-        description:
-          "Whether to create missing parent folders inside the workspace root. Defaults to false.",
+        description: "Content to write to the file.",
       },
     },
     required: ["path", "content"],
@@ -571,135 +430,7 @@ export const FILE_CREATE_TOOL: LoadedToolInfo = {
   args: [],
   input: "none",
   timeoutMs: 0,
-};
-
-export const ARCHIVE_EXTRACT_TOOL: LoadedToolInfo = {
-  id: "builtin-archive-extract",
-  name: ARCHIVE_EXTRACT_TOOL_NAME,
-  enabled: true,
-  description:
-    "Extract an archive file from an approved workspace root into a collision-safe folder inside that workspace. Use this only when archive contents are needed.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      path: { type: "string", description: "Archive file path to extract." },
-      rootId: { type: "string", description: "Optional workspace root id." },
-      outputPath: {
-        type: "string",
-        description:
-          "Optional output folder path inside the same workspace root. Omit to use a generated folder.",
-      },
-    },
-    required: ["path"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const ARCHIVE_CREATE_TOOL: LoadedToolInfo = {
-  id: "builtin-archive-create",
-  name: ARCHIVE_CREATE_TOOL_NAME,
-  enabled: true,
-  description:
-    "Create a downloadable ZIP archive from selected workspace files or folders. Use this to return multiple generated files to the user as one artifact.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      paths: {
-        type: "array",
-        items: { type: "string" },
-        description: "Workspace-relative files or folders to add to the ZIP.",
-      },
-      rootId: { type: "string", description: "Optional workspace root id." },
-      filename: { type: "string", description: "Optional ZIP filename." },
-    },
-    required: ["paths"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const DOCUMENT_CONVERT_TOOL: LoadedToolInfo = {
-  id: "builtin-document-convert",
-  name: DOCUMENT_CONVERT_TOOL_NAME,
-  enabled: true,
-  description:
-    "Convert a PDF, Office document, CSV, or text-like file into a readable text/Markdown companion file inside the workspace. Use file_read on the returned outputPath.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      path: { type: "string", description: "Document path to convert." },
-      rootId: { type: "string", description: "Optional workspace root id." },
-      outputPath: {
-        type: "string",
-        description: "Optional output file path inside the same workspace root.",
-      },
-    },
-    required: ["path"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const CHAT_FILE_CREATE_TOOL: LoadedToolInfo = {
-  id: "builtin-chat-file-create",
-  name: CHAT_FILE_CREATE_TOOL_NAME,
-  enabled: true,
-  description:
-    "Create a downloadable text file that appears in the chat for the user. IMPORTANT: whenever the user asks you to generate, create, write, export, prepare, save, or return a file in the chat (for example a .md, .txt, .json, .csv, .html, or other text file), use chat_file_create. Do not use file_create for user-downloadable chat outputs; file_create is only for normal workspace/source-code files.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      filename: { type: "string", description: "Download filename." },
-      content: { type: "string", description: "UTF-8 text file content." },
-      description: { type: "string" },
-      mimeType: { type: "string" },
-    },
-    required: ["filename", "content"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
-};
-
-export const FILE_DELETE_TOOL: LoadedToolInfo = {
-  id: "builtin-file-delete",
-  name: FILE_DELETE_TOOL_NAME,
-  enabled: true,
-  description:
-    "Move a workspace file to the operating system Trash. Requires user confirmation and only deletes files, not folders.",
-  parameters: {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      path: {
-        type: "string",
-        description:
-          "File path to move to Trash. Prefer a path relative to the workspace root.",
-      },
-      rootId: {
-        type: "string",
-        description:
-          "Optional workspace root id. Use this when the chat has multiple workspace roots.",
-      },
-    },
-    required: ["path"],
-  },
-  command: "",
-  args: [],
-  input: "none",
-  timeoutMs: 0,
+  requiresApproval: true,
 };
 
 export function createCallAgentTool(agents: LoadedAgentInfo[]): LoadedToolInfo | null {
@@ -752,7 +483,11 @@ export function createLoadSkillTool(
   availableSkills: LoadedSkillInfo[],
 ): LoadedToolInfo | null {
   const selectableSkills = availableSkills
-    .filter((skill) => skill.name.trim() && skill.description.trim())
+    .filter(
+      (skill) =>
+        skill.name.trim() &&
+        skill.description.trim(),
+    )
     .sort((left, right) => left.name.localeCompare(right.name));
 
   if (selectableSkills.length === 0) return null;
@@ -762,13 +497,12 @@ export function createLoadSkillTool(
     .join("\n");
 
   return {
-    id: "builtin-load-skill",
+    id: "builtin-skill",
     name: LOAD_SKILL_TOOL_NAME,
     enabled: true,
     description: [
-      "Load the full instructions for one relevant skill and activate it for this chat.",
-      "Use this when a skill would materially improve the answer. Do not load skills unnecessarily. Do not load a skill that is already active.",
-      "If the user explicitly mentions a skill with @skill:name, the app loads that skill before generation starts. Do not call load_skill for that mentioned skill; continue directly using the active skill instructions.",
+      "Load the full instructions for one relevant skill by name.",
+      "Use this when a skill would materially improve the task. Loading a skill returns its SKILL.md content and tells you how to resolve relative references. You may load the same skill again if the previous load may no longer be in context.",
       "Available skills:",
       skillList,
     ].join("\n"),
@@ -776,14 +510,14 @@ export function createLoadSkillTool(
       type: "object",
       additionalProperties: false,
       properties: {
-        skillName: {
+        name: {
           type: "string",
           description:
             "Exact skill name to load from the available skills list.",
           enum: selectableSkills.map((skill) => skill.name),
         },
       },
-      required: ["skillName"],
+      required: ["name"],
     },
     command: "",
     args: [],
@@ -802,20 +536,13 @@ export function isBuiltInToolName(toolName: string) {
     isTaskToolName(toolName) ||
     toolName === LOAD_SKILL_TOOL_NAME ||
     toolName === WEB_FETCH_TOOL_NAME ||
+    isFileToolName(toolName) ||
+    isLegacyFileToolName(toolName) ||
     toolName === TERMINAL_EXEC_TOOL_NAME ||
-    toolName === FILE_READ_TOOL_NAME ||
-    toolName === FILE_FIND_TOOL_NAME ||
-    toolName === FILE_SEARCH_TEXT_TOOL_NAME ||
-    toolName === FILE_REPLACE_TEXT_TOOL_NAME ||
-    toolName === FILE_CREATE_TOOL_NAME ||
-    toolName === FILE_DELETE_TOOL_NAME ||
-    toolName === ARCHIVE_EXTRACT_TOOL_NAME ||
-    toolName === ARCHIVE_CREATE_TOOL_NAME ||
-    toolName === DOCUMENT_CONVERT_TOOL_NAME ||
-    toolName === CHAT_FILE_CREATE_TOOL_NAME ||
     toolName === CALL_AGENT_TOOL_NAME
   );
 }
+
 
 export function isTaskToolName(toolName: string) {
   return (
@@ -894,41 +621,8 @@ export function createToolApprovalRequest(
   const command = buildCustomToolApprovalCommand(toolCall, tool);
   const sourceLabel = tool?.source === "mcp" ? "MCP tool" : "custom tool";
 
-  if (toolCall.function.name === TERMINAL_EXEC_TOOL_NAME) {
-    const args = parseToolArgumentsText(toolCall.function.arguments || "{}");
-    const source = args && typeof args === "object" && !Array.isArray(args)
-      ? (args as Record<string, unknown>)
-      : {};
-    const commandValue = typeof source.command === "string" ? source.command.trim() : "";
-    const shellValue = typeof source.shell === "string" && source.shell.trim()
-      ? source.shell.trim()
-      : "auto";
-    const cwdValue = typeof source.cwd === "string" && source.cwd.trim()
-      ? source.cwd.trim()
-      : ".";
-    const rootIdValue = typeof source.rootId === "string" && source.rootId.trim()
-      ? source.rootId.trim()
-      : "auto / required for multiple roots";
-    const timeoutValue = typeof source.timeoutMs === "number" && Number.isFinite(source.timeoutMs)
-      ? `${Math.round(source.timeoutMs)} ms`
-      : "Default";
-
-    return {
-      title: "Approve terminal command",
-      description:
-        "The model wants to run a foreground command inside an approved workspace folder.",
-      toolName: toolCall.function.name,
-      action: "operation",
-      details: [
-        { label: "Command", value: commandValue || "Missing command" },
-        { label: "Shell", value: shellValue },
-        { label: "Workspace root", value: rootIdValue },
-        { label: "Working directory", value: cwdValue },
-        { label: "Timeout", value: timeoutValue },
-        { label: "Scope", value: "Approved workspace folders only" },
-        { label: "Approval mode", value: "Manual user approval required" },
-      ],
-    };
+  if (isFileToolName(toolCall.function.name)) {
+    return parseFileToolApprovalRequestFromToolCall(toolCall);
   }
 
   return {
@@ -946,10 +640,12 @@ export function createToolApprovalRequest(
   };
 }
 
+
 export function requiresToolApproval(
   toolName: string,
   tool?: Pick<LoadedToolInfo, "requiresApproval">,
 ) {
+  if (tool?.requiresApproval === false) return false;
   return (
     toolName === TERMINAL_EXEC_TOOL_NAME ||
     requiresFileToolApproval(toolName) ||
@@ -958,11 +654,13 @@ export function requiresToolApproval(
 }
 
 export function getFileToolApprovalAction(toolName: string) {
-  if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) return "replacement";
-  if (toolName === FILE_CREATE_TOOL_NAME) return "creation";
-  if (toolName === FILE_DELETE_TOOL_NAME) return "deletion";
+  if (toolName === EDIT_TOOL_NAME) return "edit";
+  if (toolName === WRITE_TOOL_NAME) return "write";
+  if (toolName === BASH_TOOL_NAME) return "command";
+  if (toolName === READ_TOOL_NAME) return "read";
   return "operation";
 }
+
 
 function readFileToolPath(args: unknown) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
@@ -1021,82 +719,72 @@ export function createFileToolApprovalRequest(
   workspaceRoots?: ChatWorkspaceRoot[],
 ): FileToolApprovalRequest {
   const requestedPath = readFileToolPath(args);
-  const rootId = readFileToolRootId(args);
-  const filePath = resolveFileToolDisplayPath(
-    requestedPath,
-    rootId,
-    workspaceRoots,
-  );
+  const filePath = resolveFileToolDisplayPath(requestedPath, undefined, workspaceRoots);
   const source = args && typeof args === "object" && !Array.isArray(args)
     ? (args as Record<string, unknown>)
     : {};
 
-  if (toolName === FILE_REPLACE_TEXT_TOOL_NAME) {
-    const oldText = typeof source.oldText === "string" ? source.oldText : "";
-    const newText = typeof source.newText === "string" ? source.newText : "";
-    const startLine = typeof source.startLine === "number" ? source.startLine : undefined;
-    const endLine = typeof source.endLine === "number" ? source.endLine : undefined;
-    const lineRange =
-      startLine !== undefined || endLine !== undefined
-        ? `${startLine ?? 1}-${endLine ?? "end"}`
-        : "Whole file";
+  if (toolName === BASH_TOOL_NAME) {
+    const commandValue = typeof source.command === "string" ? source.command.trim() : "";
+    const timeoutValue = typeof source.timeout === "number" && Number.isFinite(source.timeout)
+      ? `${Math.round(source.timeout)} s`
+      : "No timeout";
 
     return {
-      title: "Approve workspace file edit",
-      description: "The model wants to replace text in an approved workspace file.",
+      title: "Approve bash command",
+      description: "The model wants to run a bash command inside the selected workspace.",
       toolName,
-      action: "replacement",
-      path: filePath,
+      action: "operation",
       details: [
-        { label: "Old text length", value: String(oldText.length) },
-        { label: "New text length", value: String(newText.length) },
-        { label: "Line range", value: lineRange },
-        { label: "Scope", value: "Approved workspace folders only" },
+        { label: "Command", value: commandValue || "Missing command" },
+        { label: "Workspace", value: workspaceRoots?.[0]?.path ?? "No workspace selected" },
+        { label: "Timeout", value: timeoutValue },
+        { label: "Approval mode", value: "Manual user approval required" },
       ],
     };
   }
 
-  if (toolName === FILE_CREATE_TOOL_NAME) {
-    const content = typeof source.content === "string" ? source.content : "";
-    const createParents = source.createParents === true;
-
+  if (toolName === EDIT_TOOL_NAME) {
+    const edits = Array.isArray(source.edits) ? source.edits : [];
     return {
-      title: "Approve workspace file creation",
-      description: "The model wants to create a file in an approved workspace folder.",
+      title: "Approve file edit",
+      description: "The model wants to edit a file in the selected workspace.",
+      toolName,
+      action: "replacement",
+      path: filePath,
+      details: [
+        { label: "Edit count", value: String(edits.length) },
+        { label: "Scope", value: "Selected workspace" },
+      ],
+    };
+  }
+
+  if (toolName === WRITE_TOOL_NAME) {
+    const content = typeof source.content === "string" ? source.content : "";
+    return {
+      title: "Approve file write",
+      description: "The model wants to create or overwrite a file in the selected workspace.",
       toolName,
       action: "creation",
       path: filePath,
       details: [
         { label: "Content length", value: String(content.length) },
-        { label: "Create parent folders", value: createParents ? "Yes" : "No" },
-        { label: "Scope", value: "Approved workspace folders only" },
-      ],
-    };
-  }
-
-  if (toolName === FILE_DELETE_TOOL_NAME) {
-    return {
-      title: "Approve workspace file deletion",
-      description: "The model wants to move a workspace file to Trash. Folders are not deleted.",
-      toolName,
-      action: "deletion",
-      path: filePath,
-      details: [
-        { label: "Deletion mode", value: "Move to Trash" },
-        { label: "Scope", value: "Approved workspace folders only" },
+        { label: "Parent folders", value: "Created automatically" },
+        { label: "Scope", value: "Selected workspace" },
       ],
     };
   }
 
   return {
-    title: "Approve workspace file operation",
-    description: "The model wants to run a workspace file operation.",
+    title: "Approve file read",
+    description: "The model wants to read a file from the selected workspace.",
     toolName,
     action: "operation",
     path: filePath,
-    details: [{ label: "Scope", value: "Approved workspace folders only" }],
+    details: [{ label: "Scope", value: "Selected workspace" }],
   };
 }
+
 
 export function parseFileToolApprovalRequestFromToolCall(
   toolCall: ChatToolCall,

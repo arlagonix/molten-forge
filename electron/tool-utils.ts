@@ -12,6 +12,7 @@ export type WorkspaceRoot = {
   name: string;
   path: string;
   createdAt?: string;
+  kind?: "chat" | "manual" | "skill";
 };
 
 export type ToolExecutionContext = {
@@ -58,6 +59,10 @@ export function normalizeWorkspaceRoots(value: unknown): WorkspaceRoot[] {
       name: safeString(item.name).trim() || path.basename(rootPath) || rootPath,
       path: rootPath,
       createdAt: safeString(item.createdAt).trim() || undefined,
+      kind: (() => {
+        const kind = safeString(item.kind).trim();
+        return kind === "chat" || kind === "manual" || kind === "skill" ? kind : undefined;
+      })(),
     });
     seen.add(id);
   }

@@ -38,9 +38,6 @@ contextBridge.exposeInMainWorld("codeForgeAI", {
     return ipcRenderer.invoke("attachments:read-data-url", request);
   },
 
-  materializeAttachments(request: unknown) {
-    return ipcRenderer.invoke("attachments:materialize", request);
-  },
 
   exportAttachment(request: unknown) {
     return ipcRenderer.invoke("attachments:export", request);
@@ -223,8 +220,8 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
     return ipcRenderer.invoke("storage:tools:open-folder");
   },
 
-  loadSkills() {
-    return ipcRenderer.invoke("storage:skills:load");
+  loadSkills(request?: unknown) {
+    return ipcRenderer.invoke("storage:skills:load", request);
   },
 
   saveSkill(skill: unknown, previousName?: unknown) {
@@ -289,9 +286,6 @@ contextBridge.exposeInMainWorld("chatForgeWorkspace", {
     return ipcRenderer.invoke("workspace:open-folder", folderPath);
   },
 
-  ensureChatWorkspace(chatId: unknown) {
-    return ipcRenderer.invoke("workspace:ensure-chat", chatId);
-  },
 });
 
 contextBridge.exposeInMainWorld("chatForgeTools", {

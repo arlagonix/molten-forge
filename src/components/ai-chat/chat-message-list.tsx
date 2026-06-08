@@ -1,6 +1,7 @@
 import { Spinner as RadixSpinner } from "@radix-ui/themes";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
+  BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -42,6 +43,12 @@ import { TooltipIconButton } from "@/components/ai-chat/tooltip-icon-button";
 import { UserMessageEditor } from "@/components/ai-chat/user-message-editor";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -73,8 +80,37 @@ import type {
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
-const USER_MENTION_PATTERN =
-  /(^|\s)@(tool|skill|agent):([A-Za-z0-9_-]+)(?=$|\s)/g;
+type ParsedSkillInvocation = {
+  name: string;
+  location: string;
+  content: string;
+  rest: string;
+};
+
+function parseSkillInvocationMessage(content: string): ParsedSkillInvocation | null {
+  const match = /^<skill\s+name="([^"]+)"\s+location="([^"]*)">\s*([\s\S]*?)\s*<\/skill>\s*([\s\S]*)$/.exec(content.trim());
+  if (!match) return null;
+
+  return {
+    name: match[1] ?? "",
+    location: match[2] ?? "",
+    content: (match[3] ?? "").trim(),
+    rest: (match[4] ?? "").trim(),
+  };
+}
+
+function formatSkillDirectory(location: string) {
+  const normalized = location.replace(/\\/g, "/");
+  const index = normalized.lastIndexOf("/");
+  if (index <= 0) return location;
+  return location.slice(0, index);
+}
+
+function parseSlashInvocation(content: string) {
+  const match = /^(\s*)(\/(?:skill|s|agent|a):[A-Za-z0-9_-]+)([\s\S]*)$/.exec(content);
+  if (!match) return null;
+  return { leading: match[1] ?? "", command: match[2] ?? "", rest: match[3] ?? "" };
+}
 
 function MarkdownIcon({ className }: { className?: string }) {
   return (
@@ -236,6 +272,7 @@ function formatGenerationInfoJson(metrics: ChatAssistantVariant["metrics"]) {
   const info = Object.fromEntries(
     Object.entries({
       model: metrics.model,
+      mode: metrics.modeName,
       provider: metrics.providerName,
       finish_reason: metrics.finishReason,
       usage: usage && Object.keys(usage).length > 0 ? usage : undefined,
@@ -256,41 +293,73 @@ const UserMessageContent = memo(function UserMessageContent({
 }: {
   content: string;
 }) {
-  const parts: ReactNode[] = [];
-  const pattern = new RegExp(USER_MENTION_PATTERN);
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
+  const [skillModalOpen, setSkillModalOpen] = useState(false);
+  const skillInvocation = parseSkillInvocationMessage(content);
 
-  while ((match = pattern.exec(content)) !== null) {
-    const prefix = match[1] ?? "";
-    const mentionType =
-      match[2] === "skill" ? "skill" : match[2] === "agent" ? "agent" : "tool";
-    const mentionName = match[3] ?? "";
-    const token = `@${mentionType}:${mentionName}`;
-    const tokenStartIndex = match.index + prefix.length;
-
-    if (tokenStartIndex > lastIndex) {
-      parts.push(content.slice(lastIndex, tokenStartIndex));
+  if (!skillInvocation) {
+    const slashInvocation = parseSlashInvocation(content);
+    if (!slashInvocation) {
+      return <div className="whitespace-pre-wrap">{content}</div>;
     }
 
-    parts.push(
-      <span
-        key={`${tokenStartIndex}-${token}`}
-        className="inline-flex items-center  border border-primary-foreground/25 bg-primary-foreground/15 px-1.5 py-0.5 font-mono text-[0.875em] font-medium leading-5 text-primary-foreground"
-        title={`One-shot ${mentionType} for this request: ${mentionName}`}
-      >
-        {token}
-      </span>,
+    return (
+      <div className="whitespace-pre-wrap">
+        {slashInvocation.leading}
+        <span className="rounded bg-primary-foreground/15 px-1 py-0.5 font-mono text-[0.95em]">
+          {slashInvocation.command}
+        </span>
+        {slashInvocation.rest}
+      </div>
     );
-
-    lastIndex = tokenStartIndex + token.length;
   }
 
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex));
-  }
+  const skillDirectory = formatSkillDirectory(skillInvocation.location);
 
-  return <div className="whitespace-pre-wrap">{parts}</div>;
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        className="flex w-full min-w-0 items-start gap-2 rounded-md border border-primary-foreground/20 bg-primary-foreground/10 px-3 py-2 text-left transition hover:bg-primary-foreground/15"
+        onClick={() => setSkillModalOpen(true)}
+        title={skillInvocation.location}
+      >
+        <BookOpen className="mt-0.5 size-4 shrink-0 opacity-80" />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">
+            Skill: {skillInvocation.name}
+          </span>
+          <span className="block truncate font-mono text-xs opacity-80">
+            {skillInvocation.location}
+          </span>
+        </span>
+      </button>
+
+      {skillInvocation.rest ? (
+        <div className="whitespace-pre-wrap">{skillInvocation.rest}</div>
+      ) : null}
+
+      <Dialog open={skillModalOpen} onOpenChange={setSkillModalOpen}>
+        <DialogContent className="flex max-h-[85dvh] flex-col gap-0 overflow-hidden p-0 sm:max-w-4xl">
+          <DialogHeader className="border-b px-5 py-4 pr-12">
+            <DialogTitle>Skill: {skillInvocation.name}</DialogTitle>
+            <div className="break-all font-mono text-xs text-muted-foreground">
+              {skillInvocation.location}
+            </div>
+            {skillDirectory ? (
+              <div className="break-all text-xs text-muted-foreground">
+                References are relative to {skillDirectory}.
+              </div>
+            ) : null}
+          </DialogHeader>
+          <div className="min-h-0 flex-1 overflow-auto p-5 chat-message-scrollbar">
+            <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-4 font-mono text-sm leading-6">
+              <code>{skillInvocation.content}</code>
+            </pre>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 });
 
 const SourceMarkdownContent = memo(function SourceMarkdownContent({
@@ -521,6 +590,10 @@ const ChatMessageItem = memo(
     const status = activeVariant?.status;
     const metrics = activeVariant?.metrics;
     const generatedModelName = metrics?.model?.trim() ?? "";
+    const generatedModeName = metrics?.modeName?.trim() || "Default";
+    const generatedModelAndMode = generatedModelName
+      ? `${generatedModelName} · ${generatedModeName}`
+      : "";
     const isMessageStreaming = status === "streaming";
     const variantCount =
       message.role === "assistant" ? message.variants.length : 0;
@@ -1206,12 +1279,12 @@ const ChatMessageItem = memo(
                       Generating
                     </span>
                   </span>
-                ) : generatedModelName ? (
+                ) : generatedModelAndMode ? (
                   <span
                     className="block truncate text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100"
-                    title={`Generated with ${generatedModelName}`}
+                    title={`Generated with ${generatedModelAndMode}`}
                   >
-                    {generatedModelName}
+                    {generatedModelAndMode}
                   </span>
                 ) : (
                   <span aria-hidden="true" />

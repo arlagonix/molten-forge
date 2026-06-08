@@ -48,7 +48,6 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { createId, labelForError } from "@/lib/ai-chat/chat-utils";
 import {
@@ -62,7 +61,9 @@ import {
 } from "@/lib/ai-chat/storage";
 import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import type {
+  FeaturePermission,
   LoadedToolInfo,
+  Permission,
   ToolCommandResult,
   ToolExecutionPreview,
   ToolImportResult,
@@ -83,215 +84,130 @@ const BUILTIN_TASK_TOOL_META = [
       "Updates the visible task checklist for the current chat by setting the full current list.",
   },
 ] as const;
-const BUILTIN_LOAD_SKILL_TOOL_NAME = "load_skill";
+const BUILTIN_LOAD_SKILL_TOOL_NAME = "skill";
 const BUILTIN_LOAD_SKILL_TOOL_ID = "builtin-load-skill";
 const BUILTIN_CALL_AGENT_TOOL_NAME = "call_agent";
 const BUILTIN_CALL_AGENT_TOOL_ID = "builtin-call-agent";
 const BUILTIN_WEB_FETCH_TOOL_NAME = "web_fetch";
 const BUILTIN_WEB_FETCH_TOOL_ID = "builtin-web-fetch";
-const BUILTIN_TERMINAL_EXEC_TOOL_NAME = "terminal_exec";
-const BUILTIN_TERMINAL_EXEC_TOOL_ID = "builtin-terminal-exec";
-const BUILTIN_FILE_READ_TOOL_NAME = "file_read";
-const BUILTIN_FILE_FIND_TOOL_NAME = "file_find";
-const BUILTIN_FILE_SEARCH_TEXT_TOOL_NAME = "file_search_text";
-const BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME = "file_replace_text";
-const BUILTIN_FILE_CREATE_TOOL_NAME = "file_create";
-const BUILTIN_FILE_DELETE_TOOL_NAME = "file_delete";
-const BUILTIN_ARCHIVE_EXTRACT_TOOL_NAME = "archive_extract";
-const BUILTIN_ARCHIVE_CREATE_TOOL_NAME = "archive_create";
-const BUILTIN_DOCUMENT_CONVERT_TOOL_NAME = "document_convert";
-const BUILTIN_CHAT_FILE_CREATE_TOOL_NAME = "chat_file_create";
+const BUILTIN_READ_TOOL_NAME = "read";
+const BUILTIN_BASH_TOOL_NAME = "bash";
+const BUILTIN_EDIT_TOOL_NAME = "edit";
+const BUILTIN_WRITE_TOOL_NAME = "write";
 const BUILTIN_FILE_TOOL_NAMES = [
-  BUILTIN_FILE_READ_TOOL_NAME,
-  BUILTIN_FILE_FIND_TOOL_NAME,
-  BUILTIN_FILE_SEARCH_TEXT_TOOL_NAME,
-  BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME,
-  BUILTIN_FILE_CREATE_TOOL_NAME,
-  BUILTIN_FILE_DELETE_TOOL_NAME,
-  BUILTIN_ARCHIVE_EXTRACT_TOOL_NAME,
-  BUILTIN_ARCHIVE_CREATE_TOOL_NAME,
-  BUILTIN_DOCUMENT_CONVERT_TOOL_NAME,
-  BUILTIN_CHAT_FILE_CREATE_TOOL_NAME,
+  BUILTIN_READ_TOOL_NAME,
+  BUILTIN_BASH_TOOL_NAME,
+  BUILTIN_EDIT_TOOL_NAME,
+  BUILTIN_WRITE_TOOL_NAME,
 ];
 const BUILTIN_FILE_TOOL_META = [
   {
-    id: "builtin-file-read",
-    name: BUILTIN_FILE_READ_TOOL_NAME,
-    setting: "fileReadEnabled" as const,
-    description: "Reads UTF-8 text files inside approved workspace folders. Reads the whole file by default; supports optional line windows with offset/limit.",
+    id: "builtin-read",
+    name: BUILTIN_READ_TOOL_NAME,
+    setting: "readEnabled" as const,
+    autoApproveSetting: "readAutoApproveEnabled" as const,
+    icon: FolderOpen,
+    description:
+      "Read the contents of a file. Supports text files and images. For text files, output is truncated to 2000 lines or 128KB; use offset/limit for large files.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
-        path: { type: "string" },
-        rootId: { type: "string" },
-        offset: { type: "number" },
-        limit: { type: "number" },
+        path: {
+          type: "string",
+          description:
+            "Path to the file to read (relative to the selected workspace or absolute).",
+        },
+        offset: {
+          type: "number",
+          description: "Line number to start reading from (1-indexed).",
+        },
+        limit: {
+          type: "number",
+          description: "Maximum number of lines to read.",
+        },
       },
       required: ["path"],
     },
   },
   {
-    id: "builtin-file-find",
-    name: BUILTIN_FILE_FIND_TOOL_NAME,
-    setting: "fileFindEnabled" as const,
+    id: "builtin-bash",
+    name: BUILTIN_BASH_TOOL_NAME,
+    setting: "bashEnabled" as const,
+    autoApproveSetting: "bashAutoApproveEnabled" as const,
+    icon: Terminal,
     description:
-      "Finds files or folders by name/path inside approved workspace folders.",
+      "Execute a bash command in the selected workspace. Uses Pi-style shell resolution, preferring Git Bash on Windows and bash/sh on Unix.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
-        query: { type: "string" },
-        rootId: { type: "string" },
-        include: { type: "array", items: { type: "string" } },
-        exclude: { type: "array", items: { type: "string" } },
-        maxResults: { type: "number" },
+        command: { type: "string", description: "Bash command to execute." },
+        timeout: {
+          type: "number",
+          description: "Timeout in seconds (optional).",
+        },
       },
+      required: ["command"],
     },
   },
   {
-    id: "builtin-file-search-text",
-    name: BUILTIN_FILE_SEARCH_TEXT_TOOL_NAME,
-    setting: "fileSearchTextEnabled" as const,
+    id: "builtin-edit",
+    name: BUILTIN_EDIT_TOOL_NAME,
+    setting: "editEnabled" as const,
+    autoApproveSetting: "editAutoApproveEnabled" as const,
+    icon: FolderOpen,
     description:
-      "Searches text file contents inside approved workspace folders.",
+      "Edit a single file using exact text replacement. Supports multiple disjoint edits in one call.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
-        query: { type: "string" },
-        rootId: { type: "string" },
-        include: { type: "array", items: { type: "string" } },
-        exclude: { type: "array", items: { type: "string" } },
-        caseSensitive: { type: "boolean" },
-        maxResults: { type: "number" },
+        path: {
+          type: "string",
+          description:
+            "Path to the file to edit (relative to the selected workspace or absolute).",
+        },
+        edits: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              oldText: { type: "string" },
+              newText: { type: "string" },
+            },
+            required: ["oldText", "newText"],
+          },
+        },
       },
-      required: ["query"],
+      required: ["path", "edits"],
     },
   },
   {
-    id: "builtin-file-replace-text",
-    name: BUILTIN_FILE_REPLACE_TEXT_TOOL_NAME,
-    setting: "fileReplaceTextEnabled" as const,
-    autoApproveSetting: "fileReplaceTextAutoApproveEnabled" as const,
+    id: "builtin-write",
+    name: BUILTIN_WRITE_TOOL_NAME,
+    setting: "writeEnabled" as const,
+    autoApproveSetting: "writeAutoApproveEnabled" as const,
+    icon: FolderOpen,
     description:
-      "Replaces exact text in a workspace file after user confirmation. Disabled by default.",
+      "Create or overwrite files. Automatically creates parent directories.",
     parameters: {
       type: "object",
       additionalProperties: false,
       properties: {
-        path: { type: "string" },
-        rootId: { type: "string" },
-        oldText: { type: "string" },
-        newText: { type: "string" },
-        expectedReplacements: { type: "number" },
-      },
-      required: ["path", "oldText", "newText"],
-    },
-  },
-  {
-    id: "builtin-file-create",
-    name: BUILTIN_FILE_CREATE_TOOL_NAME,
-    setting: "fileCreateEnabled" as const,
-    autoApproveSetting: "fileCreateAutoApproveEnabled" as const,
-    description:
-      "Creates a new UTF-8 text file in a workspace folder after user confirmation.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        path: { type: "string" },
-        rootId: { type: "string" },
-        content: { type: "string" },
-        createParents: { type: "boolean" },
+        path: {
+          type: "string",
+          description:
+            "Path to the file to write (relative to the selected workspace or absolute).",
+        },
+        content: {
+          type: "string",
+          description: "Content to write to the file.",
+        },
       },
       required: ["path", "content"],
-    },
-  },
-  {
-    id: "builtin-file-delete",
-    name: BUILTIN_FILE_DELETE_TOOL_NAME,
-    setting: "fileDeleteEnabled" as const,
-    autoApproveSetting: "fileDeleteAutoApproveEnabled" as const,
-    description:
-      "Moves a workspace file to the operating system Trash after user confirmation. Disabled by default.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        path: { type: "string" },
-        rootId: { type: "string" },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    id: "builtin-archive-extract",
-    name: BUILTIN_ARCHIVE_EXTRACT_TOOL_NAME,
-    setting: "archiveExtractEnabled" as const,
-    description:
-      "Extracts an archive inside an approved workspace folder into a collision-safe workspace folder.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        path: { type: "string" },
-        rootId: { type: "string" },
-        outputPath: { type: "string" },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    id: "builtin-archive-create",
-    name: BUILTIN_ARCHIVE_CREATE_TOOL_NAME,
-    setting: "archiveCreateEnabled" as const,
-    description:
-      "Creates a downloadable ZIP archive from selected workspace files or folders.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        paths: { type: "array", items: { type: "string" } },
-        rootId: { type: "string" },
-        filename: { type: "string" },
-      },
-      required: ["paths"],
-    },
-  },
-  {
-    id: "builtin-document-convert",
-    name: BUILTIN_DOCUMENT_CONVERT_TOOL_NAME,
-    setting: "documentConvertEnabled" as const,
-    description:
-      "Converts PDFs and common document formats to readable text or Markdown companion files inside the chat workspace.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        path: { type: "string" },
-        rootId: { type: "string" },
-        outputPath: { type: "string" },
-      },
-      required: ["path"],
-    },
-  },
-  {
-    id: "builtin-chat-file-create",
-    name: BUILTIN_CHAT_FILE_CREATE_TOOL_NAME,
-    setting: "chatFileCreateEnabled" as const,
-    description:
-      "Creates a downloadable text file artifact in the chat workspace.",
-    parameters: {
-      type: "object",
-      additionalProperties: false,
-      properties: {
-        filename: { type: "string" },
-        content: { type: "string" },
-        description: { type: "string" },
-        mimeType: { type: "string" },
-      },
-      required: ["filename", "content"],
     },
   },
 ];
@@ -347,26 +263,103 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
 const BUILTIN_TASK_TOOLS_DESCRIPTION =
   "The assistant uses one task list tool (`update_tasks`) to show and update a checklist in the current chat. It always sends the full current list; sending an empty list clears it.";
 const BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION =
-  "Loads full instructions for one relevant skill and activates it for the current chat when skills are available.";
+  "Load a discovered skill by name. Returns the skill's SKILL.md content and reference path so the model can follow skill-specific instructions.";
 const BUILTIN_CALL_AGENT_TOOL_DESCRIPTION =
   "Delegates a focused subtask to one enabled agent. The actual runtime schema is rebuilt per chat so agentName is limited to currently available agents.";
 const BUILTIN_WEB_FETCH_TOOL_DESCRIPTION =
   "Fetches readable text from a specific HTTP/HTTPS URL. It can read official docs or user-provided links, but it does not search the web.";
-const BUILTIN_TERMINAL_EXEC_TOOL_DESCRIPTION =
-  "Runs a foreground terminal command inside an approved workspace folder after user approval. Streams stdout/stderr, enforces a timeout, and returns the exit code.";
 const BUILTIN_LOAD_SKILL_TOOL_PARAMETERS = {
   type: "object",
   properties: {
-    skillName: {
+    name: {
       type: "string",
       description: "Exact skill name to load from the available skills list.",
     },
   },
-  required: ["skillName"],
+  required: ["name"],
 };
 
 const TOOL_INFO_CODE_BLOCK_CLASS_NAME =
   "chat-markdown-compact chat-tool-info-codeblock";
+
+function getToolsMasterPermission(settings: ToolsSettings): FeaturePermission {
+  return settings.toolsPermission ?? "custom";
+}
+
+function getToolPermission(
+  settings: ToolsSettings,
+  toolName: string,
+): Permission {
+  return settings.toolPermissions?.[toolName] ?? "ask";
+}
+
+function getDisplayedToolPermission(
+  settings: ToolsSettings,
+  toolName: string,
+): Permission {
+  const masterPermission = getToolsMasterPermission(settings);
+  return masterPermission === "custom"
+    ? getToolPermission(settings, toolName)
+    : masterPermission;
+}
+
+function PermissionSelect({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: Permission;
+  onChange: (value: Permission) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as Permission)}
+      disabled={disabled}
+    >
+      <SelectTrigger
+        className="h-8 w-[6.25rem] shrink-0"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="allow">Allow</SelectItem>
+        <SelectItem value="ask">Ask</SelectItem>
+        <SelectItem value="deny">Deny</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function MasterPermissionSelect({
+  value,
+  onChange,
+}: {
+  value: FeaturePermission;
+  onChange: (value: FeaturePermission) => void;
+}) {
+  return (
+    <Select
+      value={value}
+      onValueChange={(next) => onChange(next as FeaturePermission)}
+    >
+      <SelectTrigger
+        className="h-8 w-27 shrink-0"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="custom">Custom</SelectItem>
+        <SelectItem value="allow">Allow</SelectItem>
+        <SelectItem value="ask">Ask</SelectItem>
+        <SelectItem value="deny">Deny</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
 
 const BUILTIN_CALL_AGENT_TOOL_PARAMETERS = {
   type: "object",
@@ -396,32 +389,6 @@ const BUILTIN_WEB_FETCH_TOOL_PARAMETERS = {
     },
   },
   required: ["url"],
-};
-
-const BUILTIN_TERMINAL_EXEC_TOOL_PARAMETERS = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    command: {
-      type: "string",
-      description: "Exact shell command to run after user approval.",
-    },
-    rootId: {
-      type: "string",
-      description: "Workspace root id. Required when the chat has multiple workspace roots.",
-    },
-    cwd: {
-      type: "string",
-      description: "Working directory inside the selected workspace root. Defaults to the root.",
-    },
-    shell: {
-      type: "string",
-      enum: ["auto", "powershell", "cmd", "bash", "sh"],
-    },
-    timeoutMs: { type: "number" },
-    maxOutputChars: { type: "number" },
-  },
-  required: ["command"],
 };
 
 const BUILTIN_TASK_TOOL_PARAMETERS = {
@@ -469,7 +436,6 @@ type ToolDraft = {
   timeoutMs: string;
   maxConcurrentRuns: string;
   delayBetweenRunsMs: string;
-  requiresApproval: boolean;
 };
 
 type ToolTestState = {
@@ -517,7 +483,6 @@ function createBlankToolDraft(): ToolDraft {
     timeoutMs: "30000",
     maxConcurrentRuns: "",
     delayBetweenRunsMs: "0",
-    requiresApproval: false,
   };
 }
 
@@ -534,8 +499,7 @@ function areToolDraftsEqual(left: ToolDraft, right: ToolDraft) {
     left.input === right.input &&
     left.timeoutMs === right.timeoutMs &&
     left.maxConcurrentRuns === right.maxConcurrentRuns &&
-    left.delayBetweenRunsMs === right.delayBetweenRunsMs &&
-    left.requiresApproval === right.requiresApproval
+    left.delayBetweenRunsMs === right.delayBetweenRunsMs
   );
 }
 
@@ -556,7 +520,6 @@ function toolToDraft(tool: LoadedToolInfo): ToolDraft {
         ? ""
         : String(tool.maxConcurrentRuns),
     delayBetweenRunsMs: String(tool.delayBetweenRunsMs ?? 0),
-    requiresApproval: tool.requiresApproval === true,
   };
 }
 
@@ -879,7 +842,6 @@ function draftToTool(draft: ToolDraft): LoadedToolInfo {
       Number.isFinite(delayBetweenRunsMs) && delayBetweenRunsMs > 0
         ? Math.round(delayBetweenRunsMs)
         : 0,
-    requiresApproval: draft.requiresApproval,
   };
 }
 
@@ -898,7 +860,6 @@ function validateToolDraft(tool: LoadedToolInfo) {
     tool.name === BUILTIN_LOAD_SKILL_TOOL_NAME ||
     tool.name === BUILTIN_CALL_AGENT_TOOL_NAME ||
     tool.name === BUILTIN_WEB_FETCH_TOOL_NAME ||
-    tool.name === BUILTIN_TERMINAL_EXEC_TOOL_NAME ||
     BUILTIN_FILE_TOOL_NAMES.includes(tool.name)
   ) {
     throw new Error(
@@ -995,59 +956,34 @@ export const ToolsDialog = memo(function ToolsDialog({
     selectedToolName === BUILTIN_CALL_AGENT_TOOL_NAME;
   const isWebFetchToolSelected =
     selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME;
-  const isTerminalExecToolSelected =
-    selectedToolName === BUILTIN_TERMINAL_EXEC_TOOL_NAME;
   const selectedFileToolInfo = BUILTIN_FILE_TOOL_META.find(
     (tool) => tool.name === selectedToolName,
   );
-  const selectedFileToolAutoApproveSetting =
-    selectedFileToolInfo && "autoApproveSetting" in selectedFileToolInfo
-      ? selectedFileToolInfo.autoApproveSetting
-      : undefined;
   const selectedTool = useMemo(
     () => loadedTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedTools, selectedToolName],
   );
-  const totalToolsCount = loadedTools.length + 16;
-  const enabledToolsCount = useMemo(
-    () =>
-      loadedTools.filter((tool) => tool.enabled).length +
-      (toolsSettings.askUserEnabled ? 1 : 0) +
-      (toolsSettings.taskToolsEnabled ? BUILTIN_TASK_TOOL_NAMES.length : 0) +
-      (toolsSettings.loadSkillEnabled ? 1 : 0) +
-      (callAgentEnabled ? 1 : 0) +
-      (toolsSettings.webFetchEnabled ? 1 : 0) +
-      (toolsSettings.terminalExecEnabled ? 1 : 0) +
-      (toolsSettings.fileReadEnabled ? 1 : 0) +
-      (toolsSettings.fileFindEnabled ? 1 : 0) +
-      (toolsSettings.fileSearchTextEnabled ? 1 : 0) +
-      (toolsSettings.fileReplaceTextEnabled ? 1 : 0) +
-      (toolsSettings.fileCreateEnabled ? 1 : 0) +
-      (toolsSettings.fileDeleteEnabled ? 1 : 0) +
-      (toolsSettings.archiveExtractEnabled ? 1 : 0) +
-      (toolsSettings.archiveCreateEnabled ? 1 : 0) +
-      (toolsSettings.documentConvertEnabled ? 1 : 0) +
-      (toolsSettings.chatFileCreateEnabled ? 1 : 0),
-    [
-      loadedTools,
-      toolsSettings.askUserEnabled,
-      toolsSettings.taskToolsEnabled,
-      toolsSettings.loadSkillEnabled,
-      callAgentEnabled,
-      toolsSettings.webFetchEnabled,
-      toolsSettings.terminalExecEnabled,
-      toolsSettings.fileReadEnabled,
-      toolsSettings.fileFindEnabled,
-      toolsSettings.fileSearchTextEnabled,
-      toolsSettings.fileReplaceTextEnabled,
-      toolsSettings.fileCreateEnabled,
-      toolsSettings.fileDeleteEnabled,
-      toolsSettings.archiveExtractEnabled,
-      toolsSettings.archiveCreateEnabled,
-      toolsSettings.documentConvertEnabled,
-      toolsSettings.chatFileCreateEnabled,
-    ],
-  );
+  const totalToolsCount = loadedTools.length + 9;
+  const enabledToolsCount = useMemo(() => {
+    const builtInNames = [
+      BUILTIN_ASK_USER_TOOL_NAME,
+      ...BUILTIN_TASK_TOOL_NAMES,
+      BUILTIN_LOAD_SKILL_TOOL_NAME,
+      BUILTIN_CALL_AGENT_TOOL_NAME,
+      BUILTIN_WEB_FETCH_TOOL_NAME,
+      ...BUILTIN_FILE_TOOL_NAMES,
+    ];
+    return (
+      loadedTools.filter(
+        (tool) =>
+          getDisplayedToolPermission(toolsSettings, tool.name) !== "deny",
+      ).length +
+      builtInNames.filter(
+        (toolName) =>
+          getDisplayedToolPermission(toolsSettings, toolName) !== "deny",
+      ).length
+    );
+  }, [loadedTools, toolsSettings]);
   const currentToolTestState = toolDraft
     ? toolTestStatesByToolId[toolDraft.id]
     : undefined;
@@ -1061,6 +997,8 @@ export const ToolsDialog = memo(function ToolsDialog({
     (isTestingCurrentTool && toolDraft
       ? buildToolExecutionPreviewForDraft(toolDraft, currentToolTestArgsText)
       : undefined);
+  const toolsMasterPermission = getToolsMasterPermission(toolsSettings);
+  const childPermissionsLocked = toolsMasterPermission !== "custom";
 
   useEffect(() => {
     const isEditingUnsavedTool =
@@ -1073,10 +1011,10 @@ export const ToolsDialog = memo(function ToolsDialog({
     if (
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
       isTaskToolsSelected ||
-      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
       selectedToolName === BUILTIN_CALL_AGENT_TOOL_NAME ||
+      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
+      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
       selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME ||
-      selectedToolName === BUILTIN_TERMINAL_EXEC_TOOL_NAME ||
       Boolean(
         selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName),
       )
@@ -1096,10 +1034,10 @@ export const ToolsDialog = memo(function ToolsDialog({
     if (
       selectedToolName === BUILTIN_ASK_USER_TOOL_NAME ||
       isTaskToolsSelected ||
-      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
       selectedToolName === BUILTIN_CALL_AGENT_TOOL_NAME ||
+      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
+      selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME ||
       selectedToolName === BUILTIN_WEB_FETCH_TOOL_NAME ||
-      selectedToolName === BUILTIN_TERMINAL_EXEC_TOOL_NAME ||
       Boolean(
         selectedToolName && BUILTIN_FILE_TOOL_NAMES.includes(selectedToolName),
       )
@@ -1311,6 +1249,108 @@ export const ToolsDialog = memo(function ToolsDialog({
     });
   }
 
+  function setToolPermission(toolName: string, permission: Permission) {
+    onToolsSettingsChange((current) => ({
+      ...current,
+      enabled: true,
+      permissionModelVersion: 2,
+      toolPermissions: {
+        ...(current.toolPermissions ?? {}),
+        [toolName]: permission,
+      },
+      askUserEnabled:
+        toolName === BUILTIN_ASK_USER_TOOL_NAME
+          ? permission !== "deny"
+          : current.askUserEnabled,
+      taskToolsEnabled: (BUILTIN_TASK_TOOL_NAMES as readonly string[]).includes(
+        toolName,
+      )
+        ? permission !== "deny"
+        : current.taskToolsEnabled,
+      loadSkillEnabled:
+        toolName === BUILTIN_LOAD_SKILL_TOOL_NAME
+          ? permission !== "deny"
+          : current.loadSkillEnabled,
+      webFetchEnabled:
+        toolName === BUILTIN_WEB_FETCH_TOOL_NAME
+          ? permission !== "deny"
+          : current.webFetchEnabled,
+      readEnabled:
+        toolName === BUILTIN_READ_TOOL_NAME
+          ? permission !== "deny"
+          : current.readEnabled,
+      bashEnabled:
+        toolName === BUILTIN_BASH_TOOL_NAME
+          ? permission !== "deny"
+          : current.bashEnabled,
+      editEnabled:
+        toolName === BUILTIN_EDIT_TOOL_NAME
+          ? permission !== "deny"
+          : current.editEnabled,
+      writeEnabled:
+        toolName === BUILTIN_WRITE_TOOL_NAME
+          ? permission !== "deny"
+          : current.writeEnabled,
+    }));
+  }
+
+  function renderBuiltInToolRow({
+    id,
+    name,
+    description,
+    icon: Icon,
+    selected,
+    locked = true,
+  }: {
+    id: string;
+    name: string;
+    description: string;
+    icon: typeof Wrench;
+    selected: boolean;
+    locked?: boolean;
+  }) {
+    const permission = getDisplayedToolPermission(toolsSettings, name);
+
+    return (
+      <div
+        key={id}
+        role="button"
+        tabIndex={0}
+        className={cn(
+          "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
+          selected
+            ? "border-primary/30 bg-accent text-accent-foreground"
+            : "border-transparent hover:border-border hover:bg-muted/60",
+        )}
+        onClick={() => setSelectedToolName(name)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setSelectedToolName(name);
+          }
+        }}
+      >
+        <Icon className="mt-1 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
+            <span className="truncate">{name}</span>
+            {locked ? (
+              <Lock className="size-3 shrink-0 text-muted-foreground" />
+            ) : null}
+          </div>
+          <p className="line-clamp-2 text-sm leading-5 text-muted-foreground">
+            {description}
+          </p>
+        </div>
+        <PermissionSelect
+          value={permission}
+          disabled={childPermissionsLocked}
+          onChange={(next) => setToolPermission(name, next)}
+        />
+      </div>
+    );
+  }
+
   async function runCurrentToolTest() {
     if (!toolDraft) return;
 
@@ -1391,7 +1431,7 @@ export const ToolsDialog = memo(function ToolsDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[400px_minmax(0,1fr)]">
           <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
             <div className="mb-3 flex items-center justify-between gap-2">
               <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
@@ -1402,42 +1442,24 @@ export const ToolsDialog = memo(function ToolsDialog({
               </span>
             </div>
 
-            <div
-              role="button"
-              tabIndex={0}
-              className="mb-3 flex cursor-pointer items-center justify-between gap-3  border bg-background px-3 py-2 text-base outline-none"
-              onClick={() =>
-                onToolsSettingsChange((current) => ({
-                  ...current,
-                  enabled: !current.enabled,
-                }))
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onToolsSettingsChange((current) => ({
-                    ...current,
-                    enabled: !current.enabled,
-                  }));
-                }
-              }}
-            >
+            <div className="mb-3 flex items-start justify-between gap-3 border bg-background px-3 py-2 text-base">
               <span className="min-w-0">
-                <span className="block font-medium">Enable tools globally</span>
+                <span className="block font-medium">Tools</span>
                 <span className="block select-none text-sm leading-5 text-muted-foreground">
-                  Disabled globally means no tool schemas are sent to the model.
+                  Master permission for the whole tools feature. Modes can
+                  override it.
                 </span>
               </span>
-              <Switch
-                checked={toolsSettings.enabled}
-                onClick={(event) => event.stopPropagation()}
-                onCheckedChange={(checked) =>
+              <MasterPermissionSelect
+                value={toolsMasterPermission}
+                onChange={(permission) =>
                   onToolsSettingsChange((current) => ({
                     ...current,
-                    enabled: checked,
+                    enabled: permission !== "deny",
+                    toolsPermission: permission,
+                    permissionModelVersion: 2,
                   }))
                 }
-                className="shrink-0 cursor-pointer"
               />
             </div>
 
@@ -1492,327 +1514,60 @@ export const ToolsDialog = memo(function ToolsDialog({
 
             <div className="grid gap-1.5">
               <Label className="px-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Built-in tools
+                Built-in
               </Label>
 
-              <div
-                key={BUILTIN_ASK_USER_TOOL_ID}
-                role="button"
-                tabIndex={0}
-                className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                  isAskUserToolSelected
-                    ? "border-primary/30 bg-accent text-accent-foreground"
-                    : "border-transparent hover:border-border hover:bg-muted/60",
-                )}
-                onClick={() => setSelectedToolName(BUILTIN_ASK_USER_TOOL_NAME)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSelectedToolName(BUILTIN_ASK_USER_TOOL_NAME);
-                  }
-                }}
-              >
-                <MessageSquareText className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                    <span className="truncate">
-                      {BUILTIN_ASK_USER_TOOL_NAME}
-                    </span>
-                    <Lock className="size-3 shrink-0 text-muted-foreground" />
-                  </div>
-                </div>
-                <Switch
-                  checked={toolsSettings.askUserEnabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onCheckedChange={(checked) =>
-                    onToolsSettingsChange((current) => ({
-                      ...current,
-                      askUserEnabled: checked,
-                    }))
-                  }
-                  className="mt-0.5 shrink-0 cursor-pointer"
-                  title={
-                    toolsSettings.askUserEnabled
-                      ? "Disable ask_user"
-                      : "Enable ask_user"
-                  }
-                />
-              </div>
-
-              {BUILTIN_TASK_TOOL_META.map((taskTool) => {
-                const isSelected = selectedToolName === taskTool.name;
-
-                return (
-                  <div
-                    key={taskTool.id}
-                    role="button"
-                    tabIndex={0}
-                    className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                      isSelected
-                        ? "border-primary/30 bg-accent text-accent-foreground"
-                        : "border-transparent hover:border-border hover:bg-muted/60",
-                    )}
-                    onClick={() => setSelectedToolName(taskTool.name)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setSelectedToolName(taskTool.name);
-                      }
-                    }}
-                  >
-                    <ListTodo className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                        <span className="truncate">{taskTool.name}</span>
-                        <Lock className="size-3 shrink-0 text-muted-foreground" />
-                      </div>
-                    </div>
-                    <Switch
-                      checked={toolsSettings.taskToolsEnabled}
-                      onClick={(event) => event.stopPropagation()}
-                      onCheckedChange={(checked) =>
-                        onToolsSettingsChange((current) => ({
-                          ...current,
-                          taskToolsEnabled: checked,
-                        }))
-                      }
-                      className="mt-0.5 shrink-0 cursor-pointer"
-                      title={
-                        toolsSettings.taskToolsEnabled
-                          ? "Disable task list tool"
-                          : "Enable task list tool"
-                      }
-                    />
-                  </div>
-                );
+              {renderBuiltInToolRow({
+                id: BUILTIN_ASK_USER_TOOL_ID,
+                name: BUILTIN_ASK_USER_TOOL_NAME,
+                description: BUILTIN_ASK_USER_TOOL_DESCRIPTION,
+                icon: MessageSquareText,
+                selected: isAskUserToolSelected,
               })}
 
-              <div
-                key={BUILTIN_LOAD_SKILL_TOOL_ID}
-                role="button"
-                tabIndex={0}
-                className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                  isLoadSkillToolSelected
-                    ? "border-primary/30 bg-accent text-accent-foreground"
-                    : "border-transparent hover:border-border hover:bg-muted/60",
-                )}
-                onClick={() =>
-                  setSelectedToolName(BUILTIN_LOAD_SKILL_TOOL_NAME)
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSelectedToolName(BUILTIN_LOAD_SKILL_TOOL_NAME);
-                  }
-                }}
-              >
-                <BookOpen className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                    <span className="truncate">
-                      {BUILTIN_LOAD_SKILL_TOOL_NAME}
-                    </span>
-                    <Lock className="size-3 shrink-0 text-muted-foreground" />
-                  </div>
-                </div>
-                <Switch
-                  checked={toolsSettings.loadSkillEnabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onCheckedChange={(checked) =>
-                    onToolsSettingsChange((current) => ({
-                      ...current,
-                      loadSkillEnabled: checked,
-                    }))
-                  }
-                  className="mt-0.5 shrink-0 cursor-pointer"
-                  title={
-                    toolsSettings.loadSkillEnabled
-                      ? "Disable load_skill"
-                      : "Enable load_skill"
-                  }
-                />
-              </div>
+              {BUILTIN_TASK_TOOL_META.map((taskTool) =>
+                renderBuiltInToolRow({
+                  id: taskTool.id,
+                  name: taskTool.name,
+                  description: taskTool.description,
+                  icon: ListTodo,
+                  selected: selectedToolName === taskTool.name,
+                }),
+              )}
 
-              <div
-                key={BUILTIN_CALL_AGENT_TOOL_ID}
-                role="button"
-                tabIndex={0}
-                className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                  isCallAgentToolSelected
-                    ? "border-primary/30 bg-accent text-accent-foreground"
-                    : "border-transparent hover:border-border hover:bg-muted/60",
-                )}
-                onClick={() =>
-                  setSelectedToolName(BUILTIN_CALL_AGENT_TOOL_NAME)
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSelectedToolName(BUILTIN_CALL_AGENT_TOOL_NAME);
-                  }
-                }}
-              >
-                <Bot className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                    <span className="truncate">
-                      {BUILTIN_CALL_AGENT_TOOL_NAME}
-                    </span>
-                    <Lock className="size-3 shrink-0 text-muted-foreground" />
-                  </div>
-                </div>
-                <Switch
-                  checked={callAgentEnabled}
-                  disabled
-                  onClick={(event) => event.stopPropagation()}
-                  className="mt-0.5 shrink-0 cursor-not-allowed"
-                  title="Controlled by Agents settings and the current chat's enabled agents"
-                />
-              </div>
-
-              <div
-                key={BUILTIN_WEB_FETCH_TOOL_ID}
-                role="button"
-                tabIndex={0}
-                className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                  isWebFetchToolSelected
-                    ? "border-primary/30 bg-accent text-accent-foreground"
-                    : "border-transparent hover:border-border hover:bg-muted/60",
-                )}
-                onClick={() => setSelectedToolName(BUILTIN_WEB_FETCH_TOOL_NAME)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSelectedToolName(BUILTIN_WEB_FETCH_TOOL_NAME);
-                  }
-                }}
-              >
-                <Globe className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                    <span className="truncate">
-                      {BUILTIN_WEB_FETCH_TOOL_NAME}
-                    </span>
-                    <Lock className="size-3 shrink-0 text-muted-foreground" />
-                  </div>
-                </div>
-                <Switch
-                  checked={toolsSettings.webFetchEnabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onCheckedChange={(checked) =>
-                    onToolsSettingsChange((current) => ({
-                      ...current,
-                      webFetchEnabled: checked,
-                    }))
-                  }
-                  className="mt-0.5 shrink-0 cursor-pointer"
-                  title={
-                    toolsSettings.webFetchEnabled
-                      ? "Disable web_fetch"
-                      : "Enable web_fetch"
-                  }
-                />
-              </div>
-
-              <div
-                key={BUILTIN_TERMINAL_EXEC_TOOL_ID}
-                role="button"
-                tabIndex={0}
-                className={cn(
-                  "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                  isTerminalExecToolSelected
-                    ? "border-primary/30 bg-accent text-accent-foreground"
-                    : "border-transparent hover:border-border hover:bg-muted/60",
-                )}
-                onClick={() => setSelectedToolName(BUILTIN_TERMINAL_EXEC_TOOL_NAME)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    setSelectedToolName(BUILTIN_TERMINAL_EXEC_TOOL_NAME);
-                  }
-                }}
-              >
-                <Terminal className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                    <span className="truncate">
-                      {BUILTIN_TERMINAL_EXEC_TOOL_NAME}
-                    </span>
-                    <Lock className="size-3 shrink-0 text-muted-foreground" />
-                  </div>
-                </div>
-                <Switch
-                  checked={toolsSettings.terminalExecEnabled}
-                  onClick={(event) => event.stopPropagation()}
-                  onCheckedChange={(checked) =>
-                    onToolsSettingsChange((current) => ({
-                      ...current,
-                      terminalExecEnabled: checked,
-                    }))
-                  }
-                  className="mt-0.5 shrink-0 cursor-pointer"
-                  title={
-                    toolsSettings.terminalExecEnabled
-                      ? "Disable terminal_exec"
-                      : "Enable terminal_exec"
-                  }
-                />
-              </div>
-
-              {BUILTIN_FILE_TOOL_META.map((fileTool) => {
-                const isSelected = selectedToolName === fileTool.name;
-                const checked = toolsSettings[fileTool.setting];
-
-                return (
-                  <div
-                    key={fileTool.id}
-                    role="button"
-                    tabIndex={0}
-                    className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-2  border px-2 py-2 outline-none",
-                      isSelected
-                        ? "border-primary/30 bg-accent text-accent-foreground"
-                        : "border-transparent hover:border-border hover:bg-muted/60",
-                    )}
-                    onClick={() => setSelectedToolName(fileTool.name)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setSelectedToolName(fileTool.name);
-                      }
-                    }}
-                  >
-                    <FolderOpen className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 items-center gap-1.5 truncate text-base leading-6">
-                        <span className="truncate">{fileTool.name}</span>
-                        <Lock className="size-3 shrink-0 text-muted-foreground" />
-                      </div>
-                    </div>
-                    <Switch
-                      checked={checked}
-                      onClick={(event) => event.stopPropagation()}
-                      onCheckedChange={(nextChecked) =>
-                        onToolsSettingsChange((current) => ({
-                          ...current,
-                          [fileTool.setting]: nextChecked,
-                        }))
-                      }
-                      className="mt-0.5 shrink-0 cursor-pointer"
-                      title={
-                        checked
-                          ? `Disable ${fileTool.name}`
-                          : `Enable ${fileTool.name}`
-                      }
-                    />
-                  </div>
-                );
+              {renderBuiltInToolRow({
+                id: BUILTIN_LOAD_SKILL_TOOL_ID,
+                name: BUILTIN_LOAD_SKILL_TOOL_NAME,
+                description: BUILTIN_LOAD_SKILL_TOOL_DESCRIPTION,
+                icon: BookOpen,
+                selected: selectedToolName === BUILTIN_LOAD_SKILL_TOOL_NAME,
               })}
+
+              {renderBuiltInToolRow({
+                id: BUILTIN_CALL_AGENT_TOOL_ID,
+                name: BUILTIN_CALL_AGENT_TOOL_NAME,
+                description: BUILTIN_CALL_AGENT_TOOL_DESCRIPTION,
+                icon: Bot,
+                selected: isCallAgentToolSelected,
+              })}
+
+              {renderBuiltInToolRow({
+                id: BUILTIN_WEB_FETCH_TOOL_ID,
+                name: BUILTIN_WEB_FETCH_TOOL_NAME,
+                description: BUILTIN_WEB_FETCH_TOOL_DESCRIPTION,
+                icon: Globe,
+                selected: isWebFetchToolSelected,
+              })}
+
+              {BUILTIN_FILE_TOOL_META.map((fileTool) =>
+                renderBuiltInToolRow({
+                  id: fileTool.id,
+                  name: fileTool.name,
+                  description: fileTool.description,
+                  icon: fileTool.icon,
+                  selected: selectedToolName === fileTool.name,
+                }),
+              )}
 
               <div className="mt-3 flex items-center gap-2 px-1">
                 <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1845,34 +1600,14 @@ export const ToolsDialog = memo(function ToolsDialog({
                     <div className="truncate text-base leading-6">
                       {tool.name}
                     </div>
+                    <p className="line-clamp-2 text-sm leading-5 text-muted-foreground">
+                      {tool.description || "Custom command tool."}
+                    </p>
                   </div>
-                  <Switch
-                    checked={tool.enabled}
-                    onClick={(event) => event.stopPropagation()}
-                    onCheckedChange={async (checked) => {
-                      const updated = {
-                        ...tool,
-                        enabled: checked,
-                      };
-                      try {
-                        const saved = await saveTool(updated);
-                        onLoadedToolsChange((current) =>
-                          current.map((item) =>
-                            item.id === saved.id ? saved : item,
-                          ),
-                        );
-                        if (toolDraft?.id === saved.id) {
-                          setToolDraft(toolToDraft(saved));
-                        }
-                      } catch (error) {
-                        showError(
-                          "Failed to update tool",
-                          labelForError(error),
-                        );
-                      }
-                    }}
-                    className="mt-0.5 shrink-0 cursor-pointer"
-                    title={tool.enabled ? "Disable tool" : "Enable tool"}
+                  <PermissionSelect
+                    value={getDisplayedToolPermission(toolsSettings, tool.name)}
+                    disabled={childPermissionsLocked}
+                    onChange={(next) => setToolPermission(tool.name, next)}
                   />
                 </div>
               ))}
@@ -1934,7 +1669,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2  border bg-muted/20 p-3">
+                    <div className="grid gap-2">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
@@ -1995,18 +1730,20 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2  border bg-muted/20 p-3">
+                    <div className="grid gap-2">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
-                          The assistant can use the task list tool during complex
-                          work to show and update the checklist in the current
-                          chat. It always sends the full current list in one call.
+                          The assistant can use the task list tool during
+                          complex work to show and update the checklist in the
+                          current chat. It always sends the full current list in
+                          one call.
                         </p>
                         <p>
-                          Each task has a short subject and a done boolean. Sending
-                          an empty tasks array clears the visible checklist. Every
-                          successful task tool call renders the current task list in chat.
+                          Each task has a short subject and a done boolean.
+                          Sending an empty tasks array clears the visible
+                          checklist. Every successful task tool call renders the
+                          current task list in chat.
                         </p>
                       </div>
                     </div>
@@ -2035,7 +1772,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                     <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
                       Built-in tool
                     </Label>
-                    <span className="inline-flex shrink-0 items-center gap-1  border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
+                    <span className="inline-flex shrink-0 items-center gap-1 border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
                       <Lock className="size-3.5" />
                       Locked
                     </span>
@@ -2054,19 +1791,17 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2  border bg-muted/20 p-3">
+                    <div className="grid gap-2">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
-                          The assistant can call this tool to load a skill from
-                          the current model-selectable skill list. The loaded
-                          skill becomes active in the chat and its instructions
-                          are included in future requests.
+                          The assistant can call this tool to load full SKILL.md
+                          instructions for a discovered skill by exact name.
                         </p>
                         <p>
-                          Availability is controlled by this built-in tool
-                          switch, Skills settings, and the chat skill picker.
-                          Custom tool settings do not affect it.
+                          The result includes the skill file location and the
+                          directory used to resolve relative references such as
+                          examples or scripts.
                         </p>
                       </div>
                     </div>
@@ -2110,7 +1845,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2  border bg-muted/20 p-3">
+                    <div className="grid gap-2">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
@@ -2165,7 +1900,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2  border bg-muted/20 p-3">
+                    <div className="grid gap-2">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
@@ -2196,70 +1931,6 @@ export const ToolsDialog = memo(function ToolsDialog({
                   </div>
                 </div>
               </>
-            ) : isTerminalExecToolSelected ? (
-              <>
-                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
-                  <div className="flex w-full items-center justify-between gap-4">
-                    <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                      Built-in tool
-                    </Label>
-                    <span className="inline-flex shrink-0 items-center gap-1  border bg-muted/40 px-2 py-1 text-sm text-muted-foreground">
-                      <Lock className="size-3.5" />
-                      Locked
-                    </span>
-                  </div>
-                </div>
-
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
-                  <div className="grid gap-5 pb-1">
-                    <div className="grid gap-1">
-                      <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
-                        <Terminal className="size-5 text-muted-foreground" />
-                        {BUILTIN_TERMINAL_EXEC_TOOL_NAME}
-                      </h3>
-                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {BUILTIN_TERMINAL_EXEC_TOOL_DESCRIPTION}
-                      </p>
-                    </div>
-
-                    <div className="grid gap-2  border bg-muted/20 p-3">
-                      <Label>Behavior</Label>
-                      <div className="grid gap-2 text-base leading-6 text-muted-foreground">
-                        <p>
-                          Disabled by default. When enabled and available in a
-                          chat, every command asks for manual approval before it
-                          runs. The approval prompt shows the exact command,
-                          shell, workspace root, working directory, and timeout.
-                        </p>
-                        <p>
-                          Commands run only as foreground processes inside the
-                          selected workspace root. Output streams into the tool
-                          block, long output is truncated for model context with
-                          a head/tail strategy, and the final result includes the
-                          exit code.
-                        </p>
-                        <p>
-                          Network-capable commands such as curl, wget, ssh, and
-                          package installers are allowed only after approval and
-                          are flagged as higher risk. For simple web reads, the
-                          assistant should prefer web_fetch.
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label>Parameters JSON schema</Label>
-                      {renderJsonCodeBlock(
-                        JSON.stringify(
-                          BUILTIN_TERMINAL_EXEC_TOOL_PARAMETERS,
-                          null,
-                          2,
-                        ),
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </>
             ) : selectedFileToolInfo ? (
               <>
                 <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
@@ -2278,7 +1949,12 @@ export const ToolsDialog = memo(function ToolsDialog({
                   <div className="grid gap-5 pb-1">
                     <div className="grid gap-1">
                       <h3 className="flex items-center gap-2 text-lg font-semibold text-foreground">
-                        <FolderOpen className="size-5 text-muted-foreground" />
+                        {(() => {
+                          const Icon = selectedFileToolInfo.icon;
+                          return (
+                            <Icon className="size-5 text-muted-foreground" />
+                          );
+                        })()}
                         {selectedFileToolInfo.name}
                       </h3>
                       <p className="max-w-2xl text-base leading-6 text-muted-foreground">
@@ -2286,51 +1962,20 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </p>
                     </div>
 
-                    <div className="grid gap-2  border bg-muted/20 p-3">
+                    <div className="grid gap-2">
                       <Label>Behavior</Label>
                       <div className="grid gap-2 text-base leading-6 text-muted-foreground">
                         <p>
-                          File tools are only sent to the model when the current
-                          chat has at least one approved workspace folder. Paths
-                          are resolved inside those roots and cannot escape via
-                          absolute paths, relative paths, or symlinks.
+                          Relative paths resolve from the selected workspace, or
+                          from the user home folder when no workspace is
+                          selected.
                         </p>
                         <p>
-                          Reads and searches run directly. file_replace_text,
-                          file_create, and file_delete ask for user confirmation
-                          before writing unless auto-approval is enabled for the
-                          chat. file_delete moves files to the operating system
-                          Trash.
+                          Use the global and mode permission selectors to choose
+                          Allow, Ask, or Deny.
                         </p>
                       </div>
                     </div>
-
-                    {selectedFileToolAutoApproveSetting ? (
-                      <div className="flex items-start justify-between gap-3 border bg-muted/20 p-3">
-                        <div className="grid gap-1">
-                          <Label>Auto-approve in new chats</Label>
-                          <p className="text-base leading-6 text-muted-foreground">
-                            Use this as the default auto-approval setting for
-                            newly created chats. Existing chats keep their own
-                            per-chat setting.
-                          </p>
-                        </div>
-                        <Switch
-                          checked={
-                            toolsSettings[
-                              selectedFileToolAutoApproveSetting
-                            ] === true
-                          }
-                          onCheckedChange={(checked) =>
-                            onToolsSettingsChange((current) => ({
-                              ...current,
-                              [selectedFileToolAutoApproveSetting]: checked,
-                            }))
-                          }
-                          className="mt-0.5 shrink-0 cursor-pointer"
-                        />
-                      </div>
-                    ) : null}
 
                     <div className="grid gap-2">
                       <Label>Parameters JSON schema</Label>
@@ -2401,14 +2046,6 @@ export const ToolsDialog = memo(function ToolsDialog({
                       </h3>
                     </div>
 
-                    <div className="grid gap-1 border bg-muted/20 p-3">
-                      <Label>Description</Label>
-                      <p className="max-w-2xl text-base leading-6 text-muted-foreground">
-                        {toolDraft.description.trim() ||
-                          "Add a clear description so the model knows when to use this tool."}
-                      </p>
-                    </div>
-
                     <div className="grid gap-2">
                       <Label htmlFor="tool-name">Name</Label>
                       <Input
@@ -2431,25 +2068,6 @@ export const ToolsDialog = memo(function ToolsDialog({
                         }
                         placeholder="Describe when the model should use this tool."
                         className="min-h-40 resize-y"
-                      />
-                    </div>
-
-                    <div className="flex items-start justify-between gap-3 border bg-muted/20 p-3">
-                      <div className="grid gap-1">
-                        <Label htmlFor="tool-requires-approval">
-                          Requires approval
-                        </Label>
-                        <p className="text-sm leading-5 text-muted-foreground">
-                          Ask for user approval before running this custom tool.
-                        </p>
-                      </div>
-                      <Switch
-                        id="tool-requires-approval"
-                        checked={toolDraft.requiresApproval}
-                        onCheckedChange={(checked) =>
-                          updateToolDraft({ requiresApproval: checked })
-                        }
-                        className="mt-0.5 shrink-0 cursor-pointer"
                       />
                     </div>
 

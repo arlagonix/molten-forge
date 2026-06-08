@@ -80,6 +80,7 @@ export type ChatMessageMetrics = {
   isApproximate?: boolean;
   providerName?: string;
   model?: string;
+  modeName?: string;
   finishReason?: string;
 };
 
@@ -431,6 +432,13 @@ export type ChatTitleGenerationMode = "local" | "ai";
 
 export type ModeBuiltInId = "default" | "minimal";
 
+export type Permission = "allow" | "ask" | "deny";
+export type FeaturePermission = "custom" | Permission;
+export type ModePermission = "global" | Permission;
+export type ModeFeaturePermission = "custom" | ModePermission;
+export type PermissionMap = Record<string, Permission>;
+export type ModePermissionMap = Record<string, ModeFeaturePermission>;
+
 export type ModeDefinition = {
   id: string;
   name: string;
@@ -440,9 +448,15 @@ export type ModeDefinition = {
   builtIn?: ModeBuiltInId;
   /** Built-in modes can keep dynamic default capabilities until explicitly edited. */
   usesDefaultCapabilities?: boolean;
+  /** Legacy allow-lists, normalized into permission maps. */
   allowedToolNames: string[];
   allowedSkillNames: string[];
   allowedAgentNames: string[];
+  toolPermissions?: ModePermissionMap;
+  skillPermissions?: ModePermissionMap;
+  agentPermissions?: ModePermissionMap;
+  /** Permission model version. Missing means legacy master rows should be migrated conservatively. */
+  permissionModelVersion?: 2;
 };
 
 export type LoadedModeInfo = ModeDefinition;
@@ -477,6 +491,11 @@ export type ChatWorkspaceRoot = {
 };
 
 export type ChatFileToolAutoApproval = {
+  read?: boolean;
+  bash?: boolean;
+  edit?: boolean;
+  write?: boolean;
+  /** Legacy fields kept for older saved chats. */
   create?: boolean;
   replaceText?: boolean;
   delete?: boolean;
@@ -616,16 +635,29 @@ export type LoadedToolInfo = ToolDefinition;
 
 export type SkillDefinition = {
   name: string;
+  /** Legacy field kept for older saved data. Readonly filesystem skills are not toggled in the UI. */
   enabled: boolean;
   description: string;
+  /** SKILL.md body without YAML frontmatter. */
   instructions: string;
+  /** Legacy field. Ignored by the Pi-style skill runtime for now. */
   recommendedToolNames: string[];
-  /**
-   * Absolute path to the skill's folder on disk. Populated at load time so the
-   * model can read bundled files (e.g. references/) with the file tool. Never
-   * written to SKILL.md frontmatter — it is derived from the folder location.
-   */
+  /** Absolute path to the skill folder. */
   directoryPath?: string;
+  /** Absolute path to the SKILL.md file. */
+  manifestPath?: string;
+  /** Full raw SKILL.md content including frontmatter, used for readonly UI display. */
+  manifestContent?: string;
+  /** Pi/Claude-style flag: hide from automatic model discovery, but keep /skill:name available. */
+  disableModelInvocation?: boolean;
+  /** Human-readable discovery source, e.g. global or workspace path. */
+  source?: string;
+  /** Discovery group used by the readonly Skills UI and conflict resolution. */
+  sourceKind?: "global" | "workspace";
+  /** Directory that was scanned to discover this skill. */
+  sourcePath?: string;
+  /** True when another skill with the same name has higher resolution priority. */
+  shadowed?: boolean;
 };
 
 export type LoadedSkillInfo = SkillDefinition;
@@ -721,29 +753,41 @@ export type ToolsSettings = {
   taskToolsEnabled: boolean;
   loadSkillEnabled: boolean;
   webFetchEnabled: boolean;
-  terminalExecEnabled: boolean;
-  fileReadEnabled: boolean;
-  fileFindEnabled: boolean;
-  fileSearchTextEnabled: boolean;
-  fileReplaceTextEnabled: boolean;
-  fileCreateEnabled: boolean;
-  fileDeleteEnabled: boolean;
-  archiveExtractEnabled: boolean;
-  archiveCreateEnabled: boolean;
-  documentConvertEnabled: boolean;
-  chatFileCreateEnabled: boolean;
-  fileReplaceTextAutoApproveEnabled: boolean;
-  fileCreateAutoApproveEnabled: boolean;
-  fileDeleteAutoApproveEnabled: boolean;
+  readEnabled: boolean;
+  bashEnabled: boolean;
+  editEnabled: boolean;
+  writeEnabled: boolean;
+  /** Legacy auto-approval fields kept for loading old settings. */
+  readAutoApproveEnabled: boolean;
+  bashAutoApproveEnabled: boolean;
+  editAutoApproveEnabled: boolean;
+  writeAutoApproveEnabled: boolean;
+  /** Feature-level master permission for the whole tools category. */
+  toolsPermission?: FeaturePermission;
+  toolPermissions?: PermissionMap;
+  /** Permission model version. Missing means legacy master values should be migrated to custom. */
+  permissionModelVersion?: 2;
 };
 
 export type SkillsSettings = {
-  enabled: boolean;
+  /** Legacy global switch. Permission maps are the active model. */
+  enabled?: boolean;
+  /** Feature-level master permission for the whole skills category. */
+  skillsPermission?: FeaturePermission;
+  skillPermissions?: PermissionMap;
+  /** Permission model version. Missing means legacy master values should be migrated to custom. */
+  permissionModelVersion?: 2;
 };
 
 export type AgentsSettings = {
+  /** Legacy global switch. Permission maps are the active model. */
   enabled: boolean;
+  /** Feature-level master permission for the whole agents category. */
+  agentsPermission?: FeaturePermission;
+  agentPermissions?: PermissionMap;
   builtInAgentMaxNestingDepths?: Record<string, number>;
+  /** Permission model version. Missing means legacy master values should be migrated to custom. */
+  permissionModelVersion?: 2;
 };
 
 export type ToolsState = {

@@ -41,7 +41,8 @@ type AttachmentInput =
     };
 
 type ActiveMention = {
-  type: "tool" | "skill" | "agent";
+  type: "skill" | "agent";
+  command: "skill" | "s" | "agent" | "a";
   startIndex: number;
   endIndex: number;
   query: string;
@@ -59,19 +60,21 @@ function findActiveMention(
   cursorIndex: number,
 ): ActiveMention | null {
   const prefix = content.slice(0, cursorIndex);
-  const match = /(^|\s)@(tool|skill|agent):?([A-Za-z0-9_-]*)$/.exec(prefix);
+  const match = /^\s*\/(skill|s|agent|a):?([A-Za-z0-9_-]*)$/.exec(prefix);
 
   if (!match) return null;
 
-  const fullMatch = match[0] ?? "";
-  const leadingWhitespace = match[1] ?? "";
-  const type =
-    match[2] === "skill" ? "skill" : match[2] === "agent" ? "agent" : "tool";
-  const query = match[3] ?? "";
-  const startIndex = cursorIndex - fullMatch.length + leadingWhitespace.length;
+  const slashIndex = prefix.indexOf("/");
+  if (slashIndex < 0) return null;
+
+  const command = match[1] as "skill" | "s" | "agent" | "a";
+  const type = command === "agent" || command === "a" ? "agent" : "skill";
+  const query = match[2] ?? "";
+  const startIndex = slashIndex;
 
   return {
     type,
+    command,
     startIndex,
     endIndex: cursorIndex,
     query,
@@ -229,11 +232,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
     if (!activeMention || disabled) return [];
 
     const options =
-      activeMention.type === "skill"
-        ? skillMentionOptions
-        : activeMention.type === "agent"
-          ? agentMentionOptions
-          : toolMentionOptions;
+      activeMention.type === "skill" ? skillMentionOptions : agentMentionOptions;
     const query = activeMention.query.trim().toLowerCase();
 
     return options
@@ -269,7 +268,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
 
     const suffix = content.slice(activeMention.endIndex);
     const shouldAddTrailingSpace = suffix.length === 0 || !/^\s/.test(suffix);
-    const mentionText = `@${activeMention.type}:${name}${
+    const mentionText = `/${activeMention.command}:${name}${
       shouldAddTrailingSpace ? " " : ""
     }`;
     const nextContent = `${content.slice(0, activeMention.startIndex)}${mentionText}${suffix}`;
@@ -489,24 +488,20 @@ export const UserMessageEditor = memo(function UserMessageEditor({
             >
               {mentionSuggestions.map((option, index) => {
                 const isSelected = index === selectedMentionSuggestionIndex;
-                const Icon =
-                  activeMention?.type === "skill"
-                    ? BookOpen
-                    : activeMention?.type === "agent"
-                      ? Bot
-                      : Wrench;
+                const Icon = activeMention?.type === "skill" ? BookOpen : Bot;
 
                 return (
                   <button
                     key={option.name}
                     type="button"
                     data-mention-suggestion-index={index}
+                    onMouseEnter={() => setSelectedMentionSuggestionIndex(index)}
                     onMouseDown={(event) => {
                       event.preventDefault();
                       applyMentionSuggestion(option.name);
                     }}
                     className={cn(
-                      "flex w-full min-w-0 items-start gap-2  px-2 py-1.5 text-left text-sm",
+                      "flex w-full min-w-0 items-start gap-2 px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
                       isSelected && "bg-accent text-accent-foreground",
                     )}
                     title={option.description}
@@ -515,9 +510,6 @@ export const UserMessageEditor = memo(function UserMessageEditor({
                     <span className="min-w-0 flex-1">
                       <span className="flex min-w-0 items-center gap-1.5 font-medium">
                         <span className="min-w-0 truncate">{option.name}</span>
-                        {activeMention?.type === "tool" && option.isBuiltin && (
-                          <Lock className="size-3 shrink-0 text-muted-foreground" />
-                        )}
                       </span>
                       {option.description && (
                         <span className="mt-0.5 line-clamp-2 text-muted-foreground">

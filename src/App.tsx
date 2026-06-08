@@ -39,31 +39,18 @@ import {
   ASK_USER_TOOL_NAME,
   CALL_AGENT_TOOL,
   CALL_AGENT_TOOL_NAME,
-  ARCHIVE_CREATE_TOOL,
-  ARCHIVE_CREATE_TOOL_NAME,
-  ARCHIVE_EXTRACT_TOOL,
-  ARCHIVE_EXTRACT_TOOL_NAME,
-  CHAT_FILE_CREATE_TOOL,
-  CHAT_FILE_CREATE_TOOL_NAME,
-  DOCUMENT_CONVERT_TOOL,
-  DOCUMENT_CONVERT_TOOL_NAME,
   DEFAULT_AGENTS_SETTINGS,
   DEFAULT_SKILLS_SETTINGS,
   DEFAULT_TOOLS_SETTINGS,
-  FILE_CREATE_TOOL,
-  FILE_CREATE_TOOL_NAME,
-  FILE_DELETE_TOOL,
-  FILE_DELETE_TOOL_NAME,
-  FILE_FIND_TOOL,
-  FILE_FIND_TOOL_NAME,
-  FILE_READ_TOOL,
-  FILE_READ_TOOL_NAME,
-  FILE_REPLACE_TEXT_TOOL,
-  FILE_REPLACE_TEXT_TOOL_NAME,
-  FILE_SEARCH_TEXT_TOOL,
-  FILE_SEARCH_TEXT_TOOL_NAME,
+  READ_TOOL,
+  READ_TOOL_NAME,
+  BASH_TOOL,
+  BASH_TOOL_NAME,
+  EDIT_TOOL,
+  EDIT_TOOL_NAME,
+  WRITE_TOOL,
+  WRITE_TOOL_NAME,
   TASK_TOOLS,
-  TERMINAL_EXEC_TOOL,
   WEB_FETCH_TOOL,
   WEB_FETCH_TOOL_NAME,
   buildFileToolAutoApprovalFromToolsSettings,
@@ -72,7 +59,6 @@ import {
   isTaskToolName,
   isValidToolName,
 } from "@/lib/ai-chat/builtin-tools";
-import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import {
   createId,
   createNewProvider,
@@ -90,13 +76,19 @@ import { estimateAttachmentsTokens } from "@/lib/ai-chat/attachment-limits";
 import { buildLoadedMcpTools, DEFAULT_MCP_SETTINGS } from "@/lib/ai-chat/mcp";
 import {
   DEFAULT_MODE_ID,
-  getModeCapabilityNames,
+  getModePermissionMaps,
   normalizeModesState,
   resolveModeForChat,
 } from "@/lib/ai-chat/modes";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
   getEffectiveWorkspaceRoots,
+  getEffectiveGlobalToolPermission,
+  getEffectiveGlobalSkillPermission,
+  getEffectiveGlobalAgentPermission,
+  getEffectiveToolPermission,
+  getEffectiveSkillPermission,
+  getEffectiveAgentPermission,
   resolveProviderForChat,
   validateProviderForGeneration,
 } from "@/lib/ai-chat/request-builder";
@@ -653,17 +645,10 @@ export default function Home() {
       CALL_AGENT_TOOL,
       ...TASK_TOOLS,
       WEB_FETCH_TOOL,
-      TERMINAL_EXEC_TOOL,
-      FILE_READ_TOOL,
-      FILE_FIND_TOOL,
-      FILE_SEARCH_TEXT_TOOL,
-      FILE_REPLACE_TEXT_TOOL,
-      FILE_CREATE_TOOL,
-      FILE_DELETE_TOOL,
-      ARCHIVE_EXTRACT_TOOL,
-      ARCHIVE_CREATE_TOOL,
-      DOCUMENT_CONVERT_TOOL,
-      CHAT_FILE_CREATE_TOOL,
+      READ_TOOL,
+      BASH_TOOL,
+      EDIT_TOOL,
+      WRITE_TOOL,
       ...loadedTools,
       ...loadedMcpTools,
     ]) {
@@ -678,130 +663,80 @@ export default function Home() {
     return new Map(availableTools.map((tool) => [tool.name, tool] as const));
   }, [availableTools]);
 
+  const effectiveToolPermissions = useMemo(() => {
+    const context = {
+      availableTools,
+      availableSkills: [],
+      availableAgents: [],
+    };
+    return new Map(
+      availableTools.map((tool) => [
+        tool.name,
+        getEffectiveToolPermission({
+          toolName: tool.name,
+          toolsSettings,
+          mode: activeMode,
+          modeCapabilityContext: context,
+        }),
+      ] as const),
+    );
+  }, [activeMode, availableTools, toolsSettings]);
+
+  const globalToolPermissions = useMemo(() => {
+    return new Map(
+      availableTools.map((tool) => [
+        tool.name,
+        getEffectiveGlobalToolPermission(tool.name, toolsSettings),
+      ] as const),
+    );
+  }, [availableTools, toolsSettings]);
+
   const globallyEnabledToolNames = useMemo(() => {
-    const names = new Set<string>();
-
-    if (!toolsSettings.enabled) return names;
-
-    if (toolsSettings.askUserEnabled) names.add(ASK_USER_TOOL_NAME);
-    if (toolsSettings.taskToolsEnabled) {
-      for (const tool of TASK_TOOLS) names.add(tool.name);
-    }
-    if (toolsSettings.webFetchEnabled) names.add(WEB_FETCH_TOOL_NAME);
-    if (toolsSettings.terminalExecEnabled) names.add(TERMINAL_EXEC_TOOL_NAME);
-    if (toolsSettings.fileReadEnabled) names.add(FILE_READ_TOOL_NAME);
-    if (toolsSettings.fileFindEnabled) names.add(FILE_FIND_TOOL_NAME);
-    if (toolsSettings.fileSearchTextEnabled)
-      names.add(FILE_SEARCH_TEXT_TOOL_NAME);
-    if (toolsSettings.fileReplaceTextEnabled)
-      names.add(FILE_REPLACE_TEXT_TOOL_NAME);
-    if (toolsSettings.fileCreateEnabled) names.add(FILE_CREATE_TOOL_NAME);
-    if (toolsSettings.fileDeleteEnabled) names.add(FILE_DELETE_TOOL_NAME);
-    if (toolsSettings.archiveExtractEnabled) names.add(ARCHIVE_EXTRACT_TOOL_NAME);
-    if (toolsSettings.archiveCreateEnabled) names.add(ARCHIVE_CREATE_TOOL_NAME);
-    if (toolsSettings.documentConvertEnabled) names.add(DOCUMENT_CONVERT_TOOL_NAME);
-    if (toolsSettings.chatFileCreateEnabled) names.add(CHAT_FILE_CREATE_TOOL_NAME);
-    if (agentsSettings.enabled) names.add(CALL_AGENT_TOOL_NAME);
-
-    for (const tool of executableTools) {
-      if (
-        tool.enabled &&
-        tool.name !== ASK_USER_TOOL_NAME &&
-        tool.name !== CALL_AGENT_TOOL_NAME &&
-        !isTaskToolName(tool.name) &&
-        tool.name !== WEB_FETCH_TOOL_NAME &&
-        tool.name !== TERMINAL_EXEC_TOOL_NAME &&
-        tool.name !== FILE_READ_TOOL_NAME &&
-        tool.name !== FILE_FIND_TOOL_NAME &&
-        tool.name !== FILE_SEARCH_TEXT_TOOL_NAME &&
-        tool.name !== FILE_REPLACE_TEXT_TOOL_NAME &&
-        tool.name !== FILE_CREATE_TOOL_NAME &&
-        tool.name !== FILE_DELETE_TOOL_NAME &&
-        tool.name !== ARCHIVE_EXTRACT_TOOL_NAME &&
-        tool.name !== ARCHIVE_CREATE_TOOL_NAME &&
-        tool.name !== DOCUMENT_CONVERT_TOOL_NAME &&
-        tool.name !== CHAT_FILE_CREATE_TOOL_NAME &&
-        isValidToolName(tool.name)
-      ) {
-        names.add(tool.name);
-      }
-    }
-
-    return names;
-  }, [agentsSettings.enabled, executableTools, toolsSettings]);
-
-  const modeDefaultEnabledToolNames = useMemo(() => {
-    const modeAllowedToolNames = new Set(
-      getModeCapabilityNames(activeMode, {
-        availableTools,
-        availableSkills: [],
-        availableAgents: [],
-      }).toolNames,
-    );
-
     return new Set(
-      [...globallyEnabledToolNames].filter((toolName) =>
-        modeAllowedToolNames.has(toolName),
-      ),
+      availableTools
+        .filter((tool) => effectiveToolPermissions.get(tool.name) !== "deny")
+        .map((tool) => tool.name),
     );
-  }, [activeMode, availableTools, globallyEnabledToolNames]);
+  }, [availableTools, effectiveToolPermissions]);
 
-  const activeChatEnabledToolNames = useMemo(() => {
-    if (!activeChat) return [];
-
-    const chatEnabled = new Set(activeChat.enabledToolNames ?? []);
-    const chatDisabled = new Set(activeChat.disabledToolNames ?? []);
-
-    return availableTools
-      .map((tool) => tool.name)
-      .filter(
-        (toolName) =>
-          !chatDisabled.has(toolName) &&
-          (modeDefaultEnabledToolNames.has(toolName) || chatEnabled.has(toolName)),
-      );
-  }, [
-    activeChat?.disabledToolNames,
-    activeChat?.enabledToolNames,
-    activeChat?.id,
-    availableTools,
-    modeDefaultEnabledToolNames,
-  ]);
+  const modeDefaultEnabledToolNames = globallyEnabledToolNames;
+  const activeChatEnabledToolNames = useMemo(
+    () => [...modeDefaultEnabledToolNames],
+    [modeDefaultEnabledToolNames],
+  );
 
   const visibleChatTools = useMemo(() => {
     const search = chatToolSearchValue.trim().toLowerCase();
-
     if (!search) return availableTools;
-
     return availableTools.filter((tool) =>
       `${tool.name} ${tool.description}`.toLowerCase().includes(search),
     );
   }, [availableTools, chatToolSearchValue]);
 
   const toolMentionOptions = useMemo<ToolMentionOption[]>(() => {
-    const enabledNames = activeChat
-      ? new Set(activeChatEnabledToolNames)
-      : modeDefaultEnabledToolNames;
-
     return availableTools
-      .filter((tool) => enabledNames.has(tool.name))
+      .filter((tool) => effectiveToolPermissions.get(tool.name) !== "deny")
       .map((tool) => ({
         name: tool.name,
         description: tool.description,
         isBuiltin: isBuiltInToolName(tool.name),
       }));
-  }, [
-    activeChat,
-    activeChatEnabledToolNames,
-    availableTools,
-    modeDefaultEnabledToolNames,
-  ]);
+  }, [availableTools, effectiveToolPermissions]);
 
   const availableSkills = useMemo(() => {
     const byName = new Map<string, LoadedSkillInfo>();
 
     for (const skill of loadedSkills) {
-      if (!isValidToolName(skill.name) || byName.has(skill.name)) continue;
-      byName.set(skill.name, skill);
+      if (!isValidToolName(skill.name)) continue;
+      const existing = byName.get(skill.name);
+      if (!existing) {
+        byName.set(skill.name, skill);
+        continue;
+      }
+
+      if (existing.sourceKind !== "workspace" && skill.sourceKind === "workspace") {
+        byName.set(skill.name, skill);
+      }
     }
 
     return [...byName.values()].sort((left, right) =>
@@ -821,125 +756,75 @@ export default function Home() {
 
     return getEffectiveWorkspaceRoots({
       workspaceRoots: activeChat.workspaceRoots ?? [],
-      activeSkillNames: activeChat.activeSkillNames ?? [],
+      activeSkillNames: [],
       availableSkillsByName,
     });
   }, [
     activeChat,
-    availableSkillsByName,
     isNewChatDraft,
     newChatDraftWorkspaceRoots,
+    availableSkillsByName,
   ]);
 
-  useEffect(() => {
-    if (isNewChatDraft || !activeChat) return;
-    if (activeChat.workspaceRoots?.some((root) => root.id === "chat")) return;
-    if (!window.chatForgeWorkspace?.ensureChatWorkspace) return;
-
-    let cancelled = false;
-
-    window.chatForgeWorkspace
-      .ensureChatWorkspace(activeChat.id)
-      .then((chatWorkspaceRoot) => {
-        if (cancelled) return;
-        updateChat(activeChat.id, (chat) => {
-          if (chat.workspaceRoots?.some((root) => root.id === "chat")) {
-            return chat;
-          }
-
-          return {
-            ...chat,
-            workspaceRoots: [
-              { ...chatWorkspaceRoot, automatic: true, kind: "chat" },
-              ...(chat.workspaceRoots ?? []),
-            ],
-          };
-        });
-      })
-      .catch((error) => {
-        console.error("Failed to ensure chat workspace:", error);
-      });
-
-    return () => {
-      cancelled = true;
+  const effectiveSkillPermissions = useMemo(() => {
+    const context = {
+      availableTools,
+      availableSkills,
+      availableAgents: [],
     };
-  }, [activeChat?.id, activeChat?.workspaceRoots, isNewChatDraft]);
+    return new Map(
+      availableSkills.map((skill) => [
+        skill.name,
+        getEffectiveSkillPermission({
+          skillName: skill.name,
+          skillsSettings,
+          mode: activeMode,
+          modeCapabilityContext: context,
+        }),
+      ] as const),
+    );
+  }, [activeMode, availableSkills, availableTools, skillsSettings]);
+
+  const globalSkillPermissions = useMemo(() => {
+    return new Map(
+      availableSkills.map((skill) => [
+        skill.name,
+        getEffectiveGlobalSkillPermission(skill.name, skillsSettings),
+      ] as const),
+    );
+  }, [availableSkills, skillsSettings]);
 
   const globallyEnabledSkillNames = useMemo(() => {
-    if (!skillsSettings.enabled) return new Set<string>();
-
     return new Set(
       availableSkills
-        .filter((skill) => skill.enabled)
+        .filter((skill) => effectiveSkillPermissions.get(skill.name) !== "deny")
         .map((skill) => skill.name),
     );
-  }, [availableSkills, skillsSettings.enabled]);
+  }, [availableSkills, effectiveSkillPermissions]);
 
-  const modeDefaultEnabledSkillNames = useMemo(() => {
-    const modeAllowedSkillNames = new Set(
-      getModeCapabilityNames(activeMode, {
-        availableTools,
-        availableSkills,
-        availableAgents: [],
-      }).skillNames,
-    );
-
-    return new Set(
-      [...globallyEnabledSkillNames].filter((skillName) =>
-        modeAllowedSkillNames.has(skillName),
-      ),
-    );
-  }, [activeMode, availableSkills, availableTools, globallyEnabledSkillNames]);
-
-  const activeChatEnabledSkillNames = useMemo(() => {
-    if (!activeChat) return [];
-
-    const chatEnabled = new Set(activeChat.enabledSkillNames ?? []);
-    const chatDisabled = new Set(activeChat.disabledSkillNames ?? []);
-
-    return availableSkills
-      .map((skill) => skill.name)
-      .filter(
-        (skillName) =>
-          !chatDisabled.has(skillName) &&
-          (modeDefaultEnabledSkillNames.has(skillName) ||
-            chatEnabled.has(skillName)),
-      );
-  }, [
-    activeChat?.disabledSkillNames,
-    activeChat?.enabledSkillNames,
-    activeChat?.id,
-    availableSkills,
-    modeDefaultEnabledSkillNames,
-  ]);
+  const modeDefaultEnabledSkillNames = globallyEnabledSkillNames;
+  const activeChatEnabledSkillNames = useMemo(
+    () => [...modeDefaultEnabledSkillNames],
+    [modeDefaultEnabledSkillNames],
+  );
 
   const visibleChatSkills = useMemo(() => {
     const search = chatSkillSearchValue.trim().toLowerCase();
-
     if (!search) return availableSkills;
-
     return availableSkills.filter((skill) =>
       `${skill.name} ${skill.description}`.toLowerCase().includes(search),
     );
   }, [availableSkills, chatSkillSearchValue]);
 
   const skillMentionOptions = useMemo(() => {
-    const enabledNames = activeChat
-      ? new Set(activeChatEnabledSkillNames)
-      : modeDefaultEnabledSkillNames;
-
     return availableSkills
-      .filter((skill) => enabledNames.has(skill.name))
+      .filter((skill) => effectiveSkillPermissions.get(skill.name) !== "deny")
       .map((skill) => ({
         name: skill.name,
         description: skill.description,
       }));
-  }, [
-    activeChat,
-    activeChatEnabledSkillNames,
-    availableSkills,
-    modeDefaultEnabledSkillNames,
-  ]);
+  }, [availableSkills, effectiveSkillPermissions]);
+
   const availableAgents = useMemo(() => {
     const byName = new Map<string, LoadedAgentInfo>();
 
@@ -969,77 +854,72 @@ export default function Home() {
     );
   }, [availableAgents]);
 
-  const globallyEnabledAgentNames = useMemo(() => {
-    if (!agentsSettings.enabled) return new Set<string>();
+  const effectiveAgentPermissions = useMemo(() => {
+    const context = {
+      availableTools,
+      availableSkills,
+      availableAgents,
+    };
+    return new Map(
+      availableAgents.map((agent) => [
+        agent.name,
+        getEffectiveAgentPermission({
+          agentName: agent.name,
+          agentsSettings,
+          mode: activeMode,
+          modeCapabilityContext: context,
+        }),
+      ] as const),
+    );
+  }, [activeMode, agentsSettings, availableAgents, availableSkills, availableTools]);
 
+  const globalAgentPermissions = useMemo(() => {
+    return new Map(
+      availableAgents.map((agent) => [
+        agent.name,
+        getEffectiveGlobalAgentPermission(agent.name, agentsSettings),
+      ] as const),
+    );
+  }, [agentsSettings, availableAgents]);
+
+  const activeModePermissionMaps = useMemo(() => {
+    return getModePermissionMaps(activeMode, {
+      availableTools,
+      availableSkills,
+      availableAgents,
+    });
+  }, [activeMode, availableAgents, availableSkills, availableTools]);
+
+  const activeModeToolPermissions = useMemo(() => new Map(Object.entries(activeModePermissionMaps.toolPermissions)), [activeModePermissionMaps]);
+  const activeModeSkillPermissions = useMemo(() => new Map(Object.entries(activeModePermissionMaps.skillPermissions)), [activeModePermissionMaps]);
+  const activeModeAgentPermissions = useMemo(() => new Map(Object.entries(activeModePermissionMaps.agentPermissions)), [activeModePermissionMaps]);
+
+  const globallyEnabledAgentNames = useMemo(() => {
     return new Set(
       availableAgents
-        .filter((agent) => agent.enabled)
+        .filter((agent) => effectiveAgentPermissions.get(agent.name) !== "deny")
         .map((agent) => agent.name),
     );
-  }, [agentsSettings.enabled, availableAgents]);
+  }, [availableAgents, effectiveAgentPermissions]);
 
-  const modeDefaultEnabledAgentNames = useMemo(() => {
-    const modeAllowedAgentNames = new Set(
-      getModeCapabilityNames(activeMode, {
-        availableTools,
-        availableSkills,
-        availableAgents,
-      }).agentNames,
-    );
-
-    return new Set(
-      [...globallyEnabledAgentNames].filter((agentName) =>
-        modeAllowedAgentNames.has(agentName),
-      ),
-    );
-  }, [activeMode, availableAgents, availableSkills, availableTools, globallyEnabledAgentNames]);
-
-  const activeChatEnabledAgentNames = useMemo(() => {
-    if (!activeChat) return [];
-
-    const chatEnabled = new Set(activeChat.enabledAgentNames ?? []);
-    const chatDisabled = new Set(activeChat.disabledAgentNames ?? []);
-
-    return availableAgents
-      .map((agent) => agent.name)
-      .filter(
-        (agentName) =>
-          !chatDisabled.has(agentName) &&
-          (modeDefaultEnabledAgentNames.has(agentName) ||
-            chatEnabled.has(agentName)),
-      );
-  }, [
-    activeChat?.disabledAgentNames,
-    activeChat?.enabledAgentNames,
-    activeChat?.id,
-    availableAgents,
-    modeDefaultEnabledAgentNames,
-  ]);
+  const modeDefaultEnabledAgentNames = globallyEnabledAgentNames;
+  const activeChatEnabledAgentNames = useMemo(
+    () => [...modeDefaultEnabledAgentNames],
+    [modeDefaultEnabledAgentNames],
+  );
 
   const agentMentionOptions = useMemo(() => {
-    const enabledNames = activeChat
-      ? new Set(activeChatEnabledAgentNames)
-      : modeDefaultEnabledAgentNames;
-
     return availableAgents
-      .filter((agent) => enabledNames.has(agent.name))
+      .filter((agent) => effectiveAgentPermissions.get(agent.name) !== "deny")
       .map((agent) => ({
         name: agent.name,
         description: agent.description,
       }));
-  }, [
-    activeChat,
-    activeChatEnabledAgentNames,
-    availableAgents,
-    modeDefaultEnabledAgentNames,
-  ]);
+  }, [availableAgents, effectiveAgentPermissions]);
 
   const visibleChatAgents = useMemo(() => {
     const search = chatAgentSearchValue.trim().toLowerCase();
-
     if (!search) return availableAgents;
-
     return availableAgents.filter((agent) =>
       `${agent.name} ${agent.description}`.toLowerCase().includes(search),
     );
@@ -1420,7 +1300,7 @@ export default function Home() {
             return currentRoots;
           }
 
-          return [...currentRoots, root];
+          return [root];
         });
         showSuccess("Workspace folder added.");
         return;
@@ -1436,7 +1316,7 @@ export default function Home() {
 
         return {
           ...chat,
-          workspaceRoots: [...existingRoots, root],
+          workspaceRoots: [root],
           updatedAt: now,
         };
       });
@@ -1648,6 +1528,20 @@ export default function Home() {
       const executionId = createId();
       const isMcpTool = tool?.source === "mcp";
       const bridge = isMcpTool ? window.chatForgeMcp : getToolsBridge();
+      const skillWorkspaceRoots: ChatWorkspaceRoot[] = loadedSkills
+        .filter((skill) => skill.directoryPath)
+        .map((skill, index) => ({
+          id: `skill:${skill.name}:${index}`,
+          name: skill.name,
+          path: skill.directoryPath!,
+          createdAt: new Date(0).toISOString(),
+          automatic: true,
+          kind: "skill" as const,
+        }));
+      const workspaceRootsWithSkills = [
+        ...(context?.workspaceRoots ?? []),
+        ...skillWorkspaceRoots,
+      ];
 
       if (!bridge) {
         return Promise.reject(new Error(isMcpTool ? "MCP bridge is unavailable." : "Tools bridge is unavailable."));
@@ -1697,7 +1591,7 @@ export default function Home() {
           return;
         }
 
-        if (toolName === TERMINAL_EXEC_TOOL_NAME) {
+        if (toolName === BASH_TOOL_NAME) {
           const toolsBridge = getToolsBridge();
           const unsubscribe = toolsBridge.onStreamEvent?.((event: TerminalStreamEvent) => {
             if (event.executionId !== executionId) return;
@@ -1715,7 +1609,7 @@ export default function Home() {
               executionId,
               name: toolName,
               args,
-              workspaceRoots: context?.workspaceRoots,
+              workspaceRoots: workspaceRootsWithSkills,
             })
             .then(settleResolve, settleReject);
           return;
@@ -1726,7 +1620,7 @@ export default function Home() {
             executionId,
             name: toolName,
             args,
-            workspaceRoots: context?.workspaceRoots,
+            workspaceRoots: workspaceRootsWithSkills,
           })
           .then(settleResolve, settleReject);
       });
@@ -1766,21 +1660,7 @@ export default function Home() {
       // Create and persist the real chat now, then queue the send for after
       // the new chat becomes the active chat (see the effect above).
       const emptyChat = createEmptyChat();
-      let chatWorkspaceRoot: ChatWorkspaceRoot | undefined;
-      try {
-        chatWorkspaceRoot = await window.chatForgeWorkspace?.ensureChatWorkspace?.(
-          emptyChat.id,
-        );
-      } catch (error) {
-        console.error("Failed to create chat workspace:", error);
-      }
-
-      const workspaceRoots = [
-        ...(chatWorkspaceRoot
-          ? [{ ...chatWorkspaceRoot, automatic: true, kind: "chat" as const }]
-          : []),
-        ...newChatDraftWorkspaceRoots.map((root) => ({ ...root })),
-      ];
+      const workspaceRoots = newChatDraftWorkspaceRoots.slice(0, 1).map((root) => ({ ...root }));
 
       const draftFolderId = appSettings.chatFolders.some(
         (folder) => folder.id === newChatDraftFolderId,
@@ -2120,7 +2000,7 @@ export default function Home() {
 
           return {
             ...folder,
-            workspaceRoots: [...existingRoots, root],
+            workspaceRoots: [root],
             updatedAt: now,
           };
         }),
@@ -2148,7 +2028,7 @@ export default function Home() {
     const folder = appSettings.chatFolders.find((item) => item.id === folderId);
     if (!folder) return;
 
-    setNewChatDraftWorkspaceRoots(cloneWorkspaceRoots(folder.workspaceRoots));
+    setNewChatDraftWorkspaceRoots([]);
     setNewChatDraftFolderId(folder.id);
     setNewChatDraftModeId(DEFAULT_MODE_ID);
     createNewChat();
@@ -2379,6 +2259,29 @@ export default function Home() {
   const stableGenerateChatTitle = useStableCallback(generateChatTitle);
   const stableShowSuccess = useStableCallback(showSuccess);
   const stableShowError = useStableCallback(showError);
+
+  const activeWorkspaceRootsKey = useMemo(
+    () => activeChatVisibleWorkspaceRoots.map((root) => root.path).join("\n"),
+    [activeChatVisibleWorkspaceRoots],
+  );
+
+  useEffect(() => {
+    if (!mounted) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const skills = await loadSkills(activeChatVisibleWorkspaceRoots);
+        if (!cancelled) setLoadedSkills(skills);
+      } catch (error) {
+        if (!cancelled) stableShowError("Failed to reload skills", labelForError(error));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkspaceRootsKey, mounted, stableShowError]);
   const toolDisplayKey = useMemo(
     () =>
       executableTools
@@ -2500,8 +2403,6 @@ export default function Home() {
         onCreateFolder={createFolder}
         onRenameFolder={renameFolder}
         onDeleteFolder={deleteFolder}
-        onAddFolderWorkspace={addFolderWorkspace}
-        onClearFolderWorkspaces={clearFolderWorkspaces}
         onMoveChatToFolder={moveChatToFolder}
         onRemoveChatFromFolder={removeChatFromFolder}
         onClearChat={(chatId) => {
@@ -2707,17 +2608,18 @@ export default function Home() {
         open={isChatCapabilitiesDialogOpen}
         onOpenChange={setIsChatCapabilitiesDialogOpen}
         tools={availableTools}
-        selectedToolNames={activeChatEnabledToolNames}
-        onToggleTool={toggleActiveChatTool}
-        fileToolAutoApproval={activeChat?.fileToolAutoApproval ?? {}}
-        onToggleFileToolAutoApproval={toggleActiveChatFileToolAutoApproval}
+        toolPermissions={effectiveToolPermissions}
+        globalToolPermissions={globalToolPermissions}
+        modeToolPermissions={activeModeToolPermissions}
         skills={availableSkills}
-        selectedSkillNames={activeChatEnabledSkillNames}
-        activeSkillNames={activeChat?.activeSkillNames ?? []}
-        onToggleSkill={toggleActiveChatSkill}
+        skillPermissions={effectiveSkillPermissions}
+        globalSkillPermissions={globalSkillPermissions}
+        modeSkillPermissions={activeModeSkillPermissions}
         agents={availableAgents}
-        selectedAgentNames={activeChatEnabledAgentNames}
-        onToggleAgent={toggleActiveChatAgent}
+        agentPermissions={effectiveAgentPermissions}
+        globalAgentPermissions={globalAgentPermissions}
+        modeAgentPermissions={activeModeAgentPermissions}
+        modeName={activeMode.name || "Default"}
         thinkingMode={activeChat?.thinkingMode ?? "model_default"}
         onThinkingModeChange={setActiveChatThinkingMode}
         disabled={isSending}
@@ -2774,6 +2676,7 @@ export default function Home() {
         loadedSkills={loadedSkills}
         onLoadedSkillsChange={setLoadedSkills}
         availableTools={availableTools}
+        workspaceRoots={activeChatVisibleWorkspaceRoots}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />
@@ -2801,6 +2704,9 @@ export default function Home() {
         availableTools={availableTools}
         availableSkills={availableSkills}
         availableAgents={availableAgents}
+        toolsSettings={toolsSettings}
+        skillsSettings={skillsSettings}
+        agentsSettings={agentsSettings}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />
@@ -2821,7 +2727,7 @@ export default function Home() {
         onToolsSettingsChange={setToolsSettings}
         loadedTools={loadedTools}
         onLoadedToolsChange={setLoadedTools}
-        callAgentEnabled={agentsSettings.enabled && availableAgents.some((agent) => agent.enabled)}
+        callAgentEnabled={availableAgents.some((agent) => effectiveAgentPermissions.get(agent.name) !== "deny")}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />
