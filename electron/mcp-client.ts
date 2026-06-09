@@ -519,23 +519,25 @@ async function connectMcpClient(
     const command = server.command?.trim();
     if (!command) throw new Error("MCP stdio server command is required.");
 
-    const stderr = new PassThrough();
     let stderrText = "";
-    stderr.on("data", (chunk) => {
-      stderrText += chunk.toString();
-      if (stderrText.length > 20_000) stderrText = stderrText.slice(-20_000);
-    });
 
     const transport = new StdioClientTransport({
       command,
       args: server.args ?? [],
       cwd: server.cwd?.trim() || undefined,
       env: { ...getDefaultEnvironment(), ...(server.env ?? {}) },
-      stderr,
+      stderr: "pipe",
     });
 
     try {
       await client.connect(transport, getRequestOptions(server, signal));
+      // Pipe stderr from child process for error diagnostics
+      if (transport.process?.stderr) {
+        transport.process.stderr.on("data", (chunk: Buffer) => {
+          stderrText += chunk.toString();
+          if (stderrText.length > 20_000) stderrText = stderrText.slice(-20_000);
+        });
+      }
       return {
         client,
         close: async () => {
