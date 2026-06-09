@@ -299,17 +299,8 @@ export function useChatAutoscroll({
 
     if (manualScrollSuppressionTimeoutRef.current !== null) {
       window.clearTimeout(manualScrollSuppressionTimeoutRef.current);
-    }
-
-    manualScrollSuppressionTimeoutRef.current = window.setTimeout(() => {
       manualScrollSuppressionTimeoutRef.current = null;
-
-      if (!isChatNearBottom(CHAT_BOTTOM_THRESHOLD_PX)) return;
-      if (!isActiveChatGenerating()) return;
-
-      setChatAutoScrollEnabled(true);
-      scheduleStickyScrollToBottom();
-    }, STICKY_SCROLL_SUPPRESSION_MS);
+    }
   }
 
   function markManualScrollInput(durationMs = 200) {
@@ -938,9 +929,10 @@ export function useChatAutoscroll({
 
       if (
         isNearBottom &&
-        isActiveChatGenerating() &&
-        !isStickyScrollSuppressed()
+        currentScrollTop > previousScrollTop &&
+        isActiveChatGenerating()
       ) {
+        clearStickyScrollSuppression();
         setChatAutoScrollEnabled(true);
       } else if (!isNearBottom && hasRecentManualScrollInput()) {
         setChatAutoScrollEnabled(false);
