@@ -410,6 +410,7 @@ export function useToolExecution({
 
 
   function appendTerminalOutput(value: string, delta: string) {
+    if (!delta) return value;
     const maxChars = 100_000;
     const next = value + delta;
     if (next.length <= maxChars) return next;
@@ -439,7 +440,20 @@ export function useToolExecution({
       warnings: [],
     };
 
-    const publish = (status: ToolExecutionStatus) => {
+    const THROTTLE_MS = 66;
+    let lastPublishTime = 0;
+    let pendingPublishTimer: ReturnType<typeof setTimeout> | null = null;
+    let hasPendingPublish = false;
+
+    const cancelPendingPublish = () => {
+      if (pendingPublishTimer !== null) {
+        clearTimeout(pendingPublishTimer);
+        pendingPublishTimer = null;
+      }
+      hasPendingPublish = false;
+    };
+
+    const actuallyPublish = (status: ToolExecutionStatus) => {
       const content = JSON.stringify(
         {
           ok: status !== "failed",
@@ -488,10 +502,32 @@ export function useToolExecution({
           "complete",
         );
       }
+    };
 
-      if (options.chatId === activeChatId) {
-        scheduleStickyScrollToBottom({ settleFrames: 2 });
+    const publish = (status: ToolExecutionStatus) => {
+      if (status === "running") {
+        const now = Date.now();
+        const elapsed = now - lastPublishTime;
+
+        if (elapsed < THROTTLE_MS) {
+          hasPendingPublish = true;
+          if (!pendingPublishTimer) {
+            pendingPublishTimer = setTimeout(() => {
+              pendingPublishTimer = null;
+              if (hasPendingPublish) {
+                hasPendingPublish = false;
+                lastPublishTime = Date.now();
+                actuallyPublish("running");
+              }
+            }, THROTTLE_MS - elapsed);
+          }
+          return;
+        }
       }
+
+      cancelPendingPublish();
+      lastPublishTime = Date.now();
+      actuallyPublish(status);
     };
 
     return (event: TerminalStreamEvent) => {

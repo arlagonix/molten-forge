@@ -173,12 +173,14 @@ function renderToolExecutionPreview(execution?: ToolExecutionPreview) {
 
   return (
     <>
-      <div className="grid gap-1.5">
-        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-          Command
+      {execution.displayCommand && (
+        <div className="grid gap-1.5">
+          <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+            Command
+          </div>
+          {renderCommandCodeBlock(execution.displayCommand)}
         </div>
-        {renderCommandCodeBlock(execution.displayCommand)}
-      </div>
+      )}
       {execution.cwd?.trim() && (
         <div className="grid gap-1.5">
           <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">

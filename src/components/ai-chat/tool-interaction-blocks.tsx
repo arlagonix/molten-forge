@@ -9,7 +9,7 @@ import {
   X,
 } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { memo, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -140,7 +140,7 @@ export const AskUserBlock = memo(function AskUserBlock({
     setActiveQuestionIndex(0);
   }, [request, response]);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     onLayoutChange?.();
   }, [
     activeQuestionIndex,
@@ -1081,7 +1081,7 @@ export const ToolApprovalBlock = memo(function ToolApprovalBlock({
   const effectiveStatus = status ?? "waiting";
   const isWaiting = effectiveStatus === "waiting";
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     onLayoutChange?.();
   }, [effectiveStatus, isCollapsed, onLayoutChange, response, toolResult]);
 
@@ -1272,7 +1272,7 @@ export const TaskListBlock = memo(function TaskListBlock({
   const isPending = !toolResult && status !== "complete" && status !== "failed";
   const isError = toolResult?.isError === true || status === "failed";
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     onLayoutChange?.();
   }, [
     doneCount,

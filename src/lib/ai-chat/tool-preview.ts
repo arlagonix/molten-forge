@@ -62,8 +62,11 @@ export function buildToolExecutionPreview(
   modelArgs: unknown,
 ): ToolExecutionPreview {
   const commandArgs = materializeCommandArgs(tool.args, modelArgs);
+  const hasCommand = tool.command.trim().length > 0 || tool.args.length > 0;
   const stdin =
-    tool.input === "json-stdin" ? JSON.stringify(modelArgs ?? {}) : undefined;
+    tool.input === "json-stdin" || !hasCommand
+      ? JSON.stringify(modelArgs ?? {})
+      : undefined;
 
   return {
     command: tool.command,
@@ -71,8 +74,10 @@ export function buildToolExecutionPreview(
     cwd: tool.cwd,
     inputMode: tool.input,
     stdin,
-    displayCommand: formatCommandPreview(tool.command, commandArgs),
-    usesStdin: tool.input === "json-stdin",
+    displayCommand: hasCommand
+      ? formatCommandPreview(tool.command, commandArgs)
+      : "",
+    usesStdin: tool.input === "json-stdin" || !hasCommand,
     usesPlaceholders: extractTemplatePlaceholders(tool.args).length > 0,
   };
 }

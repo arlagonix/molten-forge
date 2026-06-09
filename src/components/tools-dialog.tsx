@@ -754,12 +754,14 @@ function renderToolExecutionPreview(execution?: ToolExecutionPreview) {
 
   return (
     <>
-      <div className="grid gap-1.5">
-        <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
-          Command
+      {execution.displayCommand && (
+        <div className="grid gap-1.5">
+          <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
+            Command
+          </div>
+          {renderCommandCodeBlock(execution.displayCommand)}
         </div>
-        {renderCommandCodeBlock(execution.displayCommand)}
-      </div>
+      )}
       {execution.cwd?.trim() && (
         <div className="grid gap-1.5">
           <div className="text-sm font-medium uppercase tracking-wide text-muted-foreground/80">
@@ -839,8 +841,11 @@ function buildToolExecutionPreview(
   modelArgs: unknown,
 ): ToolExecutionPreview {
   const commandArgs = materializeCommandArgs(tool.args, modelArgs);
+  const hasCommand = tool.command.trim().length > 0 || tool.args.length > 0;
   const stdin =
-    tool.input === "json-stdin" ? JSON.stringify(modelArgs ?? {}) : undefined;
+    tool.input === "json-stdin" || !hasCommand
+      ? JSON.stringify(modelArgs ?? {})
+      : undefined;
 
   return {
     command: tool.command,
@@ -848,8 +853,10 @@ function buildToolExecutionPreview(
     cwd: tool.cwd,
     inputMode: tool.input,
     stdin,
-    displayCommand: formatCommandPreview(tool.command, commandArgs),
-    usesStdin: tool.input === "json-stdin",
+    displayCommand: hasCommand
+      ? formatCommandPreview(tool.command, commandArgs)
+      : "",
+    usesStdin: tool.input === "json-stdin" || !hasCommand,
     usesPlaceholders: extractTemplatePlaceholders(tool.args).length > 0,
   };
 }
