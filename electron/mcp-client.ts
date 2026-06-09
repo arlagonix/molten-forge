@@ -69,6 +69,7 @@ export type McpSdkClient = {
 
 type McpTransport = {
   close?: () => Promise<void>;
+  stderr?: import("node:stream").Stream | null;
 };
 
 type McpSdkModule = {
@@ -529,15 +530,19 @@ async function connectMcpClient(
       stderr: "pipe",
     });
 
+    // Capture stderr for error diagnostics. The transport's stderr getter
+    // returns a PassThrough stream immediately (before start()), so early
+    // error output from the child process is not lost.
+    const stderrStream = transport.stderr;
+    if (stderrStream) {
+      stderrStream.on("data", (chunk: Buffer) => {
+        stderrText += chunk.toString();
+        if (stderrText.length > 20_000) stderrText = stderrText.slice(-20_000);
+      });
+    }
+
     try {
       await client.connect(transport, getRequestOptions(server, signal));
-      // Pipe stderr from child process for error diagnostics
-      if (transport.process?.stderr) {
-        transport.process.stderr.on("data", (chunk: Buffer) => {
-          stderrText += chunk.toString();
-          if (stderrText.length > 20_000) stderrText = stderrText.slice(-20_000);
-        });
-      }
       return {
         client,
         close: async () => {
