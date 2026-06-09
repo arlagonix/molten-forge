@@ -252,7 +252,6 @@ export function buildLoadedMcpTools(settings: McpSettings): McpLoadedTool[] {
     if (!server.enabled) continue;
 
     for (const tool of Object.values(server.tools ?? {})) {
-      if (!tool.enabled) continue;
       const exposedName = uniqueMcpExposedToolName(
         tool.exposedName,
         server.name,
@@ -271,10 +270,7 @@ export function buildLoadedMcpTools(settings: McpSettings): McpLoadedTool[] {
         args: [],
         input: "none",
         timeoutMs: server.timeoutMs,
-        requiresApproval:
-          typeof tool.requireApproval === "boolean"
-            ? tool.requireApproval
-            : server.requireApproval,
+        requiresApproval: true,
         source: "mcp",
         mcp: {
           serverId: server.id,
@@ -626,13 +622,129 @@ async function connectMcpClient(
   }
 }
 
+
+function stableStringify(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (isPlainObject(value)) {
+    return `{${Object.entries(value)
+      .filter(([, item]) => typeof item !== "undefined")
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(value) ?? "null";
+}
+
+function createAbortError() {
+  return new Error("MCP request was cancelled.");
+}
+
+function createMcpServerFingerprint(server: McpServerConfig) {
+  return stableStringify({
+    transport: server.transport,
+    command: server.command?.trim() || "",
+    args: server.args ?? [],
+    cwd: server.cwd?.trim() || "",
+    env: server.env ?? {},
+    url: server.url?.trim() || "",
+    headers: server.headers ?? {},
+    insecureSkipTlsVerify: server.insecureSkipTlsVerify === true,
+  });
+}
+
+type McpConnection = Awaited<ReturnType<typeof connectMcpClient>>;
+
+type McpSession = {
+  fingerprint: string;
+  connection?: Promise<McpConnection>;
+  queue: Promise<void>;
+};
+
+const mcpSessions = new Map<string, McpSession>();
+
+async function closeMcpSession(serverId: string) {
+  const session = mcpSessions.get(serverId);
+  if (!session) return;
+
+  mcpSessions.delete(serverId);
+  const connection = await session.connection?.catch(() => undefined);
+  await connection?.close().catch(() => undefined);
+}
+
+async function getMcpSessionConnection(
+  server: McpServerConfig,
+  signal?: AbortSignal,
+): Promise<McpConnection> {
+  if (signal?.aborted) throw createAbortError();
+
+  const fingerprint = createMcpServerFingerprint(server);
+  let session = mcpSessions.get(server.id);
+
+  if (session && session.fingerprint !== fingerprint) {
+    await closeMcpSession(server.id);
+    session = undefined;
+  }
+
+  if (!session) {
+    session = { fingerprint, queue: Promise.resolve() };
+    mcpSessions.set(server.id, session);
+  }
+
+  session.connection ??= connectMcpClient(server, signal).catch((error) => {
+    if (mcpSessions.get(server.id) === session) {
+      mcpSessions.delete(server.id);
+    }
+    throw error;
+  });
+
+  return session.connection;
+}
+
+async function runWithMcpSession<T>(
+  server: McpServerConfig,
+  signal: AbortSignal | undefined,
+  task: (connection: McpConnection) => Promise<T>,
+): Promise<T> {
+  const fingerprint = createMcpServerFingerprint(server);
+  let session = mcpSessions.get(server.id);
+
+  if (session && session.fingerprint !== fingerprint) {
+    await closeMcpSession(server.id);
+    session = undefined;
+  }
+
+  if (!session) {
+    session = { fingerprint, queue: Promise.resolve() };
+    mcpSessions.set(server.id, session);
+  }
+
+  const run = session.queue.catch(() => undefined).then(async () => {
+    if (signal?.aborted) throw createAbortError();
+    const connection = await getMcpSessionConnection(server, signal);
+
+    try {
+      return await task(connection);
+    } catch (error) {
+      await closeMcpSession(server.id);
+      throw error;
+    }
+  });
+
+  session.queue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+
+  return run;
+}
+
 export async function listMcpTools(
   server: McpServerConfig,
   signal?: AbortSignal,
 ) {
-  return runWithOptionalInsecureTls(server, async () => {
-    const connection = await connectMcpClient(server, signal);
-    try {
+  return runWithOptionalInsecureTls(server, () =>
+    runWithMcpSession(server, signal, async (connection) => {
       const result = await connection.client.listTools(
         {},
         getRequestOptions(server, signal),
@@ -642,10 +754,8 @@ export async function listMcpTools(
         description: tool.description,
         inputSchema: schemaAsObject(tool.inputSchema),
       }));
-    } finally {
-      await connection.close();
-    }
-  });
+    }),
+  );
 }
 
 export async function testMcpServer(server: McpServerConfig) {
@@ -802,9 +912,8 @@ export async function executeMcpTool({
   const server = normalized.servers.find((item) => item.id === loadedTool.mcp.serverId);
   if (!server) throw new Error(`MCP server not found: ${loadedTool.mcp.serverName}`);
 
-  return runWithOptionalInsecureTls(server, async () => {
-    const connection = await connectMcpClient(server, signal);
-    try {
+  return runWithOptionalInsecureTls(server, () =>
+    runWithMcpSession(server, signal, async (connection) => {
       const result = await connection.client.callTool(
         {
           name: loadedTool.mcp.originalToolName,
@@ -825,8 +934,6 @@ export async function executeMcpTool({
         stderr: isError ? content : "",
         timedOut: false,
       };
-    } finally {
-      await connection.close();
-    }
-  });
+    }),
+  );
 }

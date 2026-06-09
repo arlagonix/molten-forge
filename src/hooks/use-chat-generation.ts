@@ -2203,10 +2203,9 @@ export function useChatGeneration({
         const agentTimelineSteps: ChatAssistantProcessStep[] = [];
         for (const childToolCall of toolCalls) {
           const stepId = createId();
-          const childTool =
-            currentAgentToolsForRun.find(
-              (candidate) => candidate.name === childToolCall.function.name,
-            ) ?? availableToolsByName.get(childToolCall.function.name);
+          const childTool = currentAgentToolsForRun.find(
+            (candidate) => candidate.name === childToolCall.function.name,
+          );
           const childNeedsApproval = requiresToolApproval(
             childToolCall.function.name,
             childTool,
@@ -2442,10 +2441,9 @@ export function useChatGeneration({
               currentAgentActiveSkillNames,
             );
 
-            const childTool =
-              currentAgentToolsForRun.find(
-                (candidate) => candidate.name === childToolCall.function.name,
-              ) ?? availableToolsByName.get(childToolCall.function.name);
+            const childTool = currentAgentToolsForRun.find(
+              (candidate) => candidate.name === childToolCall.function.name,
+            );
 
             if (requiresToolApproval(childToolCall.function.name, childTool)) {
               const approvalStepId = createId();
@@ -2813,7 +2811,9 @@ export function useChatGeneration({
           }
         }
 
-        const tool = toolsForRun.find((candidate) => candidate.name === toolCall.function.name) ?? availableToolsByName.get(toolCall.function.name);
+        const tool = toolsForRun.find(
+          (candidate) => candidate.name === toolCall.function.name,
+        );
         if (requiresToolApproval(toolCall.function.name, tool)) {
           try {
             const approvalGroupId = toolBatchId ?? createId();
@@ -3483,10 +3483,9 @@ export function useChatGeneration({
                   activeSkillNames: currentActiveSkillNames,
                   workspaceRoots: currentWorkspaceRoots,
                   fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
-                  tool:
-                    currentToolsForRun.find(
-                      (candidate) => candidate.name === toolCall.function.name,
-                    ) ?? availableToolsByName.get(toolCall.function.name),
+                  tool: currentToolsForRun.find(
+                    (candidate) => candidate.name === toolCall.function.name,
+                  ),
                 });
 
           applyToolResultToVisibleStep(toolResult);

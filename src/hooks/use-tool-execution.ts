@@ -618,17 +618,27 @@ export function useToolExecution({
         return executeTaskTool(toolCall, options.chatId);
       }
 
-      const tool = options.tool ?? loadedTools.find((candidate) => candidate.name === toolName);
+      const tool = options.tool;
+      if (!tool) {
+        return {
+          toolCallId: toolCall.id,
+          toolName,
+          content: `Error: Tool "${toolName}" is not available in this chat or mode.`,
+          isError: true,
+        };
+      }
+
+      const optionsWithTool = { ...options, tool };
 
       if (requiresToolApproval(toolName, tool)) {
-        return await executeToolCallWithApproval(toolCall, options);
+        return await executeToolCallWithApproval(toolCall, optionsWithTool);
       }
 
       if (toolName === LOAD_SKILL_TOOL_NAME) {
         return await executeLoadSkillToolCall(toolCall);
       }
 
-      return await executeExternalToolCall(toolCall, options);
+      return await executeExternalToolCall(toolCall, optionsWithTool);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         throw error;

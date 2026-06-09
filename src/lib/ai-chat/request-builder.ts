@@ -107,6 +107,7 @@ export function getGlobalToolPermission(
   if (toolName === BASH_TOOL_NAME) return toolsSettings.bashEnabled ? (toolsSettings.bashAutoApproveEnabled ? "allow" : "ask") : "deny";
   if (toolName === EDIT_TOOL_NAME) return toolsSettings.editEnabled ? (toolsSettings.editAutoApproveEnabled ? "allow" : "ask") : "deny";
   if (toolName === WRITE_TOOL_NAME) return toolsSettings.writeEnabled ? (toolsSettings.writeAutoApproveEnabled ? "allow" : "ask") : "deny";
+  if (toolName.startsWith("mcp_")) return "deny";
   return "ask";
 }
 

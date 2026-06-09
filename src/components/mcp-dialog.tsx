@@ -436,35 +436,6 @@ export const McpDialog = memo(function McpDialog({
     }
   }
 
-  function updateTool(
-    serverId: string,
-    toolName: string,
-    updater: (tool: McpToolConfig) => McpToolConfig,
-  ) {
-    if (newServerDraft && newServerDraft.id === serverId) {
-      setNewServerDraft({
-        ...newServerDraft,
-        tools: Object.fromEntries(
-          Object.entries(newServerDraft.tools ?? {}).map(([name, tool]) => [
-            name,
-            name === toolName ? updater(tool) : tool,
-          ]),
-        ),
-      });
-      return;
-    }
-
-    updateServer(serverId, (server) => ({
-      ...server,
-      tools: Object.fromEntries(
-        Object.entries(server.tools ?? {}).map(([name, tool]) => [
-          name,
-          name === toolName ? updater(tool) : tool,
-        ]),
-      ),
-    }));
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -482,7 +453,7 @@ export const McpDialog = memo(function McpDialog({
         <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
           <DialogTitle>MCP</DialogTitle>
           <DialogDescription>
-            Connect external MCP servers and expose selected tools to chats and agents.
+            Connect external MCP servers, discover their tools, and manage execution permissions from Tools settings.
           </DialogDescription>
         </DialogHeader>
 
@@ -845,21 +816,17 @@ export const McpDialog = memo(function McpDialog({
                       />
                     )}
 
-                    <ToggleBlock
-                      title="Require approval by default"
-                      description="New MCP tool calls ask before execution."
-                      checked={activeServer.requireApproval}
-                      onCheckedChange={(requireApproval) =>
-                        updateActiveServer({ requireApproval })
-                      }
-                    />
+                    <div className="border bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground">
+                      MCP tool execution permissions are configured in Tools settings.
+                      This dialog only controls server connection and discovery.
+                    </div>
 
                     <div className="grid gap-3 pt-2">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <h4 className="text-sm font-semibold">Discovered tools</h4>
                           <p className="text-sm text-muted-foreground">
-                            Tools are disabled when first discovered. Enable only the tools you want in context.
+                            Discovered tools are read-only here. Configure Ask, Allow, or Deny in Tools settings.
                           </p>
                         </div>
                         <Button
@@ -884,7 +851,7 @@ export const McpDialog = memo(function McpDialog({
                       <div className="grid gap-2">
                         {sortTools(activeServer.tools).length === 0 ? (
                           <div className="border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
-                            No tools discovered yet. Use Refresh tools after configuring the server.
+                            No tools discovered yet. Use Load tools after configuring the server.
                           </div>
                         ) : (
                           sortTools(activeServer.tools).map((tool) => (
@@ -910,45 +877,8 @@ export const McpDialog = memo(function McpDialog({
                                     </div>
                                   )}
                                 </div>
-                                <div className="flex shrink-0 flex-col items-end gap-2">
-                                  <div className="flex w-32 items-center justify-between gap-2 text-sm text-muted-foreground">
-                                    Approval
-                                    <Switch
-                                      checked={
-                                        tool.requireApproval ??
-                                        activeServer.requireApproval
-                                      }
-                                      onCheckedChange={(requireApproval) =>
-                                        updateTool(
-                                          activeServer.id,
-                                          tool.originalName,
-                                          (currentTool) => ({
-                                            ...currentTool,
-                                            requireApproval,
-                                          }),
-                                        )
-                                      }
-                                      className="cursor-pointer"
-                                    />
-                                  </div>
-                                  <div className="flex w-32 items-center justify-between gap-2 text-sm text-muted-foreground">
-                                    Enabled
-                                    <Switch
-                                      checked={tool.enabled}
-                                      onCheckedChange={(enabled) =>
-                                        updateTool(
-                                          activeServer.id,
-                                          tool.originalName,
-                                          (currentTool) => ({
-                                            ...currentTool,
-                                            enabled,
-                                          }),
-                                        )
-                                      }
-                                      className="cursor-pointer"
-                                      aria-label={`Enable ${tool.originalName}`}
-                                    />
-                                  </div>
+                                <div className="shrink-0 border bg-muted/30 px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  Permission in Tools
                                 </div>
                               </div>
                             </div>

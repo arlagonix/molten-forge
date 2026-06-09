@@ -73,10 +73,16 @@ export function createEmptyMcpServer(): McpServerConfig {
   };
 }
 
-export function getMcpToolApproval(server: McpServerConfig, tool: McpToolConfig) {
-  return typeof tool.requireApproval === "boolean"
+export function getMcpLegacyToolPermission(
+  server: McpServerConfig,
+  tool: McpToolConfig,
+) {
+  if (!tool.enabled) return "deny" as const;
+  return (typeof tool.requireApproval === "boolean"
     ? tool.requireApproval
-    : server.requireApproval;
+    : server.requireApproval)
+    ? "ask" as const
+    : "allow" as const;
 }
 
 export function buildLoadedMcpTools(settings: McpSettings): LoadedToolInfo[] {
@@ -89,7 +95,6 @@ export function buildLoadedMcpTools(settings: McpSettings): LoadedToolInfo[] {
     if (!server.enabled) continue;
 
     for (const tool of Object.values(server.tools ?? {})) {
-      if (!tool.enabled) continue;
       const exposedName = tool.exposedName || createMcpExposedToolName(server.name, tool.originalName);
       if (!isValidMcpExposedToolName(exposedName) || usedNames.has(exposedName)) continue;
 
@@ -106,7 +111,7 @@ export function buildLoadedMcpTools(settings: McpSettings): LoadedToolInfo[] {
         args: [],
         input: "none",
         timeoutMs: server.timeoutMs || DEFAULT_MCP_TOOL_TIMEOUT_MS,
-        requiresApproval: getMcpToolApproval(server, tool),
+        requiresApproval: true,
         source: "mcp",
         mcp: {
           serverId: server.id,

@@ -68,7 +68,13 @@ import {
   providerDisplayName,
   sortChatsByUpdatedAt,
 } from "@/lib/ai-chat/chat-utils";
-import { buildLoadedMcpTools, DEFAULT_MCP_SETTINGS } from "@/lib/ai-chat/mcp";
+import {
+  buildLoadedMcpTools,
+  createMcpExposedToolName,
+  DEFAULT_MCP_SETTINGS,
+  getMcpLegacyToolPermission,
+  isValidMcpExposedToolName,
+} from "@/lib/ai-chat/mcp";
 import {
   DEFAULT_MODE_ID,
   getModePermissionMaps,
@@ -202,6 +208,40 @@ const EMPTY_FIND_RESULT: FindInPageResultState = {
   activeMatchOrdinal: 0,
   matches: 0,
 };
+
+function migrateMcpToolPermissions(
+  toolsSettings: ToolsSettings,
+  mcpSettings: McpSettings,
+): ToolsSettings {
+  const nextToolPermissions = { ...(toolsSettings.toolPermissions ?? {}) };
+  let changed = false;
+
+  for (const server of mcpSettings.servers) {
+    for (const tool of Object.values(server.tools ?? {})) {
+      const exposedName =
+        tool.exposedName ||
+        createMcpExposedToolName(server.name, tool.originalName);
+
+      if (!isValidMcpExposedToolName(exposedName)) continue;
+      if (nextToolPermissions[exposedName]) continue;
+
+      nextToolPermissions[exposedName] = getMcpLegacyToolPermission(
+        server,
+        tool,
+      );
+      changed = true;
+    }
+  }
+
+  if (!changed) return toolsSettings;
+
+  return {
+    ...toolsSettings,
+    enabled: toolsSettings.toolsPermission !== "deny",
+    permissionModelVersion: 2,
+    toolPermissions: nextToolPermissions,
+  };
+}
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -1066,7 +1106,9 @@ export default function Home() {
           activeProviderId: fallbackProviderId,
         });
         setSystemPrompt(loadedSystemPrompt);
-        setToolsSettings(loadedToolsSettings);
+        setToolsSettings(
+          migrateMcpToolPermissions(loadedToolsSettings, loadedMcpSettings),
+        );
         setSkillsSettings(loadedSkillsSettings);
         setAgentsSettings(loadedAgentsSettings);
         setAppSettings(loadedAppSettings);
@@ -1193,6 +1235,13 @@ export default function Home() {
     if (!didHydrateRef.current) return;
     saveMcpSettings(mcpSettings).catch((error) =>
       console.error("Failed to save MCP settings:", error),
+    );
+  }, [mcpSettings]);
+
+  useEffect(() => {
+    if (!didHydrateRef.current) return;
+    setToolsSettings((current) =>
+      migrateMcpToolPermissions(current, mcpSettings),
     );
   }, [mcpSettings]);
 
