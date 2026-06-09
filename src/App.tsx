@@ -2617,7 +2617,7 @@ export default function Home() {
               aria-live="polite"
             >
               <div className="mx-auto flex w-full max-w-4xl">
-                <div className="inline-flex select-none items-center gap-1.5 text-sm leading-5 text-muted-foreground shadow-md">
+                <div className="inline-flex select-none items-center gap-1.5 text-sm text-muted-foreground">
                   <RadixSpinner
                     aria-hidden="true"
                     className="generating-radix-spinner"
