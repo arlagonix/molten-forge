@@ -209,27 +209,85 @@ const EMPTY_FIND_RESULT: FindInPageResultState = {
   matches: 0,
 };
 
+function getMcpPermissionToolName(
+  server: McpSettings["servers"][number],
+  tool: NonNullable<McpSettings["servers"][number]["tools"]>[string],
+) {
+  return createMcpExposedToolName(server.name, tool.originalName);
+}
+
+function getStoredMcpPermissionToolName(
+  server: McpSettings["servers"][number],
+  tool: NonNullable<McpSettings["servers"][number]["tools"]>[string],
+) {
+  return tool.exposedName || getMcpPermissionToolName(server, tool);
+}
+
 function migrateMcpToolPermissions(
   toolsSettings: ToolsSettings,
-  mcpSettings: McpSettings,
+  nextMcpSettings: McpSettings,
+  previousMcpSettings?: McpSettings,
 ): ToolsSettings {
   const nextToolPermissions = { ...(toolsSettings.toolPermissions ?? {}) };
+  const nextMcpToolNames = new Set<string>();
   let changed = false;
 
-  for (const server of mcpSettings.servers) {
+  for (const server of nextMcpSettings.servers) {
     for (const tool of Object.values(server.tools ?? {})) {
-      const exposedName =
-        tool.exposedName ||
-        createMcpExposedToolName(server.name, tool.originalName);
+      const exposedName = getMcpPermissionToolName(server, tool);
+      if (isValidMcpExposedToolName(exposedName)) {
+        nextMcpToolNames.add(exposedName);
+      }
+    }
+  }
 
+  const previousServersById = new Map(
+    (previousMcpSettings?.servers ?? []).map((server) => [server.id, server]),
+  );
+
+  for (const server of nextMcpSettings.servers) {
+    const previousServer = previousServersById.get(server.id);
+
+    for (const tool of Object.values(server.tools ?? {})) {
+      const exposedName = getMcpPermissionToolName(server, tool);
       if (!isValidMcpExposedToolName(exposedName)) continue;
-      if (nextToolPermissions[exposedName]) continue;
 
-      nextToolPermissions[exposedName] = getMcpLegacyToolPermission(
-        server,
-        tool,
-      );
-      changed = true;
+      const previousTool = previousServer?.tools?.[tool.originalName];
+      const previousExposedName = previousServer && previousTool
+        ? getStoredMcpPermissionToolName(previousServer, previousTool)
+        : tool.exposedName && tool.exposedName !== exposedName
+          ? tool.exposedName
+          : undefined;
+
+      if (
+        previousExposedName &&
+        previousExposedName !== exposedName &&
+        isValidMcpExposedToolName(previousExposedName) &&
+        nextToolPermissions[previousExposedName] &&
+        !nextToolPermissions[exposedName]
+      ) {
+        nextToolPermissions[exposedName] = nextToolPermissions[previousExposedName];
+        changed = true;
+      }
+
+      if (!nextToolPermissions[exposedName]) {
+        nextToolPermissions[exposedName] = getMcpLegacyToolPermission(
+          server,
+          tool,
+        );
+        changed = true;
+      }
+
+      if (
+        previousExposedName &&
+        previousExposedName !== exposedName &&
+        isValidMcpExposedToolName(previousExposedName) &&
+        !nextMcpToolNames.has(previousExposedName) &&
+        nextToolPermissions[previousExposedName]
+      ) {
+        delete nextToolPermissions[previousExposedName];
+        changed = true;
+      }
     }
   }
 
@@ -242,6 +300,7 @@ function migrateMcpToolPermissions(
     toolPermissions: nextToolPermissions,
   };
 }
+
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -666,6 +725,16 @@ export default function Home() {
 
   const loadedMcpTools = useMemo(
     () => buildLoadedMcpTools(mcpSettings),
+    [mcpSettings],
+  );
+
+  const handleMcpSettingsChange = useCallback(
+    (nextSettings: McpSettings) => {
+      setToolsSettings((current) =>
+        migrateMcpToolPermissions(current, nextSettings, mcpSettings),
+      );
+      setMcpSettings(nextSettings);
+    },
     [mcpSettings],
   );
 
@@ -2858,7 +2927,7 @@ export default function Home() {
         open={mcpOpen}
         onOpenChange={setMcpOpen}
         mcpSettings={mcpSettings}
-        onMcpSettingsChange={setMcpSettings}
+        onMcpSettingsChange={handleMcpSettingsChange}
         showSuccess={stableShowSuccess}
         showError={stableShowError}
       />

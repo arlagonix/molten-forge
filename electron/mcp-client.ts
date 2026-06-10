@@ -252,8 +252,10 @@ export function buildLoadedMcpTools(settings: McpSettings): McpLoadedTool[] {
     if (!server.enabled) continue;
 
     for (const tool of Object.values(server.tools ?? {})) {
+      if (!tool.enabled) continue;
+
       const exposedName = uniqueMcpExposedToolName(
-        tool.exposedName,
+        createMcpExposedToolName(server.name, tool.originalName),
         server.name,
         tool.originalName,
         usedNames,

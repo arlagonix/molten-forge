@@ -1,9 +1,9 @@
 "use client";
 
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Info,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -12,12 +12,12 @@ import {
   Wand2,
   X,
 } from "lucide-react";
+import { memo, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -41,28 +41,78 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  createEmptyMcpServer,
-  createMcpExposedToolName,
-} from "@/lib/ai-chat/mcp";
-import type {
-  McpServerConfig,
-  McpSettings,
-  McpToolConfig,
-} from "@/lib/ai-chat/types";
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
+import { useMcpSettingsForm } from "@/hooks/use-mcp-settings-form";
+import { createMcpExposedToolName } from "@/lib/ai-chat/mcp";
+import type { McpSettings, McpToolConfig } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
 const TLS_WARNING =
   "Use only for local, self-signed, or corporate-proxy MCP servers you trust.";
 
+function InfoTooltip({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={`${label} info`}
+          className="inline-flex size-5 shrink-0 cursor-help items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <Info className="size-3.5" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent
+        side="right"
+        sideOffset={6}
+        className="max-w-xs text-sm leading-5"
+      >
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function FieldLabel({
+  htmlFor,
+  label,
+  description,
+}: {
+  htmlFor?: string;
+  label: string;
+  description: ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <Label htmlFor={htmlFor}>{label}</Label>
+      <InfoTooltip label={label}>{description}</InfoTooltip>
+    </div>
+  );
+}
+
 /** A bordered container that acts as a single large switch target. */
 function ToggleBlock({
   title,
   description,
+  info,
   checked,
   onCheckedChange,
 }: {
   title: string;
   description: ReactNode;
+  info?: ReactNode;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
@@ -81,7 +131,10 @@ function ToggleBlock({
       className="flex cursor-pointer select-none items-center justify-between gap-4 rounded-md border p-3 transition-colors hover:bg-accent/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <div className="min-w-0">
-        <Label className="cursor-pointer">{title}</Label>
+        <div className="flex items-center gap-1.5">
+          <Label className="cursor-pointer">{title}</Label>
+          {info ? <InfoTooltip label={title}>{info}</InfoTooltip> : null}
+        </div>
         <div className="text-sm text-muted-foreground">{description}</div>
       </div>
       {/* Presentational only — the whole block is the click target. */}
@@ -104,39 +157,6 @@ type McpDialogProps = {
   showError: (message: string, description?: string) => void;
 };
 
-function cloneSettings(settings: McpSettings): McpSettings {
-  return JSON.parse(JSON.stringify(settings)) as McpSettings;
-}
-
-function stripTransientMcpState(settings: McpSettings): McpSettings {
-  return {
-    ...settings,
-    servers: settings.servers.map((server) => {
-      const { lastError: _lastError, ...rest } = server;
-      return rest;
-    }),
-  };
-}
-
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, item]) => typeof item !== "undefined")
-      .sort(([left], [right]) => left.localeCompare(right));
-
-    return `{${entries
-      .map(([key, item]) => `${JSON.stringify(key)}:${stableStringify(item)}`)
-      .join(",")}}`;
-  }
-
-  return JSON.stringify(value);
-}
-
-function areEqual(left: unknown, right: unknown) {
-  return stableStringify(left) === stableStringify(right);
-}
-
 function recordToText(value?: Record<string, string>) {
   return Object.entries(value ?? {})
     .map(([key, rawValue]) => `${key}=${rawValue}`)
@@ -149,7 +169,9 @@ function textToRecord(value: string): Record<string, string> | undefined {
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => {
-      const separator = line.includes("=") ? line.indexOf("=") : line.indexOf(":");
+      const separator = line.includes("=")
+        ? line.indexOf("=")
+        : line.indexOf(":");
       if (separator <= 0) return undefined;
       const key = line.slice(0, separator).trim();
       const rawValue = line.slice(separator + 1).trim();
@@ -178,29 +200,6 @@ function sortTools(tools?: Record<string, McpToolConfig>) {
   );
 }
 
-function serverIsMeaningfullyEdited(
-  server: McpServerConfig | null,
-  base: McpServerConfig | null,
-) {
-  if (!server || !base) return false;
-  return !areEqual(
-    {
-      ...server,
-      id: "",
-      tools: server.tools ?? {},
-      lastError: undefined,
-      lastConnectedAt: undefined,
-    },
-    {
-      ...base,
-      id: "",
-      tools: base.tools ?? {},
-      lastError: undefined,
-      lastConnectedAt: undefined,
-    },
-  );
-}
-
 export const McpDialog = memo(function McpDialog({
   open,
   onOpenChange,
@@ -209,726 +208,635 @@ export const McpDialog = memo(function McpDialog({
   showSuccess,
   showError,
 }: McpDialogProps) {
-  const [draftSettings, setDraftSettings] = useState<McpSettings>(() =>
-    cloneSettings(mcpSettings),
-  );
-  const [selectedServerId, setSelectedServerId] = useState<string | undefined>(
-    mcpSettings.servers[0]?.id,
-  );
-  const [newServerDraft, setNewServerDraft] = useState<McpServerConfig | null>(
-    null,
-  );
-  const [newServerBase, setNewServerBase] = useState<McpServerConfig | null>(
-    null,
-  );
-  const [busyServerId, setBusyServerId] = useState<string | undefined>();
-  const [isSaving, setIsSaving] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    serverId: string;
-    ok: boolean;
-    title: string;
-    message: string;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const nextDraft = cloneSettings(mcpSettings);
-    setDraftSettings(nextDraft);
-    setSelectedServerId(nextDraft.servers[0]?.id);
-    setNewServerDraft(null);
-    setNewServerBase(null);
-    setBusyServerId(undefined);
-    setTestResult(null);
-  }, [open]);
-
-  useEffect(() => {
-    if (newServerDraft) return;
-    if (
-      selectedServerId &&
-      draftSettings.servers.some((server) => server.id === selectedServerId)
-    ) {
-      return;
-    }
-    setSelectedServerId(draftSettings.servers[0]?.id);
-  }, [draftSettings.servers, newServerDraft, selectedServerId]);
-
-  const selectedServer = useMemo(
-    () => draftSettings.servers.find((server) => server.id === selectedServerId),
-    [draftSettings.servers, selectedServerId],
-  );
-  const activeServer = newServerDraft ?? selectedServer ?? null;
-  const isNewServer = Boolean(newServerDraft);
-  const enabledServersCount = draftSettings.servers.filter(
-    (server) => server.enabled,
-  ).length;
-  const settingsChanged = !areEqual(draftSettings, mcpSettings);
-  const newServerChanged = serverIsMeaningfullyEdited(
-    newServerDraft,
-    newServerBase,
-  );
-  const hasChanges = settingsChanged || Boolean(newServerDraft);
-
-  function updateDraftSettings(updater: (settings: McpSettings) => McpSettings) {
-    setDraftSettings((current) => updater(current));
-  }
-
-  function updateServer(
-    serverId: string,
-    updater: (server: McpServerConfig) => McpServerConfig,
-  ) {
-    updateDraftSettings((settings) => ({
-      ...settings,
-      servers: settings.servers.map((server) =>
-        server.id === serverId ? updater(server) : server,
-      ),
-    }));
-  }
-
-  function updateActiveServer(patch: Partial<McpServerConfig>) {
-    if (!activeServer) return;
-
-    if (newServerDraft) {
-      setNewServerDraft({ ...newServerDraft, ...patch });
-      return;
-    }
-
-    updateServer(activeServer.id, (server) => ({ ...server, ...patch }));
-  }
-
-  function addServer() {
-    const server = createEmptyMcpServer();
-    setNewServerDraft(server);
-    setNewServerBase(server);
-    setSelectedServerId(undefined);
-  }
-
-  function discardNewServer() {
-    setNewServerDraft(null);
-    setNewServerBase(null);
-    setSelectedServerId(draftSettings.servers[0]?.id);
-  }
-
-  function deleteServer(serverId: string) {
-    const nextServers = draftSettings.servers.filter(
-      (server) => server.id !== serverId,
-    );
-    setDraftSettings({ ...draftSettings, servers: nextServers });
-    setSelectedServerId(nextServers[0]?.id);
-  }
-
-  async function saveCurrentDraft() {
-    setIsSaving(true);
-    try {
-      const savedServerId = newServerDraft?.id;
-      const nextSettings = stripTransientMcpState(
-        newServerDraft
-          ? {
-              ...draftSettings,
-              servers: [...draftSettings.servers, newServerDraft],
-            }
-          : draftSettings,
-      );
-
-      onMcpSettingsChange(cloneSettings(nextSettings));
-      setDraftSettings(cloneSettings(nextSettings));
-      if (savedServerId) setSelectedServerId(savedServerId);
-      setNewServerDraft(null);
-      setNewServerBase(null);
-      showSuccess("MCP settings saved");
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  function resetCurrentDraft() {
-    const nextDraft = cloneSettings(mcpSettings);
-    setDraftSettings(nextDraft);
-    setSelectedServerId(nextDraft.servers[0]?.id);
-    setNewServerDraft(null);
-    setNewServerBase(null);
-  }
-
-  async function testServer(server: McpServerConfig) {
-    const bridge = window.chatForgeMcp;
-    if (!bridge) {
-      showError("MCP bridge is unavailable.");
-      return;
-    }
-
-    setBusyServerId(server.id);
-    setTestResult(null);
-    try {
-      const result = await bridge.testServer({ server });
-      if (result.ok) {
-        showSuccess("MCP server connected", result.message);
-        setTestResult({
-          serverId: server.id,
-          ok: true,
-          title: "MCP server connected",
-          message: result.message,
-        });
-      } else {
-        showError("MCP server failed", result.message);
-        setTestResult({
-          serverId: server.id,
-          ok: false,
-          title: "MCP server failed",
-          message: result.message,
-        });
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      showError("MCP server failed", message);
-      setTestResult({
-        serverId: server.id,
-        ok: false,
-        title: "MCP server failed",
-        message,
-      });
-    } finally {
-      setBusyServerId(undefined);
-    }
-  }
-
-  async function refreshServer(server: McpServerConfig) {
-    const bridge = window.chatForgeMcp;
-    if (!bridge) {
-      showError("MCP bridge is unavailable.");
-      return;
-    }
-
-    const settingsForRefresh = newServerDraft
-      ? { ...draftSettings, servers: [...draftSettings.servers, newServerDraft] }
-      : draftSettings;
-
-    setBusyServerId(server.id);
-    try {
-      const result = await bridge.refreshTools({
-        settings: settingsForRefresh,
-        serverId: server.id,
-      });
-      const updatedServer = result.settings.servers.find(
-        (item) => item.id === server.id,
-      );
-      const toolCount = Object.keys(updatedServer?.tools ?? {}).length;
-
-      if (newServerDraft) {
-        setNewServerDraft(updatedServer ?? server);
-      } else {
-        setDraftSettings(result.settings);
-      }
-
-      if (updatedServer?.lastError) {
-        showError("MCP refresh failed", updatedServer.lastError);
-      } else {
-        showSuccess(
-          "MCP tools refreshed",
-          `${toolCount} tool${toolCount === 1 ? "" : "s"} found. Save to keep these changes.`,
-        );
-      }
-    } catch (error) {
-      showError(
-        "MCP refresh failed",
-        error instanceof Error ? error.message : String(error),
-      );
-    } finally {
-      setBusyServerId(undefined);
-    }
-  }
+  const {
+    activeServer,
+    busyServerId,
+    cancelDiscardUnsavedChanges,
+    confirmDiscardUnsavedChanges,
+    deleteActiveServer,
+    discardNewServer,
+    hasChanges,
+    isNewServer,
+    isSaving,
+    mcpEnabled,
+    refreshServer,
+    requestAddServer,
+    requestClose,
+    requestSelectServer,
+    resetCurrentDraft,
+    savedServers,
+    selectedServerId,
+    setTestResult,
+    testResult,
+    testServer,
+    unsavedChangesDialogOpen,
+    updateActiveServer,
+    updateActiveServerToolEnabled,
+    updateGlobalEnabled,
+    updateServerEnabled,
+    saveCurrentDraft,
+  } = useMcpSettingsForm({
+    open,
+    mcpSettings,
+    onOpenChange,
+    onMcpSettingsChange,
+    showSuccess,
+    showError,
+  });
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl"
-        onInteractOutside={(event) => {
-          // Toasts render outside the dialog (at the app root). Selecting or
-          // clicking toast text must not be treated as an outside click that
-          // closes the modal.
-          const target = event.target as HTMLElement | null;
-          if (target?.closest?.("[data-sonner-toaster]")) {
-            event.preventDefault();
-          }
-        }}
-      >
-        <DialogHeader className="shrink-0 border-b px-5 py-4 pr-12">
-          <DialogTitle>MCP</DialogTitle>
-          <DialogDescription>
-            Connect external MCP servers, discover their tools, and manage execution permissions from Tools settings.
-          </DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={requestClose}>
+        <DialogContent
+          className="flex h-[min(1000px,calc(100dvh-2rem))] max-h-none flex-col gap-0 overflow-hidden p-0 sm:max-w-6xl"
+          onInteractOutside={(event) => {
+            // Toasts render outside the dialog (at the app root). Selecting or
+            // clicking toast text must not be treated as an outside click that
+            // closes the modal.
+            const target = event.target as HTMLElement | null;
+            if (target?.closest?.("[data-sonner-toaster]")) {
+              event.preventDefault();
+            }
+          }}
+        >
+          <DialogHeader className="shrink-0 border-b p-4 pr-12">
+            <DialogTitle>MCP</DialogTitle>
+          </DialogHeader>
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
-          <aside className="min-h-0 overflow-y-auto border-b bg-card/70 p-3 md:border-b-0 md:border-r">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                MCP servers
-              </Label>
-              <span className="text-sm text-muted-foreground">
-                {enabledServersCount}/{draftSettings.servers.length} enabled
-              </span>
-            </div>
-
-            <div
-              role="button"
-              tabIndex={0}
-              className="mb-3 flex cursor-pointer items-center justify-between gap-3 border bg-background px-3 py-2 text-base outline-none"
-              onClick={() =>
-                setDraftSettings((current) => ({
-                  ...current,
-                  enabled: !current.enabled,
-                }))
-              }
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setDraftSettings((current) => ({
-                    ...current,
-                    enabled: !current.enabled,
-                  }));
-                }
-              }}
-            >
-              <span className="min-w-0">
-                <span className="block font-medium">Enable MCP globally</span>
-                <span className="block select-none text-sm leading-5 text-muted-foreground">
-                  Disabled globally hides all MCP tools from model context.
-                </span>
-              </span>
-              <Switch
-                checked={draftSettings.enabled}
-                onClick={(event) => event.stopPropagation()}
-                onCheckedChange={(checked) =>
-                  setDraftSettings((current) => ({ ...current, enabled: checked }))
-                }
-                className="shrink-0 cursor-pointer"
-              />
-            </div>
-
-            <div className="mb-3 flex gap-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="flex-1"
-                onClick={addServer}
-              >
-                <Plus className="size-4" />
-                Add server
-              </Button>
-            </div>
-
-            <div className="grid gap-1.5">
-              {draftSettings.servers.map((server) => {
-                const toolCount = Object.keys(server.tools ?? {}).length;
-                return (
-                  <div
-                    key={server.id}
-                    role="button"
-                    tabIndex={0}
-                    className={cn(
-                      "group flex min-w-0 cursor-pointer items-start gap-2 border px-2 py-2 outline-none",
-                      !newServerDraft && selectedServerId === server.id
-                        ? "border-primary/30 bg-accent text-accent-foreground"
-                        : "border-transparent hover:border-border hover:bg-muted/60",
-                    )}
-                    onClick={() => {
-                      setNewServerDraft(null);
-                      setNewServerBase(null);
-                      setSelectedServerId(server.id);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setNewServerDraft(null);
-                        setNewServerBase(null);
-                        setSelectedServerId(server.id);
-                      }
-                    }}
-                  >
-                    <Server className="mt-1 size-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-base leading-6">{server.name}</div>
-                      <div className="truncate text-sm text-muted-foreground">
-                        {server.transport} · {toolCount} tool{toolCount === 1 ? "" : "s"}
-                      </div>
-                    </div>
-                    <Switch
-                      checked={server.enabled}
-                      onClick={(event) => event.stopPropagation()}
-                      onCheckedChange={(checked) =>
-                        updateServer(server.id, (current) => ({
-                          ...current,
-                          enabled: checked,
-                        }))
-                      }
-                      className="mt-0.5 shrink-0 cursor-pointer"
-                      title={
-                        server.enabled
-                          ? "Disable MCP server"
-                          : "Enable MCP server"
-                      }
-                    />
-                  </div>
-                );
-              })}
-
-
-              {draftSettings.servers.length === 0 && (
-                <div className="border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
-                  No MCP servers configured.
-                </div>
-              )}
-            </div>
-          </aside>
-
-          <div className="min-h-0 flex flex-col overflow-hidden">
-            {activeServer ? (
-              <>
-                <div className="z-20 flex min-h-[4.25rem] shrink-0 items-center border-b bg-background px-5 py-3">
-                  <div className="flex w-full items-center justify-between gap-4">
-                    <div>
-                      <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
-                        {isNewServer ? "New MCP server" : "Edit MCP server"}
-                      </Label>
-                      <div className="mt-1 text-sm text-muted-foreground">
-                        Configure the server, test the connection, then refresh tools.
-                      </div>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          title="MCP server options"
-                        >
-                          <MoreHorizontal className="size-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-56">
-                        <DropdownMenuItem
-                          disabled={busyServerId === activeServer.id}
-                          onSelect={() => void testServer(activeServer)}
-                        >
-                          <Wand2 className="size-4" />
-                          Test connection
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={busyServerId === activeServer.id}
-                          onSelect={() => void refreshServer(activeServer)}
-                        >
-                          <RefreshCw className="size-4" />
-                          Refresh tools
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        {isNewServer ? (
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onSelect={discardNewServer}
-                          >
-                            <Trash2 className="size-4" />
-                            Discard
-                          </DropdownMenuItem>
-                        ) : (
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onSelect={() => deleteServer(activeServer.id)}
-                          >
-                            <Trash2 className="size-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        )}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
+            <aside className="flex min-h-0 flex-col border-b bg-card/70 md:border-b-0 md:border-r">
+              <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="mb-2 flex cursor-pointer items-center justify-between gap-3 border bg-background px-2 py-2 text-base outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+                  onClick={() => updateGlobalEnabled(!mcpEnabled)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      updateGlobalEnabled(!mcpEnabled);
+                    }
+                  }}
+                >
+                  <span className="min-w-0">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      Enable MCP globally
+                      <InfoTooltip label="Enable MCP globally">
+                        Master switch for MCP. When disabled, all server switches appear off, but their saved values are preserved.
+                      </InfoTooltip>
+                    </span>
+                    <span className="block select-none text-sm leading-5 text-muted-foreground">
+                      Disabled globally hides all MCP tools from model context.
+                    </span>
+                  </span>
+                  <Switch
+                    checked={mcpEnabled}
+                    onClick={(event) => event.stopPropagation()}
+                    onCheckedChange={updateGlobalEnabled}
+                    className="shrink-0 cursor-pointer"
+                  />
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">
-                  <div className="grid gap-5 pb-1">
-                    {testResult && testResult.serverId === activeServer.id && (
+                <div className="grid gap-1.5">
+                  {savedServers.map((server) => {
+                    const toolCount = Object.keys(server.tools ?? {}).length;
+                    const serverSwitchChecked = mcpEnabled
+                      ? server.enabled
+                      : false;
+
+                    return (
                       <div
-                        role={testResult.ok ? "status" : "alert"}
+                        key={server.id}
+                        role="button"
+                        tabIndex={0}
                         className={cn(
-                          "relative grid gap-1 rounded-md border px-3 py-2.5 pr-9 text-sm",
-                          testResult.ok
-                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                            : "border-destructive/40 bg-destructive/10 text-destructive",
+                          "group flex min-w-0 cursor-pointer select-none items-start gap-2 border px-2 py-2 outline-none transition-colors",
+                          !isNewServer && selectedServerId === server.id
+                            ? "border-primary/30 bg-accent text-accent-foreground"
+                            : "border-transparent hover:border-border hover:bg-muted/60",
                         )}
+                        onClick={() => {
+                          if (!isNewServer && selectedServerId === server.id) {
+                            if (mcpEnabled) {
+                              updateServerEnabled(server.id, !server.enabled);
+                            }
+                            return;
+                          }
+
+                          requestSelectServer(server.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            requestSelectServer(server.id);
+                          }
+                        }}
                       >
-                        <div className="flex items-center gap-2 font-medium">
-                          {testResult.ok ? (
-                            <CheckCircle2 className="size-4 shrink-0" />
-                          ) : (
-                            <AlertTriangle className="size-4 shrink-0" />
-                          )}
-                          {testResult.title}
+                        <Server className="mt-[5px] size-4 shrink-0 text-muted-foreground" />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-base leading-6">
+                            {server.name}
+                          </div>
+                          <div className="truncate text-sm text-muted-foreground">
+                            {server.transport} · {toolCount} tool
+                            {toolCount === 1 ? "" : "s"}
+                          </div>
                         </div>
-                        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/80 select-text">
-                          {testResult.message}
-                        </pre>
-                        <button
-                          type="button"
-                          onClick={() => setTestResult(null)}
-                          className="absolute right-2 top-2 rounded-sm p-1 opacity-70 transition-opacity hover:opacity-100"
-                          title="Dismiss"
-                          aria-label="Dismiss test result"
-                        >
-                          <X className="size-4" />
-                        </button>
+                        <Switch
+                          aria-label={`${server.name} MCP server`}
+                          checked={serverSwitchChecked}
+                          disabled={!mcpEnabled}
+                          onClick={(event) => event.stopPropagation()}
+                          onCheckedChange={(checked) =>
+                            updateServerEnabled(server.id, checked)
+                          }
+                          className="mt-0.5 shrink-0 cursor-pointer"
+                          title={
+                            server.enabled
+                              ? "Disable MCP server"
+                              : "Enable MCP server"
+                          }
+                        />
                       </div>
-                    )}
-                    <div className="grid gap-2">
-                      <Label htmlFor="mcp-server-name">Name</Label>
-                      <Input
-                        id="mcp-server-name"
-                        value={activeServer.name}
-                        onChange={(event) =>
-                          updateActiveServer({ name: event.target.value })
-                        }
-                        placeholder="github"
-                      />
+                    );
+                  })}
+
+                  {savedServers.length === 0 && (
+                    <div className="border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
+                      No MCP servers configured.
                     </div>
+                  )}
+                </div>
+              </div>
 
-                    <div className="grid gap-2">
-                      <Label>Transport</Label>
-                      <Select
-                        value={activeServer.transport}
-                        onValueChange={(transport) =>
-                          updateActiveServer({
-                            transport: transport === "http" ? "http" : "stdio",
-                          })
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="stdio">stdio</SelectItem>
-                          <SelectItem value="http">HTTP / Streamable HTTP</SelectItem>
-                        </SelectContent>
-                      </Select>
+              <div className="shrink-0 border-t bg-card/90 p-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="h-[36px] w-full"
+                  onClick={requestAddServer}
+                >
+                  <Plus className="size-4" />
+                  Add server
+                </Button>
+              </div>
+            </aside>
+
+            <div className="min-h-0 flex flex-col overflow-hidden">
+              {activeServer ? (
+                <>
+                  <div className="z-20 flex  shrink-0 items-center border-b bg-background px-4 py-2">
+                    <div className="flex w-full items-center justify-between gap-4">
+                      <div>
+                        <Label className="text-sm font-medium uppercase tracking-wide text-muted-foreground">
+                          {isNewServer ? "New MCP server" : "Edit MCP server"}
+                        </Label>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            title="MCP server options"
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem
+                            disabled={busyServerId === activeServer.id}
+                            onSelect={() => void testServer(activeServer)}
+                          >
+                            <Wand2 className="size-4" />
+                            Test connection
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={busyServerId === activeServer.id}
+                            onSelect={() => void refreshServer(activeServer)}
+                          >
+                            <RefreshCw className="size-4" />
+                            Refresh tools
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          {isNewServer ? (
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onSelect={discardNewServer}
+                            >
+                              <Trash2 className="size-4 text-destructive" />
+                              Discard
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onSelect={deleteActiveServer}
+                            >
+                              <Trash2 className="size-4 text-destructive" />
+                              Delete
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
+                  </div>
 
-                    {activeServer.transport === "stdio" ? (
-                      <>
-                        <div className="grid gap-2">
-                          <Label>Command</Label>
-                          <Input
-                            placeholder="npx"
-                            value={activeServer.command ?? ""}
-                            onChange={(event) =>
-                              updateActiveServer({ command: event.target.value })
-                            }
-                          />
-                        </div>
-
-                        <div className="grid gap-2">
-                          <Label>Args, one per line</Label>
-                          <Textarea
-                            className="min-h-24 font-mono text-xs"
-                            placeholder={
-                              "-y\n@modelcontextprotocol/server-filesystem\nC:/Users/..."
-                            }
-                            value={argsToText(activeServer.args)}
-                            onChange={(event) =>
-                              updateActiveServer({ args: textToArgs(event.target.value) })
-                            }
-                          />
-                        </div>
-
-                        <div className="grid gap-2">
-                          <Label>Working directory</Label>
-                          <Input
-                            value={activeServer.cwd ?? ""}
-                            onChange={(event) =>
-                              updateActiveServer({
-                                cwd: event.target.value || undefined,
-                              })
-                            }
-                          />
-                        </div>
-
-                        <div className="grid gap-2">
-                          <Label>Environment variables</Label>
-                          <Textarea
-                            className="min-h-20 font-mono text-xs"
-                            placeholder="API_KEY=..."
-                            value={recordToText(activeServer.env)}
-                            onChange={(event) =>
-                              updateActiveServer({
-                                env: textToRecord(event.target.value),
-                              })
-                            }
-                          />
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="grid gap-2">
-                          <Label>URL</Label>
-                          <Input
-                            placeholder="http://localhost:3000/mcp"
-                            value={activeServer.url ?? ""}
-                            onChange={(event) =>
-                              updateActiveServer({ url: event.target.value })
-                            }
-                          />
-                        </div>
-
-                        <div className="grid gap-2">
-                          <Label>Headers</Label>
-                          <Textarea
-                            className="min-h-20 font-mono text-xs"
-                            placeholder="Authorization=Bearer ..."
-                            value={recordToText(activeServer.headers)}
-                            onChange={(event) =>
-                              updateActiveServer({
-                                headers: textToRecord(event.target.value),
-                              })
-                            }
-                          />
-                        </div>
-                      </>
-                    )}
-
-                    <div className="grid gap-2">
-                      <Label>Timeout, ms</Label>
-                      <Input
-                        type="number"
-                        min={1000}
-                        value={activeServer.timeoutMs}
-                        onChange={(event) =>
-                          updateActiveServer({
-                            timeoutMs: Number(event.target.value) || 60_000,
-                          })
-                        }
-                      />
-                    </div>
-
-                    {activeServer.transport === "http" && (
-                      <ToggleBlock
-                        title="Skip TLS certificate verification"
-                        description={TLS_WARNING}
-                        checked={activeServer.insecureSkipTlsVerify ?? false}
-                        onCheckedChange={(checked) =>
-                          updateActiveServer({ insecureSkipTlsVerify: checked })
-                        }
-                      />
-                    )}
-
-                    <div className="border bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground">
-                      MCP tool execution permissions are configured in Tools settings.
-                      This dialog only controls server connection and discovery.
-                    </div>
-
-                    <div className="grid gap-3 pt-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <h4 className="text-sm font-semibold">Discovered tools</h4>
-                          <p className="text-sm text-muted-foreground">
-                            Discovered tools are read-only here. Configure Ask, Allow, or Deny in Tools settings.
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="shrink-0 gap-2"
-                          disabled={busyServerId === activeServer.id}
-                          onClick={() => void refreshServer(activeServer)}
-                          title="Load tools from this server"
-                        >
-                          <RefreshCw
+                  <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+                    <div className="grid gap-5 pb-1">
+                      {testResult &&
+                        testResult.serverId === activeServer.id && (
+                          <div
+                            role={testResult.ok ? "status" : "alert"}
                             className={cn(
-                              "size-4",
-                              busyServerId === activeServer.id && "animate-spin",
+                              "relative grid gap-1 rounded-md border px-3 py-2.5 pr-9 text-sm",
+                              testResult.ok
+                                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                                : "border-destructive/40 bg-destructive/10 text-destructive",
                             )}
-                          />
-                          Load tools
-                        </Button>
+                          >
+                            <div className="flex items-center gap-2 font-medium">
+                              {testResult.ok ? (
+                                <CheckCircle2 className="size-4 shrink-0" />
+                              ) : (
+                                <AlertTriangle className="size-4 shrink-0" />
+                              )}
+                              {testResult.title}
+                            </div>
+                            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/80 select-text">
+                              {testResult.message}
+                            </pre>
+                            <button
+                              type="button"
+                              onClick={() => setTestResult(null)}
+                              className="absolute right-2 top-2 rounded-sm p-1 opacity-70 transition-opacity hover:opacity-100"
+                              title="Dismiss"
+                              aria-label="Dismiss test result"
+                            >
+                              <X className="size-4" />
+                            </button>
+                          </div>
+                        )}
+                      <div className="grid gap-2">
+                        <FieldLabel
+                          htmlFor="mcp-server-name"
+                          label="Name"
+                          description="Display name used for this server and its generated MCP tool names. Must be unique, 1–48 characters, using letters, numbers, underscores, or hyphens."
+                        />
+                        <Input
+                          id="mcp-server-name"
+                          value={activeServer.name}
+                          onChange={(event) =>
+                            updateActiveServer({ name: event.target.value })
+                          }
+                          placeholder="github"
+                        />
+                        <div className="text-sm text-muted-foreground">
+                          Use 1–48 letters, numbers, underscores, or hyphens.
+                          Names are unique case-insensitively.
+                        </div>
                       </div>
 
                       <div className="grid gap-2">
-                        {sortTools(activeServer.tools).length === 0 ? (
-                          <div className="border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
-                            No tools discovered yet. Use Load tools after configuring the server.
+                        <FieldLabel
+                          label="Transport"
+                          description="Connection type. Stdio starts a local process; HTTP connects to a Streamable HTTP MCP endpoint."
+                        />
+                        <Select
+                          value={activeServer.transport}
+                          onValueChange={(transport) =>
+                            updateActiveServer({
+                              transport:
+                                transport === "http" ? "http" : "stdio",
+                            })
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="stdio">stdio</SelectItem>
+                            <SelectItem value="http">
+                              HTTP / Streamable HTTP
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {activeServer.transport === "stdio" ? (
+                        <>
+                          <div className="grid gap-2">
+                            <FieldLabel
+                              label="Command"
+                              description="Executable used to start a stdio MCP server, such as npx, node, python, uvx, or a full path."
+                            />
+                            <Input
+                              placeholder="npx"
+                              value={activeServer.command ?? ""}
+                              onChange={(event) =>
+                                updateActiveServer({
+                                  command: event.target.value,
+                                })
+                              }
+                            />
                           </div>
-                        ) : (
-                          sortTools(activeServer.tools).map((tool) => (
-                            <div
-                              key={tool.originalName}
-                              className="border bg-background px-3 py-2"
-                            >
-                              <div className="flex items-start justify-between gap-4">
-                                <div className="min-w-0">
-                                  <div className="truncate text-base leading-6">
-                                    {tool.originalName}
-                                  </div>
-                                  <div className="mt-0.5 break-all font-mono text-xs text-muted-foreground">
-                                    {tool.exposedName ||
-                                      createMcpExposedToolName(
+
+                          <div className="grid gap-2">
+                            <FieldLabel
+                              label="Args, one per line"
+                              description="Arguments passed to the command. Put each argument on a separate line."
+                            />
+                            <Textarea
+                              className="min-h-24 font-mono text-xs"
+                              placeholder={
+                                "-y\n@modelcontextprotocol/server-filesystem\nC:/Users/..."
+                              }
+                              value={argsToText(activeServer.args)}
+                              onChange={(event) =>
+                                updateActiveServer({
+                                  args: textToArgs(event.target.value),
+                                })
+                              }
+                            />
+                          </div>
+
+                          <div className="grid gap-2">
+                            <FieldLabel
+                              label="Working directory"
+                              description="Folder where the command runs. Use it when the server expects local config files or project-relative paths."
+                            />
+                            <Input
+                              value={activeServer.cwd ?? ""}
+                              onChange={(event) =>
+                                updateActiveServer({
+                                  cwd: event.target.value || undefined,
+                                })
+                              }
+                            />
+                          </div>
+
+                          <div className="grid gap-2">
+                            <FieldLabel
+                              label="Environment variables"
+                              description="KEY=value entries passed to the server process. Use for API keys, tokens, secrets, flags, or environment-based config."
+                            />
+                            <Textarea
+                              className="min-h-20 font-mono text-xs"
+                              placeholder="API_KEY=..."
+                              value={recordToText(activeServer.env)}
+                              onChange={(event) =>
+                                updateActiveServer({
+                                  env: textToRecord(event.target.value),
+                                })
+                              }
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="grid gap-2">
+                            <FieldLabel
+                              label="URL"
+                              description="Streamable HTTP MCP endpoint for this server, for example a local or remote /mcp URL."
+                            />
+                            <Input
+                              placeholder="http://localhost:3000/mcp"
+                              value={activeServer.url ?? ""}
+                              onChange={(event) =>
+                                updateActiveServer({ url: event.target.value })
+                              }
+                            />
+                          </div>
+
+                          <div className="grid gap-2">
+                            <FieldLabel
+                              label="Headers"
+                              description="HTTP headers sent to the server. Put one key=value entry per line, for example Authorization=Bearer ..."
+                            />
+                            <Textarea
+                              className="min-h-20 font-mono text-xs"
+                              placeholder="Authorization=Bearer ..."
+                              value={recordToText(activeServer.headers)}
+                              onChange={(event) =>
+                                updateActiveServer({
+                                  headers: textToRecord(event.target.value),
+                                })
+                              }
+                            />
+                          </div>
+                        </>
+                      )}
+
+                      <div className="grid gap-2">
+                        <FieldLabel
+                          label="Timeout, ms"
+                          description="Maximum time to wait for startup, tool discovery, and tool calls before failing."
+                        />
+                        <Input
+                          type="number"
+                          min={1000}
+                          value={activeServer.timeoutMs}
+                          onChange={(event) =>
+                            updateActiveServer({
+                              timeoutMs: Number(event.target.value) || 60_000,
+                            })
+                          }
+                        />
+                      </div>
+
+                      {activeServer.transport === "http" && (
+                        <ToggleBlock
+                          title="Skip TLS certificate verification"
+                          description={TLS_WARNING}
+                          info="Disables TLS certificate validation. Useful for trusted local or corporate-proxy servers only."
+                          checked={activeServer.insecureSkipTlsVerify ?? false}
+                          onCheckedChange={(checked) =>
+                            updateActiveServer({
+                              insecureSkipTlsVerify: checked,
+                            })
+                          }
+                        />
+                      )}
+
+                      <div className="grid gap-3 pt-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <h4 className="text-base font-medium leading-6">
+                                Discovered tools
+                              </h4>
+                              <InfoTooltip label="Discovered tools">
+                                Tools discovered from this server. Enable a
+                                tool here to show it in Tools settings and model
+                                context; permissions are configured in Tools
+                                settings.
+                              </InfoTooltip>
+                            </div>
+                            <p className="text-sm text-muted-foreground">
+                              Disabled tools stay hidden from Tools settings and
+                              model context.
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0 gap-2"
+                            disabled={busyServerId === activeServer.id}
+                            onClick={() => void refreshServer(activeServer)}
+                            title="Load tools from this server"
+                          >
+                            <RefreshCw
+                              className={cn(
+                                "size-4",
+                                busyServerId === activeServer.id &&
+                                  "animate-spin",
+                              )}
+                            />
+                            Load tools
+                          </Button>
+                        </div>
+
+                        {sortTools(activeServer.tools).length > 0 ? (
+                          <div className="border bg-muted/20 px-3 py-2 text-sm leading-5 text-muted-foreground">
+                            Tool switches here control whether MCP tools are
+                            visible in Tools settings and model context. Ask,
+                            Allow, and Deny are still configured in Tools
+                            settings after a tool is enabled.
+                          </div>
+                        ) : null}
+
+                        <div className="grid gap-2">
+                          {sortTools(activeServer.tools).length === 0 ? (
+                            <div className="border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
+                              No tools discovered yet. Use Load tools after
+                              configuring the server.
+                            </div>
+                          ) : (
+                            sortTools(activeServer.tools).map((tool) => (
+                              <div
+                                key={tool.originalName}
+                                role="button"
+                                aria-pressed={tool.enabled}
+                                tabIndex={0}
+                                className="cursor-pointer select-none border bg-background px-3 py-2 outline-none transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring"
+                                onClick={() => {
+                                  updateActiveServerToolEnabled(
+                                    tool.originalName,
+                                    !tool.enabled,
+                                  );
+                                }}
+                                onKeyDown={(event) => {
+                                  if (
+                                    event.key === "Enter" ||
+                                    event.key === " "
+                                  ) {
+                                    event.preventDefault();
+                                    updateActiveServerToolEnabled(
+                                      tool.originalName,
+                                      !tool.enabled,
+                                    );
+                                  }
+                                }}
+                              >
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="min-w-0">
+                                    <div className="truncate text-base font-medium leading-6">
+                                      {tool.originalName}
+                                    </div>
+                                    <div className="mt-0.5 break-all font-mono text-xs font-medium text-muted-foreground">
+                                      {createMcpExposedToolName(
                                         activeServer.name,
                                         tool.originalName,
                                       )}
-                                  </div>
-                                  {tool.description && (
-                                    <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                                      {tool.description}
                                     </div>
-                                  )}
-                                </div>
-                                <div className="shrink-0 border bg-muted/30 px-2 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                                  Permission in Tools
+                                    {tool.description && (
+                                      <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                                        {tool.description}
+                                      </div>
+                                    )}
+                                  </div>
+                                  <div className="flex shrink-0 items-center gap-2 pt-0.5">
+                                    <Switch
+                                      id={`mcp-tool-${activeServer.id}-${tool.originalName}`}
+                                      checked={tool.enabled}
+                                      onClick={(event) =>
+                                        event.stopPropagation()
+                                      }
+                                      onCheckedChange={(checked) =>
+                                        updateActiveServerToolEnabled(
+                                          tool.originalName,
+                                          checked,
+                                        )
+                                      }
+                                      className="shrink-0 cursor-pointer"
+                                    />
+                                  </div>
                                 </div>
                               </div>
-                            </div>
-                          ))
-                        )}
+                            ))
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
 
-              </>
-            ) : (
-              <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-muted-foreground">
-                <div className="grid max-w-sm gap-2">
-                  <Server className="mx-auto size-8 opacity-50" />
-                  <div className="text-lg font-medium text-foreground">
-                    No MCP server selected
+                  <DialogFooter className="shrink-0 items-center border-t bg-background px-4 py-2 sm:justify-between">
+                    <div
+                      className="text-sm text-muted-foreground"
+                      aria-live="polite"
+                    >
+                      {hasChanges ? "Unsaved changes" : null}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={resetCurrentDraft}
+                        disabled={isSaving || (!isNewServer && !hasChanges)}
+                      >
+                        {isNewServer ? "Cancel" : "Reset"}
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => void saveCurrentDraft()}
+                        disabled={!hasChanges || isSaving}
+                      >
+                        {isSaving
+                          ? isNewServer
+                            ? "Creating..."
+                            : "Saving..."
+                          : isNewServer
+                            ? "Create"
+                            : "Save"}
+                      </Button>
+                    </div>
+                  </DialogFooter>
+                </>
+              ) : (
+                <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center text-muted-foreground">
+                  <div className="grid max-w-sm gap-2">
+                    <Server className="mx-auto size-8 opacity-50" />
+                    <div className="text-lg font-medium text-foreground">
+                      No MCP server selected
+                    </div>
+                    <p className="text-base leading-6">
+                      Create a server or select one from the list to edit its
+                      connection settings.
+                    </p>
                   </div>
-                  <p className="text-base leading-6">
-                    Create a server or select one from the list to edit its connection settings.
-                  </p>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
+        </DialogContent>
+      </Dialog>
 
-        <DialogFooter className="shrink-0 items-center border-t bg-background px-5 py-4 sm:justify-between">
-          <div className="text-sm text-muted-foreground" aria-live="polite">
-            {hasChanges ? "Unsaved changes" : null}
-          </div>
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={resetCurrentDraft}
-              disabled={!hasChanges || isSaving}
-            >
-              Reset
-            </Button>
-            <Button
-              type="button"
-              onClick={() => void saveCurrentDraft()}
-              disabled={!hasChanges || isSaving}
-            >
-              {isSaving ? "Saving..." : "Save"}
-            </Button>
-          </div>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <UnsavedChangesDialog
+        open={unsavedChangesDialogOpen}
+        onCancel={cancelDiscardUnsavedChanges}
+        onDiscard={confirmDiscardUnsavedChanges}
+      />
+    </>
   );
 });
