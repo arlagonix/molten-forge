@@ -227,6 +227,90 @@ export function combinePermissions(featurePermission: Permission, itemPermission
   return "allow";
 }
 
+function formatDiagnosticPermission(
+  permission: Permission | "global" | "custom" | undefined,
+) {
+  if (!permission) return "Global";
+  if (permission === "custom") return "Custom";
+  if (permission === "global") return "Global";
+  if (permission === "allow") return "Allow";
+  if (permission === "ask") return "Ask";
+  return "Deny";
+}
+
+export function createUnavailableToolCallMessage({
+  toolName,
+  toolsForRun,
+  availableToolsByName,
+  toolsSettings,
+  mode,
+  modeCapabilityContext,
+}: {
+  toolName: string;
+  toolsForRun: LoadedToolInfo[];
+  availableToolsByName: Map<string, LoadedToolInfo>;
+  toolsSettings: ToolsSettings;
+  mode?: LoadedModeInfo;
+  modeCapabilityContext?: ModeCapabilityContext;
+}) {
+  const isToolLoaded = availableToolsByName.has(toolName);
+  const isInToolsForRun = toolsForRun.some((tool) => tool.name === toolName);
+  const modePermissions = modeCapabilityContext
+    ? getModePermissionMaps(mode, modeCapabilityContext).toolPermissions
+    : undefined;
+  const modeMasterPermission = modePermissions?.[FEATURE_PERMISSION_KEY] ?? "custom";
+  const modeToolPermission = modePermissions?.[toolName];
+  const globalPermission = getEffectiveGlobalToolPermission(
+    toolName,
+    toolsSettings,
+  );
+  const effectivePermission = getEffectiveToolPermission({
+    toolName,
+    toolsSettings,
+    mode,
+    modeCapabilityContext,
+  });
+
+  const lines = [
+    `Error: Tool "${toolName}" is not available in this chat or mode.`,
+    "",
+    `Tool loaded: ${isToolLoaded ? "yes" : "no"}`,
+    `Included in this run: ${isInToolsForRun ? "yes" : "no"}`,
+  ];
+
+  if (mode) {
+    lines.push(`Mode: ${mode.name || mode.id}`);
+  }
+
+  lines.push(
+    `Global permission: ${formatDiagnosticPermission(globalPermission)}`,
+    `Mode tools master: ${formatDiagnosticPermission(modeMasterPermission)}`,
+    `Mode tool permission: ${formatDiagnosticPermission(modeToolPermission)}`,
+    `Effective permission: ${formatDiagnosticPermission(effectivePermission)}`,
+    "",
+  );
+
+  if (!isToolLoaded) {
+    lines.push(
+      "Possible reason: this MCP/custom tool was removed, disabled, renamed, or was not discovered before the request was sent.",
+    );
+  } else if (effectivePermission === "deny") {
+    lines.push(
+      "Possible reason: the tool is denied by global permissions, mode permissions, or the active mode's default capabilities.",
+    );
+  } else if (!isInToolsForRun) {
+    lines.push(
+      "Possible reason: the model used stale tool context, or the executable tool list changed after the request was built.",
+    );
+  } else {
+    lines.push(
+      "Possible reason: the tool call reached execution before the matching tool definition could be resolved.",
+    );
+  }
+
+  return lines.join("\n");
+}
+
 
 function normalizeWorkspaceRootPathForCompare(value: string) {
   return value.trim().replace(/[\\/]+$/, "").toLowerCase();

@@ -61,6 +61,7 @@ import {
   openToolsFolder,
   saveTool,
 } from "@/lib/ai-chat/storage";
+import { getEffectiveGlobalToolPermission } from "@/lib/ai-chat/request-builder";
 import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import type {
   FeaturePermission,
@@ -288,24 +289,11 @@ function getToolsMasterPermission(settings: ToolsSettings): FeaturePermission {
   return settings.toolsPermission ?? "custom";
 }
 
-function getToolPermission(
-  settings: ToolsSettings,
-  toolName: string,
-): Permission {
-  return (
-    settings.toolPermissions?.[toolName] ??
-    (toolName.startsWith("mcp_") ? "deny" : "ask")
-  );
-}
-
 function getDisplayedToolPermission(
   settings: ToolsSettings,
   toolName: string,
 ): Permission {
-  const masterPermission = getToolsMasterPermission(settings);
-  return masterPermission === "custom"
-    ? getToolPermission(settings, toolName)
-    : masterPermission;
+  return getEffectiveGlobalToolPermission(toolName, settings);
 }
 
 function PermissionSelect({

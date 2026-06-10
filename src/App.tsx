@@ -2582,7 +2582,9 @@ export default function Home() {
                   visualStreamingMessageIds={visualStreamingMessageIds}
                   collapsedToolStepIds={collapsedToolStepIds}
                   collapsedThinkingStepIds={collapsedThinkingStepIds}
-                  thinkingAutoCollapse={appSettings.thinkingAutoCollapse ?? false}
+                  thinkingAutoCollapse={
+                    appSettings.thinkingAutoCollapse ?? true
+                  }
                   toolDisplayKey={toolDisplayKey}
                   skillDisplayKey={skillDisplayKey}
                   agentDisplayKey={agentDisplayKey}
@@ -2765,7 +2767,7 @@ export default function Home() {
         onOpenChange={setSettingsOpen}
         chatTitleGenerationMode={appSettings.chatTitleGenerationMode}
         appFontFamily={appSettings.fontFamily}
-        thinkingAutoCollapse={appSettings.thinkingAutoCollapse ?? false}
+        thinkingAutoCollapse={appSettings.thinkingAutoCollapse ?? true}
         theme={theme}
         resolvedTheme={resolvedTheme}
         onToggleAiTitleGeneration={(checked) =>

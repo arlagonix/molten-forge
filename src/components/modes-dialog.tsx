@@ -39,12 +39,16 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  DEFAULT_PERMISSION,
   FEATURE_PERMISSION_KEY,
   getBuiltInModeDefaults,
   normalizeModePermissionMap,
   normalizeModesState,
 } from "@/lib/ai-chat/modes";
+import {
+  getEffectiveGlobalAgentPermission,
+  getEffectiveGlobalSkillPermission,
+  getEffectiveGlobalToolPermission,
+} from "@/lib/ai-chat/request-builder";
 import type {
   AgentsSettings,
   LoadedAgentInfo,
@@ -214,39 +218,6 @@ function hasDraftChanges(
     );
   }
   return JSON.stringify(current) !== JSON.stringify(saved);
-}
-
-function getToolGlobalPermission(
-  settings: ToolsSettings,
-  name: string,
-): Permission {
-  const masterPermission = settings.toolsPermission ?? "custom";
-  if (masterPermission !== "custom") return masterPermission;
-  return settings.toolPermissions?.[name] ?? DEFAULT_PERMISSION;
-}
-
-function getSkillGlobalPermission(
-  settings: SkillsSettings,
-  name: string,
-): Permission {
-  const masterPermission = settings.skillsPermission ?? "custom";
-  if (masterPermission !== "custom") return masterPermission;
-  return (
-    settings.skillPermissions?.[name] ??
-    (settings.enabled === false ? "deny" : DEFAULT_PERMISSION)
-  );
-}
-
-function getAgentGlobalPermission(
-  settings: AgentsSettings,
-  name: string,
-): Permission {
-  const masterPermission = settings.agentsPermission ?? "custom";
-  if (masterPermission !== "custom") return masterPermission;
-  return (
-    settings.agentPermissions?.[name] ??
-    (settings.enabled === false ? "deny" : DEFAULT_PERMISSION)
-  );
 }
 
 function PermissionSelect({
@@ -878,7 +849,7 @@ export const ModesDialog = memo(function ModesDialog({
                         items={toolItems}
                         permissions={modeDraft.toolPermissions}
                         globalPermissionFor={(name) =>
-                          getToolGlobalPermission(toolsSettings, name)
+                          getEffectiveGlobalToolPermission(name, toolsSettings)
                         }
                         modeName={modeDraft.name || "Mode"}
                         onChange={(name, permission) =>
@@ -897,7 +868,7 @@ export const ModesDialog = memo(function ModesDialog({
                         items={skillItems}
                         permissions={modeDraft.skillPermissions}
                         globalPermissionFor={(name) =>
-                          getSkillGlobalPermission(skillsSettings, name)
+                          getEffectiveGlobalSkillPermission(name, skillsSettings)
                         }
                         modeName={modeDraft.name || "Mode"}
                         onChange={(name, permission) =>
@@ -916,7 +887,7 @@ export const ModesDialog = memo(function ModesDialog({
                         items={agentItems}
                         permissions={modeDraft.agentPermissions}
                         globalPermissionFor={(name) =>
-                          getAgentGlobalPermission(agentsSettings, name)
+                          getEffectiveGlobalAgentPermission(name, agentsSettings)
                         }
                         modeName={modeDraft.name || "Mode"}
                         onChange={(name, permission) =>

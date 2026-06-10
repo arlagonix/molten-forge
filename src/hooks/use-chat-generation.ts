@@ -62,6 +62,7 @@ import {
 } from "@/lib/ai-chat/generation-metadata";
 import {
   buildSystemPromptWithActiveSkills,
+  createUnavailableToolCallMessage,
   getEnabledAgentsForChat,
   getEnabledSkillsForChat,
   getEffectiveWorkspaceRoots,
@@ -1319,6 +1320,21 @@ export function useChatGeneration({
     return chatsRef.current.find((chat) => chat.id === chatId);
   }
 
+  function createUnavailableToolMessageForChat(
+    chatId: string,
+    toolName: string,
+    toolsForRun: LoadedToolInfo[],
+  ) {
+    const chat = getCurrentChatSnapshot(chatId);
+    return createUnavailableToolCallMessage({
+      toolName,
+      toolsForRun,
+      availableToolsByName,
+      toolsSettings,
+      mode: chat ? getModeForChat(chat) : undefined,
+      modeCapabilityContext,
+    });
+  }
 
   function mergeToolsByName(...toolLists: LoadedToolInfo[][]) {
     const byName = new Map<string, LoadedToolInfo>();
@@ -2489,6 +2505,11 @@ export function useChatGeneration({
                 activeSkillNames: currentAgentActiveSkillNames,
                 workspaceRoots: childWorkspaceRoots,
                 tool: childTool,
+                unavailableToolMessage: createUnavailableToolMessageForChat(
+                  chatId,
+                  childToolCall.function.name,
+                  currentAgentToolsForRun,
+                ),
               });
               recordAgentApprovalStepResult(toolResult);
               recordAgentToolStepResult(toolResult);
@@ -2508,6 +2529,11 @@ export function useChatGeneration({
               workspaceRoots: childWorkspaceRoots,
               fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
               tool: childTool,
+              unavailableToolMessage: createUnavailableToolMessageForChat(
+                chatId,
+                childToolCall.function.name,
+                currentAgentToolsForRun,
+              ),
             });
             recordAgentToolStepResult(toolResult);
             return toolResult;
@@ -3497,6 +3523,11 @@ export function useChatGeneration({
                   fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
                   tool: currentToolsForRun.find(
                     (candidate) => candidate.name === toolCall.function.name,
+                  ),
+                  unavailableToolMessage: createUnavailableToolMessageForChat(
+                    chatId,
+                    toolCall.function.name,
+                    currentToolsForRun,
                   ),
                 });
 

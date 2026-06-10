@@ -1,4 +1,12 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell, type OpenDialogOptions } from "electron";
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  shell,
+  type OpenDialogOptions,
+} from "electron";
 import Seven from "node-7z";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -14,21 +22,29 @@ import {
   ATTACHMENT_LIMITS,
   estimateAttachmentTokens,
 } from "../src/lib/ai-chat/attachment-limits";
-import { BASH_TOOL_NAME, isFileToolName } from "../src/lib/ai-chat/file-tool-names";
-import type { AttachmentKind, ChatAttachment, ChatFolder, ChatWorkspaceRoot } from "../src/lib/ai-chat/types";
+import {
+  BASH_TOOL_NAME,
+  isFileToolName,
+} from "../src/lib/ai-chat/file-tool-names";
+import type {
+  AttachmentKind,
+  ChatAttachment,
+  ChatFolder,
+  ChatWorkspaceRoot,
+} from "../src/lib/ai-chat/types";
 import {
   runChatCompletion,
   streamChatCompletion,
   type AdapterStreamEvent,
 } from "./ai-sdk-client";
 import {
-  buildLoadedMcpTools,
   executeMcpTool,
   normalizeMcpSettings,
   refreshMcpTools,
   testMcpServer,
   type McpSettings,
 } from "./mcp-client";
+import { executePiTool } from "./pi-tools";
 import {
   getErrorMessage,
   isPlainObject,
@@ -38,7 +54,6 @@ import {
   type JsonRecord,
   type ToolExecutionContext,
 } from "./tool-utils";
-import { executePiTool } from "./pi-tools";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
@@ -56,7 +71,9 @@ function trustSystemCertificates() {
       typeof tls.getCACertificates !== "function" ||
       typeof tls.setDefaultCACertificates !== "function"
     ) {
-      console.warn("[tls] system CA APIs unavailable; skipping system CA trust");
+      console.warn(
+        "[tls] system CA APIs unavailable; skipping system CA trust",
+      );
       return;
     }
     const system = tls.getCACertificates("system");
@@ -539,18 +556,33 @@ function readBooleanSetting(value: unknown, fallback: boolean) {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function normalizePermission(value: unknown, fallback: Permission = "ask"): Permission {
-  return value === "allow" || value === "ask" || value === "deny" ? value : fallback;
+function normalizePermission(
+  value: unknown,
+  fallback: Permission = "ask",
+): Permission {
+  return value === "allow" || value === "ask" || value === "deny"
+    ? value
+    : fallback;
 }
 
-function normalizeFeaturePermission(value: unknown, fallback: FeaturePermission = "custom"): FeaturePermission {
-  return value === "custom" || value === "allow" || value === "ask" || value === "deny" ? value : fallback;
+function normalizeFeaturePermission(
+  value: unknown,
+  fallback: FeaturePermission = "custom",
+): FeaturePermission {
+  return value === "custom" ||
+    value === "allow" ||
+    value === "ask" ||
+    value === "deny"
+    ? value
+    : fallback;
 }
 
 function normalizePermissionMap(value: unknown): Record<string, Permission> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const result: Record<string, Permission> = {};
-  for (const [name, permission] of Object.entries(value as Record<string, unknown>)) {
+  for (const [name, permission] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
     const trimmedName = name.trim();
     if (!trimmedName) continue;
     result[trimmedName] = normalizePermission(permission);
@@ -558,7 +590,11 @@ function normalizePermissionMap(value: unknown): Record<string, Permission> {
   return result;
 }
 
-function legacyToolPermission(enabled: unknown, autoApproved: unknown, fallbackEnabled = true): Permission {
+function legacyToolPermission(
+  enabled: unknown,
+  autoApproved: unknown,
+  fallbackEnabled = true,
+): Permission {
   const isEnabled = typeof enabled === "boolean" ? enabled : fallbackEnabled;
   if (!isEnabled) return "deny";
   return autoApproved === true ? "allow" : "ask";
@@ -566,18 +602,32 @@ function legacyToolPermission(enabled: unknown, autoApproved: unknown, fallbackE
 
 const MAX_BUILT_IN_TOOL_TIMEOUT_MS = 10 * 60_000;
 
-function normalizeBuiltInToolSettings(value: unknown): ToolsSettings["builtInToolSettings"] {
+function normalizeBuiltInToolSettings(
+  value: unknown,
+): ToolsSettings["builtInToolSettings"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const result: NonNullable<ToolsSettings["builtInToolSettings"]> = {};
-  for (const [name, rawSettings] of Object.entries(value as Record<string, unknown>)) {
-    if (!name.trim() || !rawSettings || typeof rawSettings !== "object" || Array.isArray(rawSettings)) continue;
+  for (const [name, rawSettings] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (
+      !name.trim() ||
+      !rawSettings ||
+      typeof rawSettings !== "object" ||
+      Array.isArray(rawSettings)
+    )
+      continue;
     const source = rawSettings as Record<string, unknown>;
     const customDescription = safeString(source.customDescription);
-    const timeoutMs = typeof source.timeoutMs === "number" && Number.isFinite(source.timeoutMs) && source.timeoutMs > 0
-      ? Math.min(Math.round(source.timeoutMs), MAX_BUILT_IN_TOOL_TIMEOUT_MS)
-      : undefined;
+    const timeoutMs =
+      typeof source.timeoutMs === "number" &&
+      Number.isFinite(source.timeoutMs) &&
+      source.timeoutMs > 0
+        ? Math.min(Math.round(source.timeoutMs), MAX_BUILT_IN_TOOL_TIMEOUT_MS)
+        : undefined;
     result[name] = {
-      descriptionMode: source.descriptionMode === "custom" ? "custom" : "default",
+      descriptionMode:
+        source.descriptionMode === "custom" ? "custom" : "default",
       customDescription,
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     };
@@ -589,10 +639,12 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
   if (!isPlainObject(value)) return DEFAULT_TOOLS_SETTINGS;
 
   const legacyChecklistWriteEnabled = value.checklistWriteEnabled;
-  const permissionModelVersion = value.permissionModelVersion === 2 ? 2 : undefined;
-  const toolsPermission = permissionModelVersion === 2
-    ? normalizeFeaturePermission(value.toolsPermission, "custom")
-    : "custom";
+  const permissionModelVersion =
+    value.permissionModelVersion === 2 ? 2 : undefined;
+  const toolsPermission =
+    permissionModelVersion === 2
+      ? normalizeFeaturePermission(value.toolsPermission, "custom")
+      : "custom";
 
   const readEnabled = value.readEnabled ?? value.fileReadEnabled;
   const bashEnabled = value.bashEnabled ?? value.terminalExecEnabled;
@@ -614,15 +666,24 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
     web_fetch: legacyToolPermission(value.webFetchEnabled, false, false),
     read: legacyToolPermission(readEnabled, value.readAutoApproveEnabled, true),
     bash: legacyToolPermission(bashEnabled, value.bashAutoApproveEnabled, true),
-    edit: legacyToolPermission(value.editEnabled ?? value.fileReplaceTextEnabled, value.editAutoApproveEnabled ?? value.fileReplaceTextAutoApproveEnabled, true),
-    write: legacyToolPermission(value.writeEnabled ?? value.fileCreateEnabled, value.writeAutoApproveEnabled ?? value.fileCreateAutoApproveEnabled, true),
+    edit: legacyToolPermission(
+      value.editEnabled ?? value.fileReplaceTextEnabled,
+      value.editAutoApproveEnabled ?? value.fileReplaceTextAutoApproveEnabled,
+      true,
+    ),
+    write: legacyToolPermission(
+      value.writeEnabled ?? value.fileCreateEnabled,
+      value.writeAutoApproveEnabled ?? value.fileCreateAutoApproveEnabled,
+      true,
+    ),
     call_agent: "ask",
     ...permissionOverrides,
   };
 
-  const toolsEnabled = permissionModelVersion === 2
-    ? toolsPermission !== "deny"
-    : readBooleanSetting(value.enabled, true);
+  const toolsEnabled =
+    permissionModelVersion === 2
+      ? toolsPermission !== "deny"
+      : readBooleanSetting(value.enabled, true);
 
   return {
     enabled: toolsEnabled,
@@ -640,7 +701,9 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
     writeAutoApproveEnabled: toolPermissions.write === "allow",
     toolsPermission,
     toolPermissions,
-    builtInToolSettings: normalizeBuiltInToolSettings(value.builtInToolSettings),
+    builtInToolSettings: normalizeBuiltInToolSettings(
+      value.builtInToolSettings,
+    ),
     permissionModelVersion: 2,
   };
 }
@@ -664,10 +727,13 @@ function normalizeAgentsSettings(value: unknown): AgentsSettings {
 function normalizeChatFolderWorkspaceRoots(
   value: unknown,
 ): ChatWorkspaceRoot[] | undefined {
-  const roots = normalizeWorkspaceRoots(value).map((root) => ({
-    ...root,
-    createdAt: root.createdAt ?? new Date().toISOString(),
-  } satisfies ChatWorkspaceRoot));
+  const roots = normalizeWorkspaceRoots(value).map(
+    (root) =>
+      ({
+        ...root,
+        createdAt: root.createdAt ?? new Date().toISOString(),
+      }) satisfies ChatWorkspaceRoot,
+  );
   return roots.length ? roots : undefined;
 }
 
@@ -681,12 +747,15 @@ function normalizeChatFolders(value: unknown): ChatFolder[] {
     .filter((folder): folder is JsonRecord => isPlainObject(folder))
     .map((folder) => {
       const rawId = safeString(folder.id).trim();
-      const id = rawId || `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const id =
+        rawId || `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       if (seenIds.has(id)) return undefined;
       seenIds.add(id);
 
       const createdAt = safeString(folder.createdAt).trim() || now;
-      const workspaceRoots = normalizeChatFolderWorkspaceRoots(folder.workspaceRoots);
+      const workspaceRoots = normalizeChatFolderWorkspaceRoots(
+        folder.workspaceRoots,
+      );
 
       return {
         id,
@@ -710,7 +779,7 @@ function normalizeAppSettings(value: unknown): AppSettings {
     thinkingAutoCollapse:
       typeof value.thinkingAutoCollapse === "boolean"
         ? value.thinkingAutoCollapse
-        : false,
+        : true,
   };
 }
 
@@ -1377,7 +1446,11 @@ async function readResponseTextWithLimit(
   return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
 }
 
-async function fetchWebUrl(startUrl: URL, signal?: AbortSignal, timeoutMs = WEB_FETCH_TIMEOUT_MS) {
+async function fetchWebUrl(
+  startUrl: URL,
+  signal?: AbortSignal,
+  timeoutMs = WEB_FETCH_TIMEOUT_MS,
+) {
   let currentUrl = new URL(startUrl.toString());
   currentUrl.hash = "";
 
@@ -1740,7 +1813,11 @@ async function executeToolManifest(
   throwIfAborted(context.signal);
 
   if (toolName === WEB_FETCH_TOOL_NAME) {
-    return executeWebFetchTool(args, context.signal, normalizeOptionalTimeoutMs(context.timeoutMs, WEB_FETCH_TIMEOUT_MS));
+    return executeWebFetchTool(
+      args,
+      context.signal,
+      normalizeOptionalTimeoutMs(context.timeoutMs, WEB_FETCH_TIMEOUT_MS),
+    );
   }
 
   if (isFileToolName(toolName)) {
@@ -1903,10 +1980,15 @@ function getStoragePaths() {
 const CHAT_WORKSPACE_ROOT_ID = "chat";
 
 function getChatWorkspacePath(chatId: string) {
-  return path.join(getStoragePaths().chatWorkspacesDir, sanitizeFileNamePart(chatId));
+  return path.join(
+    getStoragePaths().chatWorkspacesDir,
+    sanitizeFileNamePart(chatId),
+  );
 }
 
-async function ensureChatWorkspaceRoot(chatIdValue: unknown): Promise<ChatWorkspaceRoot> {
+async function ensureChatWorkspaceRoot(
+  chatIdValue: unknown,
+): Promise<ChatWorkspaceRoot> {
   const chatId = safeString(chatIdValue).trim();
   if (!chatId) throw new Error("Chat id is required.");
   const workspacePath = getChatWorkspacePath(chatId);
@@ -1936,7 +2018,10 @@ function normalizeManagedFilePath(storagePath: string) {
 
   for (const root of roots) {
     const relative = path.relative(root, resolvedStoragePath);
-    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+    if (
+      relative === "" ||
+      (!relative.startsWith("..") && !path.isAbsolute(relative))
+    ) {
       return resolvedStoragePath;
     }
   }
@@ -1950,7 +2035,8 @@ async function safeUniquePath(directory: string, fileName: string) {
   const ext = parsed.ext;
 
   for (let index = 0; index < 1000; index += 1) {
-    const candidateName = index === 0 ? `${base}${ext}` : `${base}-${index + 1}${ext}`;
+    const candidateName =
+      index === 0 ? `${base}${ext}` : `${base}-${index + 1}${ext}`;
     const candidatePath = path.join(directory, candidateName);
     try {
       await fs.lstat(candidatePath);
@@ -1967,13 +2053,17 @@ async function safeUniquePath(directory: string, fileName: string) {
   return path.join(directory, `${base}-${randomUUID()}${ext}`);
 }
 
-function stripInlineAttachmentContentForWorkspace(attachment: ChatAttachment): ChatAttachment {
+function stripInlineAttachmentContentForWorkspace(
+  attachment: ChatAttachment,
+): ChatAttachment {
   return {
     ...attachment,
     extractedText: undefined,
     truncated: undefined,
     tokenEstimate: attachment.kind === "image" ? attachment.tokenEstimate : 0,
-    children: attachment.children?.map(stripInlineAttachmentContentForWorkspace),
+    children: attachment.children?.map(
+      stripInlineAttachmentContentForWorkspace,
+    ),
   };
 }
 
@@ -1994,7 +2084,11 @@ async function copyAttachmentIntoChatWorkspace({
   const nextChildren = attachment.children?.length
     ? await Promise.all(
         attachment.children.map((child) =>
-          copyAttachmentIntoChatWorkspace({ chatId, messageId, attachment: child }),
+          copyAttachmentIntoChatWorkspace({
+            chatId,
+            messageId,
+            attachment: child,
+          }),
         ),
       )
     : baseAttachment.children;
@@ -2006,7 +2100,10 @@ async function copyAttachmentIntoChatWorkspace({
     };
   }
 
-  const sourceRelativeToWorkspace = path.relative(workspaceRoot.path, sourcePath);
+  const sourceRelativeToWorkspace = path.relative(
+    workspaceRoot.path,
+    sourcePath,
+  );
   const sourceAlreadyInChatWorkspace =
     sourceRelativeToWorkspace &&
     !sourceRelativeToWorkspace.startsWith("..") &&
@@ -2022,9 +2119,17 @@ async function copyAttachmentIntoChatWorkspace({
     };
   }
 
-  const originalDirectory = path.join(workspaceRoot.path, "incoming", sanitizeFileNamePart(messageId), "original");
+  const originalDirectory = path.join(
+    workspaceRoot.path,
+    "incoming",
+    sanitizeFileNamePart(messageId),
+    "original",
+  );
   await fs.mkdir(originalDirectory, { recursive: true });
-  const destinationPath = await safeUniquePath(originalDirectory, attachment.name);
+  const destinationPath = await safeUniquePath(
+    originalDirectory,
+    attachment.name,
+  );
 
   await fs.copyFile(sourcePath, destinationPath);
   const oldAttachmentPath = normalizeAttachmentStoragePath(sourcePath);
@@ -2036,7 +2141,10 @@ async function copyAttachmentIntoChatWorkspace({
     ...baseAttachment,
     storagePath: destinationPath,
     workspaceRootId: workspaceRoot.id,
-    workspacePath: path.relative(workspaceRoot.path, destinationPath).split(path.sep).join("/"),
+    workspacePath: path
+      .relative(workspaceRoot.path, destinationPath)
+      .split(path.sep)
+      .join("/"),
     ...(nextChildren ? { children: nextChildren } : {}),
   };
 }
@@ -2046,7 +2154,9 @@ function normalizeMaterializeAttachmentsRequest(request: unknown) {
   const chatId = safeString(value.chatId).trim();
   const messageId = safeString(value.messageId).trim();
   const attachments = Array.isArray(value.attachments)
-    ? (value.attachments.filter((item) => isPlainObject(item)) as unknown[] as ChatAttachment[])
+    ? (value.attachments.filter((item) =>
+        isPlainObject(item),
+      ) as unknown[] as ChatAttachment[])
     : [];
   if (!chatId) throw new Error("chatId is required.");
   if (!messageId) throw new Error("messageId is required.");
@@ -2056,11 +2166,16 @@ function normalizeMaterializeAttachmentsRequest(request: unknown) {
 async function exportManagedFile(request: unknown) {
   const value = isPlainObject(request) ? request : {};
   const storagePath = safeString(value.storagePath).trim();
-  const name = sanitizeFileNamePart(safeString(value.name).trim() || path.basename(storagePath));
-  const sourcePath = storagePath ? normalizeManagedFilePath(storagePath) : undefined;
+  const name = sanitizeFileNamePart(
+    safeString(value.name).trim() || path.basename(storagePath),
+  );
+  const sourcePath = storagePath
+    ? normalizeManagedFilePath(storagePath)
+    : undefined;
   if (!sourcePath) throw new Error("File is outside managed app storage.");
 
-  const browserWindow = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+  const browserWindow =
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
   const options = {
     title: "Download file",
     defaultPath: name,
@@ -2161,8 +2276,12 @@ async function cleanupChatMessageWorkspace(request: unknown) {
   const value = isPlainObject(request) ? request : {};
   const chatId = safeString(value.chatId).trim();
   const messageId = safeString(value.messageId).trim();
-  const generatedFileStoragePaths = Array.isArray(value.generatedFileStoragePaths)
-    ? value.generatedFileStoragePaths.filter((item): item is string => typeof item === "string")
+  const generatedFileStoragePaths = Array.isArray(
+    value.generatedFileStoragePaths,
+  )
+    ? value.generatedFileStoragePaths.filter(
+        (item): item is string => typeof item === "string",
+      )
     : [];
 
   if (!chatId || !messageId) return { deleted: 0 };
@@ -2177,7 +2296,10 @@ async function cleanupChatMessageWorkspace(request: unknown) {
     sanitizeFileNamePart(messageId),
   );
   const incomingRelative = path.relative(workspaceRoot, incomingMessagePath);
-  if (!incomingRelative.startsWith("..") && !path.isAbsolute(incomingRelative)) {
+  if (
+    !incomingRelative.startsWith("..") &&
+    !path.isAbsolute(incomingRelative)
+  ) {
     await fs.rm(incomingMessagePath, { recursive: true, force: true });
     deleted += 1;
   }
@@ -2652,7 +2774,8 @@ async function processAttachmentBuffer({
       kind: kind === "binary" ? "text" : kind,
       mimeType: mimeType ?? inferMimeType(name),
       sizeBytes: buffer.byteLength,
-      error: error instanceof Error ? error.message : "Failed to process attachment",
+      error:
+        error instanceof Error ? error.message : "Failed to process attachment",
     });
   }
 }
@@ -3860,7 +3983,9 @@ function buildSkillFromManifest(
 ): SkillDefinition {
   const { frontmatter, body } = parseSkillManifest(content);
   const manifestPath = path.join(folderPath, SKILL_MANIFEST_FILENAME);
-  const name = normalizeSkillName(frontmatter.name || path.basename(folderPath));
+  const name = normalizeSkillName(
+    frontmatter.name || path.basename(folderPath),
+  );
 
   return normalizeSkillDefinition({
     name,
@@ -3901,7 +4026,8 @@ function uniqueStrings(values: string[]) {
   const result: string[] = [];
   for (const value of values) {
     const normalized = path.resolve(value);
-    const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
+    const key =
+      process.platform === "win32" ? normalized.toLowerCase() : normalized;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(normalized);
@@ -3919,31 +4045,53 @@ async function tryReadSkillFolder(
   try {
     content = await fs.readFile(manifestPath, "utf8");
   } catch (error) {
-    const code = typeof error === "object" && error && "code" in error ? (error as { code?: string }).code : undefined;
+    const code =
+      typeof error === "object" && error && "code" in error
+        ? (error as { code?: string }).code
+        : undefined;
     if (code === "ENOENT" || code === "ENOTDIR") return undefined;
     throw error;
   }
 
-  const skill = buildSkillFromManifest(folderPath, content, sourceKind, sourcePath);
+  const skill = buildSkillFromManifest(
+    folderPath,
+    content,
+    sourceKind,
+    sourcePath,
+  );
   if (!skill.name) return undefined;
   return { skill, folderPath, manifestPath };
 }
 
-async function discoverSkillsInDir(searchDir: string, sourceKind: "global" | "workspace"): Promise<SkillFolderRecord[]> {
+async function discoverSkillsInDir(
+  searchDir: string,
+  sourceKind: "global" | "workspace",
+): Promise<SkillFolderRecord[]> {
   const records: SkillFolderRecord[] = [];
   try {
-    const rootRecord = await tryReadSkillFolder(searchDir, sourceKind, searchDir);
+    const rootRecord = await tryReadSkillFolder(
+      searchDir,
+      sourceKind,
+      searchDir,
+    );
     if (rootRecord) records.push(rootRecord);
 
     const entries = await fs.readdir(searchDir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
-      const record = await tryReadSkillFolder(path.join(searchDir, entry.name), sourceKind, searchDir);
+      const record = await tryReadSkillFolder(
+        path.join(searchDir, entry.name),
+        sourceKind,
+        searchDir,
+      );
       if (record) records.push(record);
     }
   } catch (error) {
-    const code = typeof error === "object" && error && "code" in error ? (error as { code?: string }).code : undefined;
+    const code =
+      typeof error === "object" && error && "code" in error
+        ? (error as { code?: string }).code
+        : undefined;
     if (code === "ENOENT" || code === "ENOTDIR") return [];
     console.error(`Failed to discover skills in ${searchDir}:`, error);
   }
@@ -3951,9 +4099,13 @@ async function discoverSkillsInDir(searchDir: string, sourceKind: "global" | "wo
 }
 
 async function loadJsonSkills(request?: unknown) {
-  const workspaceRoots = isPlainObject(request) ? request.workspaceRoots : undefined;
+  const workspaceRoots = isPlainObject(request)
+    ? request.workspaceRoots
+    : undefined;
   const globalDirs = uniqueStrings(getGlobalSkillSearchDirs());
-  const workspaceDirs = uniqueStrings(getWorkspaceSkillSearchDirs(workspaceRoots));
+  const workspaceDirs = uniqueStrings(
+    getWorkspaceSkillSearchDirs(workspaceRoots),
+  );
 
   const globalRecords: SkillFolderRecord[] = [];
   const workspaceRecords: SkillFolderRecord[] = [];
@@ -3961,10 +4113,14 @@ async function loadJsonSkills(request?: unknown) {
     globalRecords.push(...(await discoverSkillsInDir(searchDir, "global")));
   }
   for (const searchDir of workspaceDirs) {
-    workspaceRecords.push(...(await discoverSkillsInDir(searchDir, "workspace")));
+    workspaceRecords.push(
+      ...(await discoverSkillsInDir(searchDir, "workspace")),
+    );
   }
 
-  const workspaceSkillNames = new Set(workspaceRecords.map((record) => record.skill.name));
+  const workspaceSkillNames = new Set(
+    workspaceRecords.map((record) => record.skill.name),
+  );
   const allSkills = [
     ...globalRecords.map((record) => ({
       ...record.skill,
@@ -3975,7 +4131,9 @@ async function loadJsonSkills(request?: unknown) {
 
   return allSkills
     .sort((left, right) => {
-      const sourceOrder = (left.sourceKind === "global" ? 0 : 1) - (right.sourceKind === "global" ? 0 : 1);
+      const sourceOrder =
+        (left.sourceKind === "global" ? 0 : 1) -
+        (right.sourceKind === "global" ? 0 : 1);
       if (sourceOrder !== 0) return sourceOrder;
       return left.name.localeCompare(right.name);
     })
@@ -3987,23 +4145,40 @@ async function saveJsonSkill(..._args: unknown[]) {
 }
 
 async function deleteJsonSkill(..._args: unknown[]) {
-  throw new Error("Skills are readonly. Delete the skill folder from the filesystem.");
+  throw new Error(
+    "Skills are readonly. Delete the skill folder from the filesystem.",
+  );
 }
 
 function createEmptySkillImportResult(cancelled: boolean): SkillImportResult {
-  return { cancelled, imported: 0, updated: 0, skipped: [], invalid: [], renamed: [] };
+  return {
+    cancelled,
+    imported: 0,
+    updated: 0,
+    skipped: [],
+    invalid: [],
+    renamed: [],
+  };
 }
 
 async function importJsonSkillsFromFiles(): Promise<SkillImportResult> {
   return createEmptySkillImportResult(true);
 }
 
-async function exportJsonSkillToFile(..._args: unknown[]): Promise<SkillExportResult> {
-  throw new Error("Skills are readonly. Copy the skill folder from the filesystem.");
+async function exportJsonSkillToFile(
+  ..._args: unknown[]
+): Promise<SkillExportResult> {
+  throw new Error(
+    "Skills are readonly. Copy the skill folder from the filesystem.",
+  );
 }
 
-async function exportJsonSkillsToFolder(..._args: unknown[]): Promise<SkillExportResult> {
-  throw new Error("Skills are readonly. Copy the skill folders from the filesystem.");
+async function exportJsonSkillsToFolder(
+  ..._args: unknown[]
+): Promise<SkillExportResult> {
+  throw new Error(
+    "Skills are readonly. Copy the skill folders from the filesystem.",
+  );
 }
 
 async function openJsonSkillsFolder() {
@@ -4440,8 +4615,9 @@ ipcMain.on("attachments:clipboard-file-paths-sync", (event) => {
   event.returnValue = readClipboardFilePathsSync();
 });
 
-ipcMain.handle("attachments:cleanup-message-workspace", async (_event, request: unknown) =>
-  cleanupChatMessageWorkspace(request),
+ipcMain.handle(
+  "attachments:cleanup-message-workspace",
+  async (_event, request: unknown) => cleanupChatMessageWorkspace(request),
 );
 
 ipcMain.handle("attachments:pick", async () => {
@@ -4522,7 +4698,6 @@ ipcMain.handle(
   },
 );
 
-
 ipcMain.handle(
   "attachments:delete-unused",
   async (_event, request: unknown) => {
@@ -4556,7 +4731,10 @@ ipcMain.handle(
 
 ipcMain.handle("storage:providers-state:load", async () => {
   await initializeJsonStorageIfNeeded();
-  return readJsonFileWithRecovery<unknown>(getStoragePaths().providers, undefined);
+  return readJsonFileWithRecovery<unknown>(
+    getStoragePaths().providers,
+    undefined,
+  );
 });
 
 ipcMain.handle(
@@ -4704,7 +4882,9 @@ ipcMain.handle("storage:tools:export", async (_event, tools: unknown) =>
 
 ipcMain.handle("storage:tools:open-folder", async () => openJsonToolsFolder());
 
-ipcMain.handle("storage:skills:load", async (_event, request: unknown) => loadJsonSkills(request));
+ipcMain.handle("storage:skills:load", async (_event, request: unknown) =>
+  loadJsonSkills(request),
+);
 
 ipcMain.handle(
   "storage:skill:save",
@@ -4770,7 +4950,9 @@ ipcMain.handle("tools:execute-stream", async (event, request: unknown) => {
   try {
     const toolName = safeString(value.name).trim();
     if (toolName !== BASH_TOOL_NAME) {
-      throw new Error(`Streaming execution is not supported for tool: ${toolName}`);
+      throw new Error(
+        `Streaming execution is not supported for tool: ${toolName}`,
+      );
     }
 
     return await executePiTool(
@@ -4835,7 +5017,10 @@ ipcMain.handle("mcp:refresh-tools", async (_event, request: unknown) => {
 
 ipcMain.handle("mcp:test-server", async (_event, request: unknown) => {
   const value = isPlainObject(request) ? request : {};
-  const settings = normalizeMcpSettings({ enabled: true, servers: [value.server] });
+  const settings = normalizeMcpSettings({
+    enabled: true,
+    servers: [value.server],
+  });
   const server = settings.servers[0];
   if (!server) throw new Error("MCP server is required.");
   return testMcpServer(server);
@@ -4857,7 +5042,8 @@ ipcMain.handle("mcp:execute-tool", async (_event, request: unknown) => {
     const settingsFile = await readSettingsFile();
     const settings = normalizeMcpSettings(settingsFile.mcpSettings);
     const tool = isPlainObject(value.tool) ? value.tool : {};
-    const toolName = safeString(tool.name).trim() || safeString(value.name).trim();
+    const toolName =
+      safeString(tool.name).trim() || safeString(value.name).trim();
     if (!toolName) throw new Error("MCP tool name is required.");
 
     return await executeMcpTool({
@@ -5052,4 +5238,3 @@ app.on("activate", () => {
 });
 
 app.whenReady().then(createWindow);
-

@@ -1,19 +1,26 @@
-import { defaultGenerationSettings, defaultProvider } from "./provider-presets";
-import { normalizeModesState, serializeModesState, normalizeFeaturePermission, normalizePermissionMap } from "./modes";
 import { normalizeProviderForState, sortChatsByUpdatedAt } from "./chat-utils";
+import {
+  normalizeFeaturePermission,
+  normalizeModesState,
+  normalizePermissionMap,
+  serializeModesState,
+} from "./modes";
+import { defaultProvider } from "./provider-presets";
 import type {
-  AgentsSettings,
   AgentExportResult,
   AgentImportResult,
+  AgentsSettings,
   AppSettings,
   ChatFolder,
   ChatSession,
   ChatWorkspaceRoot,
+  FeaturePermission,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   McpSettings,
   ModesState,
+  PermissionMap,
   ProviderConfig,
   ProvidersState,
   SkillExportResult,
@@ -22,9 +29,6 @@ import type {
   ToolExportResult,
   ToolImportResult,
   ToolsSettings,
-  PermissionMap,
-  Permission,
-  FeaturePermission,
 } from "./types";
 
 const DB_NAME = "chat-forge";
@@ -100,8 +104,13 @@ type ChatForgeStorageApi = {
   exportTool: (tool: LoadedToolInfo) => Promise<ToolExportResult>;
   exportTools: (tools: LoadedToolInfo[]) => Promise<ToolExportResult>;
   openToolsFolder: () => Promise<void>;
-  loadSkills: (request?: { workspaceRoots?: ChatWorkspaceRoot[] }) => Promise<LoadedSkillInfo[]>;
-  saveSkill: (skill: LoadedSkillInfo, previousName?: string) => Promise<LoadedSkillInfo>;
+  loadSkills: (request?: {
+    workspaceRoots?: ChatWorkspaceRoot[];
+  }) => Promise<LoadedSkillInfo[]>;
+  saveSkill: (
+    skill: LoadedSkillInfo,
+    previousName?: string,
+  ) => Promise<LoadedSkillInfo>;
   deleteSkill: (skillName: string) => Promise<void>;
   importSkills: () => Promise<SkillImportResult>;
   exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
@@ -199,28 +208,49 @@ function normalizeProvidersState(value?: ProvidersState): ProvidersState {
   };
 }
 
-function legacyToolPermission(enabled: unknown, autoApproved: unknown, fallbackEnabled = true) {
+function legacyToolPermission(
+  enabled: unknown,
+  autoApproved: unknown,
+  fallbackEnabled = true,
+) {
   const isEnabled = typeof enabled === "boolean" ? enabled : fallbackEnabled;
   if (!isEnabled) return "deny" as const;
-  return autoApproved === true ? "allow" as const : "ask" as const;
+  return autoApproved === true ? ("allow" as const) : ("ask" as const);
 }
 
 const MAX_BUILT_IN_TOOL_TIMEOUT_MS = 10 * 60_000;
 
-function normalizeBuiltInToolSettings(value: unknown): ToolsSettings["builtInToolSettings"] {
+function normalizeBuiltInToolSettings(
+  value: unknown,
+): ToolsSettings["builtInToolSettings"] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
 
   const result: NonNullable<ToolsSettings["builtInToolSettings"]> = {};
-  for (const [name, rawSettings] of Object.entries(value as Record<string, unknown>)) {
-    if (!name.trim() || !rawSettings || typeof rawSettings !== "object" || Array.isArray(rawSettings)) continue;
+  for (const [name, rawSettings] of Object.entries(
+    value as Record<string, unknown>,
+  )) {
+    if (
+      !name.trim() ||
+      !rawSettings ||
+      typeof rawSettings !== "object" ||
+      Array.isArray(rawSettings)
+    )
+      continue;
     const source = rawSettings as Record<string, unknown>;
-    const customDescription = typeof source.customDescription === "string" ? source.customDescription : "";
-    const timeout = typeof source.timeoutMs === "number" && Number.isFinite(source.timeoutMs) && source.timeoutMs > 0
-      ? Math.min(Math.round(source.timeoutMs), MAX_BUILT_IN_TOOL_TIMEOUT_MS)
-      : undefined;
+    const customDescription =
+      typeof source.customDescription === "string"
+        ? source.customDescription
+        : "";
+    const timeout =
+      typeof source.timeoutMs === "number" &&
+      Number.isFinite(source.timeoutMs) &&
+      source.timeoutMs > 0
+        ? Math.min(Math.round(source.timeoutMs), MAX_BUILT_IN_TOOL_TIMEOUT_MS)
+        : undefined;
 
     result[name] = {
-      descriptionMode: source.descriptionMode === "custom" ? "custom" : "default",
+      descriptionMode:
+        source.descriptionMode === "custom" ? "custom" : "default",
       customDescription,
       ...(timeout !== undefined ? { timeoutMs: timeout } : {}),
     };
@@ -236,15 +266,24 @@ function normalizeToolsSettings(
     value as Partial<ToolsSettings> & { checklistWriteEnabled?: unknown }
   )?.checklistWriteEnabled;
   const legacy = value as Partial<ToolsSettings> & Record<string, unknown>;
-  const permissionOverrides = normalizePermissionMap((value as Record<string, unknown> | undefined)?.toolPermissions);
+  const permissionOverrides = normalizePermissionMap(
+    (value as Record<string, unknown> | undefined)?.toolPermissions,
+  );
   const readEnabled = value?.readEnabled ?? legacy.fileReadEnabled;
   const bashEnabled = value?.bashEnabled ?? legacy.terminalExecEnabled;
   const editEnabled = value?.editEnabled ?? legacy.fileReplaceTextEnabled;
   const writeEnabled = value?.writeEnabled ?? legacy.fileCreateEnabled;
-  const permissionModelVersion = (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2 ? 2 : undefined;
-  const toolsPermission: FeaturePermission = permissionModelVersion === 2
-    ? normalizeFeaturePermission((value as Record<string, unknown> | undefined)?.toolsPermission, "custom")
-    : "custom";
+  const permissionModelVersion =
+    (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2
+      ? 2
+      : undefined;
+  const toolsPermission: FeaturePermission =
+    permissionModelVersion === 2
+      ? normalizeFeaturePermission(
+          (value as Record<string, unknown> | undefined)?.toolsPermission,
+          "custom",
+        )
+      : "custom";
   const toolPermissions: PermissionMap = {
     ask_user: legacyToolPermission(value?.askUserEnabled, true, true),
     update_tasks: legacyToolPermission(
@@ -258,25 +297,44 @@ function normalizeToolsSettings(
     ),
     skill: legacyToolPermission(value?.loadSkillEnabled, false, true),
     web_fetch: legacyToolPermission(value?.webFetchEnabled, false, false),
-    read: legacyToolPermission(readEnabled, value?.readAutoApproveEnabled, true),
-    bash: legacyToolPermission(bashEnabled, value?.bashAutoApproveEnabled, true),
-    edit: legacyToolPermission(editEnabled, value?.editAutoApproveEnabled ?? legacy.fileReplaceTextAutoApproveEnabled, true),
-    write: legacyToolPermission(writeEnabled, value?.writeAutoApproveEnabled ?? legacy.fileCreateAutoApproveEnabled, true),
+    read: legacyToolPermission(
+      readEnabled,
+      value?.readAutoApproveEnabled,
+      true,
+    ),
+    bash: legacyToolPermission(
+      bashEnabled,
+      value?.bashAutoApproveEnabled,
+      true,
+    ),
+    edit: legacyToolPermission(
+      editEnabled,
+      value?.editAutoApproveEnabled ?? legacy.fileReplaceTextAutoApproveEnabled,
+      true,
+    ),
+    write: legacyToolPermission(
+      writeEnabled,
+      value?.writeAutoApproveEnabled ?? legacy.fileCreateAutoApproveEnabled,
+      true,
+    ),
     call_agent: "ask",
     ...permissionOverrides,
   };
 
-  const toolsEnabled = permissionModelVersion === 2
-    ? toolsPermission !== "deny"
-    : typeof value?.enabled === "boolean"
-      ? value.enabled
-      : true;
+  const toolsEnabled =
+    permissionModelVersion === 2
+      ? toolsPermission !== "deny"
+      : typeof value?.enabled === "boolean"
+        ? value.enabled
+        : true;
 
   return {
     enabled: toolsEnabled,
     toolsPermission,
     permissionModelVersion: 2,
-    builtInToolSettings: normalizeBuiltInToolSettings((value as Record<string, unknown> | undefined)?.builtInToolSettings),
+    builtInToolSettings: normalizeBuiltInToolSettings(
+      (value as Record<string, unknown> | undefined)?.builtInToolSettings,
+    ),
     askUserEnabled: toolPermissions.ask_user !== "deny",
     taskToolsEnabled: toolPermissions.update_tasks !== "deny",
     loadSkillEnabled: toolPermissions.skill !== "deny",
@@ -293,24 +351,33 @@ function normalizeToolsSettings(
   };
 }
 
-
 function normalizeSkillsSettings(
   value: Partial<SkillsSettings> | undefined,
 ): SkillsSettings {
-  const permissionModelVersion = (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2 ? 2 : undefined;
-  const skillsPermission: FeaturePermission = permissionModelVersion === 2
-    ? normalizeFeaturePermission((value as Record<string, unknown> | undefined)?.skillsPermission, "custom")
-    : "custom";
-  const skillsEnabled = permissionModelVersion === 2
-    ? skillsPermission !== "deny"
-    : typeof value?.enabled === "boolean"
-      ? value.enabled
-      : true;
+  const permissionModelVersion =
+    (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2
+      ? 2
+      : undefined;
+  const skillsPermission: FeaturePermission =
+    permissionModelVersion === 2
+      ? normalizeFeaturePermission(
+          (value as Record<string, unknown> | undefined)?.skillsPermission,
+          "custom",
+        )
+      : "custom";
+  const skillsEnabled =
+    permissionModelVersion === 2
+      ? skillsPermission !== "deny"
+      : typeof value?.enabled === "boolean"
+        ? value.enabled
+        : true;
 
   return {
     enabled: skillsEnabled,
     skillsPermission,
-    skillPermissions: normalizePermissionMap((value as Record<string, unknown> | undefined)?.skillPermissions),
+    skillPermissions: normalizePermissionMap(
+      (value as Record<string, unknown> | undefined)?.skillPermissions,
+    ),
     permissionModelVersion: 2,
   };
 }
@@ -332,21 +399,31 @@ function normalizeAgentsSettings(
     }
   }
 
-  const permissionModelVersion = (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2 ? 2 : undefined;
-  const agentsPermission: FeaturePermission = permissionModelVersion === 2
-    ? normalizeFeaturePermission((value as Record<string, unknown> | undefined)?.agentsPermission, "custom")
-    : "custom";
+  const permissionModelVersion =
+    (value as Record<string, unknown> | undefined)?.permissionModelVersion === 2
+      ? 2
+      : undefined;
+  const agentsPermission: FeaturePermission =
+    permissionModelVersion === 2
+      ? normalizeFeaturePermission(
+          (value as Record<string, unknown> | undefined)?.agentsPermission,
+          "custom",
+        )
+      : "custom";
 
-  const agentsEnabled = permissionModelVersion === 2
-    ? agentsPermission !== "deny"
-    : typeof value?.enabled === "boolean"
-      ? value.enabled
-      : true;
+  const agentsEnabled =
+    permissionModelVersion === 2
+      ? agentsPermission !== "deny"
+      : typeof value?.enabled === "boolean"
+        ? value.enabled
+        : true;
 
   return {
     enabled: agentsEnabled,
     agentsPermission,
-    agentPermissions: normalizePermissionMap((value as Record<string, unknown> | undefined)?.agentPermissions),
+    agentPermissions: normalizePermissionMap(
+      (value as Record<string, unknown> | undefined)?.agentPermissions,
+    ),
     builtInAgentMaxNestingDepths,
     permissionModelVersion: 2,
   };
@@ -362,9 +439,10 @@ function normalizeChatFolderWorkspaceRoots(
       Boolean(root && typeof root === "object" && !Array.isArray(root)),
     )
     .map((root) => {
-      const id = typeof root.id === "string" && root.id.trim()
-        ? root.id.trim()
-        : `workspace-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const id =
+        typeof root.id === "string" && root.id.trim()
+          ? root.id.trim()
+          : `workspace-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       const path = typeof root.path === "string" ? root.path.trim() : "";
       if (!path) return undefined;
 
@@ -384,7 +462,8 @@ function normalizeChatFolderWorkspaceRoots(
           typeof root.createdAt === "string" && root.createdAt.trim()
             ? root.createdAt
             : new Date().toISOString(),
-        automatic: typeof root.automatic === "boolean" ? root.automatic : undefined,
+        automatic:
+          typeof root.automatic === "boolean" ? root.automatic : undefined,
         kind,
       } satisfies ChatWorkspaceRoot;
     })
@@ -405,7 +484,8 @@ function normalizeChatFolders(value: unknown): ChatFolder[] {
     )
     .map((folder) => {
       const rawId = typeof folder.id === "string" ? folder.id.trim() : "";
-      const id = rawId || `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const id =
+        rawId || `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`;
       if (seenIds.has(id)) return undefined;
       seenIds.add(id);
 
@@ -438,63 +518,102 @@ export function normalizeAppSettings(
       value?.chatTitleGenerationMode === "ai" ? "ai" : "local",
     fontFamily: value?.fontFamily === "mono" ? "mono" : "sans",
     chatFolders: normalizeChatFolders(value?.chatFolders),
-    thinkingAutoCollapse:
-      value?.thinkingAutoCollapse ?? false,
+    thinkingAutoCollapse: value?.thinkingAutoCollapse ?? true,
   };
 }
 
-function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+function normalizeStringRecord(
+  value: unknown,
+): Record<string, string> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
 
   const entries = Object.entries(value)
-    .map(([key, rawValue]) => [key.trim(), typeof rawValue === "string" ? rawValue : ""] as const)
+    .map(
+      ([key, rawValue]) =>
+        [key.trim(), typeof rawValue === "string" ? rawValue : ""] as const,
+    )
     .filter(([key, rawValue]) => key && rawValue.length > 0);
 
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
-function normalizeMcpSettings(value: Partial<McpSettings> | undefined): McpSettings {
+function normalizeMcpSettings(
+  value: Partial<McpSettings> | undefined,
+): McpSettings {
   const servers = Array.isArray(value?.servers) ? value.servers : [];
 
   return {
     enabled: typeof value?.enabled === "boolean" ? value.enabled : true,
     servers: servers
-      .filter((server) => server && typeof server === "object" && !Array.isArray(server))
+      .filter(
+        (server) =>
+          server && typeof server === "object" && !Array.isArray(server),
+      )
       .map((server) => {
         const source = server as Record<string, unknown>;
-        const id = typeof source.id === "string" && source.id.trim()
-          ? source.id.trim()
-          : `mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const name = typeof source.name === "string" && source.name.trim()
-          ? source.name.trim()
-          : id;
+        const id =
+          typeof source.id === "string" && source.id.trim()
+            ? source.id.trim()
+            : `mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        const name =
+          typeof source.name === "string" && source.name.trim()
+            ? source.name.trim()
+            : id;
         const transport = source.transport === "http" ? "http" : "stdio";
-        const rawTools = source.tools && typeof source.tools === "object" && !Array.isArray(source.tools)
-          ? source.tools as Record<string, unknown>
-          : {};
+        const rawTools =
+          source.tools &&
+          typeof source.tools === "object" &&
+          !Array.isArray(source.tools)
+            ? (source.tools as Record<string, unknown>)
+            : {};
         const tools = Object.fromEntries(
           Object.entries(rawTools)
-            .filter(([, value]) => value && typeof value === "object" && !Array.isArray(value))
+            .filter(
+              ([, value]) =>
+                value && typeof value === "object" && !Array.isArray(value),
+            )
             .map(([toolName, value]) => {
               const rawTool = value as Record<string, unknown>;
-              const originalName = typeof rawTool.originalName === "string" && rawTool.originalName.trim()
-                ? rawTool.originalName.trim()
-                : toolName;
-              const exposedName = typeof rawTool.exposedName === "string" ? rawTool.exposedName.trim() : "";
-              const description = typeof rawTool.description === "string" ? rawTool.description : undefined;
-              const inputSchema = rawTool.inputSchema && typeof rawTool.inputSchema === "object" && !Array.isArray(rawTool.inputSchema)
-                ? rawTool.inputSchema as Record<string, unknown>
-                : undefined;
+              const originalName =
+                typeof rawTool.originalName === "string" &&
+                rawTool.originalName.trim()
+                  ? rawTool.originalName.trim()
+                  : toolName;
+              const exposedName =
+                typeof rawTool.exposedName === "string"
+                  ? rawTool.exposedName.trim()
+                  : "";
+              const description =
+                typeof rawTool.description === "string"
+                  ? rawTool.description
+                  : undefined;
+              const inputSchema =
+                rawTool.inputSchema &&
+                typeof rawTool.inputSchema === "object" &&
+                !Array.isArray(rawTool.inputSchema)
+                  ? (rawTool.inputSchema as Record<string, unknown>)
+                  : undefined;
 
-              return [originalName, {
+              return [
                 originalName,
-                exposedName,
-                enabled: typeof rawTool.enabled === "boolean" ? rawTool.enabled : false,
-                ...(description ? { description } : {}),
-                ...(inputSchema ? { inputSchema } : {}),
-                ...(typeof rawTool.requireApproval === "boolean" ? { requireApproval: rawTool.requireApproval } : {}),
-                ...(typeof rawTool.lastSeenAt === "string" ? { lastSeenAt: rawTool.lastSeenAt } : {}),
-              }];
+                {
+                  originalName,
+                  exposedName,
+                  enabled:
+                    typeof rawTool.enabled === "boolean"
+                      ? rawTool.enabled
+                      : false,
+                  ...(description ? { description } : {}),
+                  ...(inputSchema ? { inputSchema } : {}),
+                  ...(typeof rawTool.requireApproval === "boolean"
+                    ? { requireApproval: rawTool.requireApproval }
+                    : {}),
+                  ...(typeof rawTool.lastSeenAt === "string"
+                    ? { lastSeenAt: rawTool.lastSeenAt }
+                    : {}),
+                },
+              ];
             }),
         );
 
@@ -503,19 +622,34 @@ function normalizeMcpSettings(value: Partial<McpSettings> | undefined): McpSetti
           name,
           enabled: typeof source.enabled === "boolean" ? source.enabled : true,
           transport,
-          command: typeof source.command === "string" ? source.command : undefined,
-          args: Array.isArray(source.args) ? source.args.filter((arg): arg is string => typeof arg === "string") : [],
+          command:
+            typeof source.command === "string" ? source.command : undefined,
+          args: Array.isArray(source.args)
+            ? source.args.filter(
+                (arg): arg is string => typeof arg === "string",
+              )
+            : [],
           cwd: typeof source.cwd === "string" ? source.cwd : undefined,
           env: normalizeStringRecord(source.env),
           url: typeof source.url === "string" ? source.url : undefined,
           headers: normalizeStringRecord(source.headers),
-          timeoutMs: typeof source.timeoutMs === "number" && Number.isFinite(source.timeoutMs) && source.timeoutMs > 0
-            ? Math.min(Math.round(source.timeoutMs), 10 * 60_000)
-            : 60_000,
-          requireApproval: typeof source.requireApproval === "boolean" ? source.requireApproval : true,
+          timeoutMs:
+            typeof source.timeoutMs === "number" &&
+            Number.isFinite(source.timeoutMs) &&
+            source.timeoutMs > 0
+              ? Math.min(Math.round(source.timeoutMs), 10 * 60_000)
+              : 60_000,
+          requireApproval:
+            typeof source.requireApproval === "boolean"
+              ? source.requireApproval
+              : true,
           tools,
-          lastError: typeof source.lastError === "string" ? source.lastError : undefined,
-          lastConnectedAt: typeof source.lastConnectedAt === "string" ? source.lastConnectedAt : undefined,
+          lastError:
+            typeof source.lastError === "string" ? source.lastError : undefined,
+          lastConnectedAt:
+            typeof source.lastConnectedAt === "string"
+              ? source.lastConnectedAt
+              : undefined,
         };
       }),
   };
@@ -981,7 +1115,6 @@ export async function saveMcpSettings(value: McpSettings): Promise<void> {
   await legacySetSetting(MCP_SETTINGS_KEY, normalized);
 }
 
-
 export async function loadModesState(): Promise<ModesState> {
   const api = await ensureJsonStorageReady();
 
@@ -1082,7 +1215,9 @@ export async function openToolsFolder(): Promise<void> {
   throw new Error("Opening the tools folder requires the Electron app.");
 }
 
-export async function loadSkills(workspaceRoots: ChatWorkspaceRoot[] = []): Promise<LoadedSkillInfo[]> {
+export async function loadSkills(
+  workspaceRoots: ChatWorkspaceRoot[] = [],
+): Promise<LoadedSkillInfo[]> {
   const api = await ensureJsonStorageReady();
 
   if (api) {

@@ -641,6 +641,7 @@ export function useToolExecution({
       workspaceRoots?: ChatWorkspaceRoot[];
       fileToolAutoApproval?: ChatFileToolAutoApproval;
       tool?: LoadedToolInfo;
+      unavailableToolMessage?: string;
     },
   ): Promise<ChatToolResult> {
     const toolName = toolCall.function.name;
@@ -659,7 +660,9 @@ export function useToolExecution({
         return {
           toolCallId: toolCall.id,
           toolName,
-          content: `Error: Tool "${toolName}" is not available in this chat or mode.`,
+          content:
+            options.unavailableToolMessage ??
+            `Error: Tool "${toolName}" is not available in this chat or mode.`,
           isError: true,
         };
       }
