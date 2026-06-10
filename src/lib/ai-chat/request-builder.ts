@@ -541,11 +541,13 @@ export function buildSystemPromptWithActiveSkills({
   activeSkillNames: _activeSkillNames,
   availableSkillsByName,
   mode,
+  effectiveWorkspaceRoots,
 }: {
   systemPrompt: string;
   activeSkillNames: string[];
   availableSkillsByName: Map<string, LoadedSkillInfo>;
   mode?: LoadedModeInfo;
+  effectiveWorkspaceRoots?: ChatWorkspaceRoot[];
 }) {
   const modeBlock = getModeInstructionsBlock(mode);
   const modelVisibleSkills = [...availableSkillsByName.values()]
@@ -575,5 +577,22 @@ export function buildSystemPromptWithActiveSkills({
       ].join("\n")
     : "";
 
-  return [systemPrompt.trim(), modeBlock, skillsBlock].filter(Boolean).join("\n\n");
+  const workspaceBlock = (effectiveWorkspaceRoots?.length ?? 0) > 0
+    ? [
+        "<workspace>",
+        ...(effectiveWorkspaceRoots ?? []).map((root) =>
+          [
+            "  <workspace_root>",
+            `    <id>${escapeXmlText(root.id)}</id>`,
+            `    <name>${escapeXmlText(root.name)}</name>`,
+            `    <path>${escapeXmlText(root.path)}</path>`,
+            "  </workspace_root>",
+          ].join("\n"),
+        ),
+        "</workspace>",
+        "The workspace root path is the base directory for your project files. When using file tools (read, write, edit) or bash, use paths relative to this workspace root or absolute paths within it.",
+      ].join("\n")
+    : "";
+
+  return [systemPrompt.trim(), modeBlock, workspaceBlock, skillsBlock].filter(Boolean).join("\n\n");
 }

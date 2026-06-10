@@ -170,6 +170,7 @@ type ChatMessageListProps = {
   visualStreamingMessageIds: string[];
   collapsedToolStepIds: Record<string, boolean>;
   collapsedThinkingStepIds: Record<string, boolean>;
+  thinkingAutoCollapse?: boolean;
   toolDisplayKey: string;
   skillDisplayKey: string;
   agentDisplayKey: string;
@@ -535,6 +536,7 @@ const ChatMessageItem = memo(
     visualStreamingMessageIds,
     collapsedToolStepIds,
     collapsedThinkingStepIds,
+    thinkingAutoCollapse,
     toolMentionOptions,
     skillMentionOptions,
     agentMentionOptions,
@@ -619,7 +621,7 @@ const ChatMessageItem = memo(
           status === "streaming" && isLatestProcessStep;
 
         const manualCollapsed = collapsedThinkingStepIds[step.id];
-        const isCollapsed = manualCollapsed ?? !isThinkingStreaming;
+        const isCollapsed = manualCollapsed ?? (thinkingAutoCollapse ? true : !isThinkingStreaming);
 
         return (
           <ThinkingBlock

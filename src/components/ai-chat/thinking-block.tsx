@@ -56,26 +56,26 @@ function getEffectiveThinkingStatus(
 function renderThinkingStatus(status: ThinkingStatus) {
   if (status === "complete") {
     return (
-      <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
-        <Check className="size-3.5" />
-        Complete
+      <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-green-600 dark:text-green-400">
+        <Check className="size-3.5 shrink-0" />
+        <span className="shrink-0">Complete</span>
       </span>
     );
   }
 
   if (status === "waiting") {
     return (
-      <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-        <Spinner className="size-3.5" />
-        Waiting
+      <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-amber-600 dark:text-amber-400">
+        <Spinner className="size-3.5 shrink-0" />
+        <span className="shrink-0">Waiting</span>
       </span>
     );
   }
 
   return (
-    <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
-      <Spinner className="size-3.5" />
-      In progress
+    <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-amber-600 dark:text-amber-400">
+      <Spinner className="size-3.5 shrink-0" />
+      <span className="shrink-0">In progress</span>
     </span>
   );
 }
@@ -149,28 +149,65 @@ export function ThinkingBlock({
     return "";
   }, [completedAt, durationTickMs, effectiveStatus, startedAt]);
 
+  // Extract the last non-empty trimmed line from the thinking content,
+  // stripping leading markdown markers and non-letter characters.
+  const lastContentLine = useMemo(() => {
+    const lines = content.split("\n");
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const trimmed = lines[i].trim();
+      if (!trimmed) continue;
+      const cleaned = trimmed.replace(/^[^a-zA-Z]+/, "");
+      if (cleaned) return cleaned;
+    }
+    return "";
+  }, [content]);
+
+  // Throttle updates to ~1 second so the user has time to read.
+  const [displayedLastLine, setDisplayedLastLine] = useState(lastContentLine);
+  const lastContentLineRef = useRef(lastContentLine);
+  lastContentLineRef.current = lastContentLine;
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setDisplayedLastLine(lastContentLineRef.current);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   return (
     <article className="flex w-full min-w-0 max-w-full justify-start">
-      <div className="w-full min-w-0 max-w-full overflow-hidden  border border-dashed bg-muted/30 px-4 py-3 text-base leading-none text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
+      <div className="w-full min-w-0 max-w-full overflow-hidden border border-dashed bg-muted/30 px-4 py-3 text-base leading-none text-muted-foreground shadow-xs [overflow-wrap:anywhere]">
         <button
           type="button"
-          className="w-full  text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           onMouseDown={(event) => event.preventDefault()}
           onClick={onToggleCollapsed}
           aria-expanded={!isCollapsed}
           aria-controls={`${id}-thinking-content`}
         >
-          <div className="flex min-w-0 items-center justify-between gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
-            <div className="flex min-w-0 items-center gap-2">
+          <div className="flex min-w-0 items-center gap-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
               <Brain className="size-3.5 shrink-0" />
-              <span className="truncate">Thinking</span>
-              <span className="text-muted-foreground/60">•</span>
+              <span className="shrink-0 whitespace-nowrap">Thinking</span>
+              <span className="shrink-0 text-muted-foreground/60">•</span>
               {renderThinkingStatus(effectiveStatus)}
               {thoughtDuration ? (
                 <>
-                  <span className="text-muted-foreground/60">•</span>
+                  <span className="shrink-0 text-muted-foreground/60">•</span>
                   <span className="shrink-0 tabular-nums text-muted-foreground/85">
                     {thoughtDuration}
+                  </span>
+                </>
+              ) : null}
+              {effectiveStatus !== "complete" && displayedLastLine ? (
+                <>
+                  <span className="shrink-0 text-muted-foreground/60">•</span>
+                  <span
+                    className="min-w-0 flex-1 truncate normal-case tracking-normal text-muted-foreground/85"
+                    title={displayedLastLine}
+                  >
+                    {displayedLastLine}
                   </span>
                 </>
               ) : null}

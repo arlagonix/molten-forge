@@ -292,7 +292,10 @@ function getToolPermission(
   settings: ToolsSettings,
   toolName: string,
 ): Permission {
-  return settings.toolPermissions?.[toolName] ?? (toolName.startsWith("mcp_") ? "deny" : "ask");
+  return (
+    settings.toolPermissions?.[toolName] ??
+    (toolName.startsWith("mcp_") ? "deny" : "ask")
+  );
 }
 
 function getDisplayedToolPermission(
@@ -1071,8 +1074,7 @@ export const ToolsDialog = memo(function ToolsDialog({
     [loadedTools, selectedToolName],
   );
   const selectedMcpTool = useMemo(
-    () =>
-      loadedMcpTools.find((tool) => tool.name === selectedToolName) ?? null,
+    () => loadedMcpTools.find((tool) => tool.name === selectedToolName) ?? null,
     [loadedMcpTools, selectedToolName],
   );
   const totalToolsCount = loadedTools.length + loadedMcpTools.length + 9;
@@ -2055,7 +2057,8 @@ export const ToolsDialog = memo(function ToolsDialog({
 
               {loadedMcpTools.length === 0 && (
                 <div className=" border border-dashed px-3 py-4 text-center text-base text-muted-foreground">
-                  No MCP tools discovered. Add or refresh MCP servers from MCP settings.
+                  No MCP tools discovered. Add or refresh MCP servers from MCP
+                  settings.
                 </div>
               )}
             </div>
@@ -2800,18 +2803,18 @@ export const ToolsDialog = memo(function ToolsDialog({
                             {currentToolTestResult ? (
                               currentToolTestResult.exitCode !== 0 ||
                               currentToolTestResult.timedOut ? (
-                                <span className="inline-flex items-center gap-1 text-destructive">
+                                <span className="inline-flex items-center gap-1 text-destructive shrink-0">
                                   <X className="size-3.5" />
                                   Failed
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400">
+                                <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400 shrink-0">
                                   <Check className="size-3.5" />
                                   Complete
                                 </span>
                               )
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                              <span className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 shrink-0">
                                 <Spinner className="size-3.5" />
                                 {currentToolTestState?.status === "pending"
                                   ? "Waiting"

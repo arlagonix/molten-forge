@@ -479,6 +479,7 @@ export type AppSettings = {
   chatTitleGenerationMode: ChatTitleGenerationMode;
   fontFamily: AppFontFamily;
   chatFolders: ChatFolder[];
+  thinkingAutoCollapse?: boolean;
 };
 
 export type ChatWorkspaceRoot = {

@@ -88,7 +88,7 @@ export const AgentCallBlock = memo(function AgentCallBlock({
       >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden text-sm font-medium uppercase tracking-wide text-muted-foreground">
               <Bot className="size-3.5 shrink-0" />
               <span className="truncate">{agentCall.agentName}</span>
               <span className="text-muted-foreground/60">·</span>

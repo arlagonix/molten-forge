@@ -392,6 +392,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
   fontFamily: "sans",
   chatFolders: [],
+  thinkingAutoCollapse: false,
 };
 const DEFAULT_MCP_SETTINGS: McpSettings = {
   enabled: true,
@@ -705,6 +706,10 @@ function normalizeAppSettings(value: unknown): AppSettings {
       value.chatTitleGenerationMode === "ai" ? "ai" : "local",
     fontFamily: value.fontFamily === "mono" ? "mono" : "sans",
     chatFolders: normalizeChatFolders(value.chatFolders),
+    thinkingAutoCollapse:
+      typeof value.thinkingAutoCollapse === "boolean"
+        ? value.thinkingAutoCollapse
+        : false,
   };
 }
 

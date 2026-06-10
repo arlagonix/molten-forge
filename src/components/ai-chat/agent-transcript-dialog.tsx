@@ -230,7 +230,7 @@ function FallbackToolCallBlock({
 function AgentModalHeader({ agentCall }: { agentCall: ChatAgentCall }) {
   return (
     <DialogHeader className="border-b px-5 py-4">
-      <DialogTitle className="flex min-w-0 items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+      <DialogTitle className="flex min-w-0 items-center gap-2 overflow-hidden text-sm font-medium uppercase tracking-wide text-muted-foreground">
         <Bot className="size-4 shrink-0" />
         <span className="min-w-0 truncate">{agentCall.agentName}</span>
         <span className="text-muted-foreground/60">·</span>
@@ -776,7 +776,7 @@ function ChildAgentBlock({
       >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <div className="flex min-w-0 items-center gap-2 text-sm font-medium uppercase tracking-wide text-muted-foreground">
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden text-sm font-medium uppercase tracking-wide text-muted-foreground">
               <Bot className="size-3.5 shrink-0" />
               <span className="truncate">{child.agentName}</span>
               <span className="text-muted-foreground/60">·</span>

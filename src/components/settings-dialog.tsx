@@ -3,6 +3,7 @@
 import {
   BookOpen,
   Bot,
+  Brain,
   Cpu,
   MessageSquareText,
   Moon,
@@ -157,11 +158,13 @@ type SettingsDialogProps = {
   onOpenChange: (open: boolean) => void;
   chatTitleGenerationMode: ChatTitleGenerationMode;
   appFontFamily: AppFontFamily;
+  thinkingAutoCollapse: boolean;
   theme: ThemePreference;
   resolvedTheme: "light" | "dark";
   onToggleAiTitleGeneration: (checked: boolean) => void;
   onSetTheme: (theme: ThemePreference) => void;
   onSetAppFontFamily: (fontFamily: AppFontFamily) => void;
+  onThinkingAutoCollapseChange: (checked: boolean) => void;
   onOpenProviders: () => void;
   onOpenTools: () => void;
   onOpenSkills: () => void;
@@ -176,11 +179,13 @@ export const SettingsDialog = memo(function SettingsDialog({
   onOpenChange,
   chatTitleGenerationMode,
   appFontFamily,
+  thinkingAutoCollapse,
   theme,
   resolvedTheme,
   onToggleAiTitleGeneration,
   onSetTheme,
   onSetAppFontFamily,
+  onThinkingAutoCollapseChange,
   onOpenProviders,
   onOpenTools,
   onOpenSkills,
@@ -281,6 +286,13 @@ export const SettingsDialog = memo(function SettingsDialog({
                     { value: "sans", label: "Sans" },
                     { value: "mono", label: "Mono" },
                   ]}
+                />
+                <SettingsSwitchRow
+                  icon={<Brain className="size-4" />}
+                  title="Auto-collapse thinking"
+                  description="Always collapse thinking blocks, including while the model is still reasoning."
+                  checked={thinkingAutoCollapse}
+                  onCheckedChange={onThinkingAutoCollapseChange}
                 />
                 <SettingsSwitchRow
                   icon={<SlidersHorizontal className="size-4" />}

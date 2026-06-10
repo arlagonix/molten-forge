@@ -48,6 +48,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   chatTitleGenerationMode: "local",
   fontFamily: "sans",
   chatFolders: [],
+  thinkingAutoCollapse: false,
 };
 
 export const DEFAULT_MCP_SETTINGS: McpSettings = {
@@ -437,6 +438,8 @@ export function normalizeAppSettings(
       value?.chatTitleGenerationMode === "ai" ? "ai" : "local",
     fontFamily: value?.fontFamily === "mono" ? "mono" : "sans",
     chatFolders: normalizeChatFolders(value?.chatFolders),
+    thinkingAutoCollapse:
+      value?.thinkingAutoCollapse ?? false,
   };
 }
 

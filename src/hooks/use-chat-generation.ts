@@ -1372,6 +1372,11 @@ export function useChatGeneration({
         }).map((skill) => [skill.name, skill] as const),
       ),
       mode: getModeForChat(chat),
+      effectiveWorkspaceRoots: getEffectiveWorkspaceRoots({
+        workspaceRoots: chat?.workspaceRoots ?? [],
+        activeSkillNames,
+        availableSkillsByName,
+      }),
     });
   }
 
@@ -1744,10 +1749,17 @@ export function useChatGeneration({
           .filter(Boolean)
           .join("\n\n");
 
+    const agentWorkspaceRoots = getEffectiveWorkspaceRoots({
+      workspaceRoots: activeChat?.workspaceRoots ?? [],
+      activeSkillNames: activeSkillNamesForAgent,
+      availableSkillsByName,
+    });
+
     return buildSystemPromptWithActiveSkills({
       systemPrompt: basePrompt,
       activeSkillNames: activeSkillNamesForAgent,
       availableSkillsByName,
+      effectiveWorkspaceRoots: agentWorkspaceRoots,
     });
   }
 
