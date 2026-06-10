@@ -272,6 +272,7 @@ type AppSettings = {
   chatTitleGenerationMode: "local" | "ai";
   fontFamily: "sans" | "mono";
   chatFolders: ChatFolder[];
+  thinkingAutoCollapse?: boolean;
 };
 
 type ToolLoadError = {
