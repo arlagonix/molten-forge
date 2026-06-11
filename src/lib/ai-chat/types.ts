@@ -331,8 +331,12 @@ export type ChatAssistantProcessStep =
       id: string;
       type: "tool_building";
       status?: "running";
-      toolCalls: ChatToolCall[];
+      toolCallIds: string[];
+      toolNames: string[];
+      toolCallCount: number;
       updatedAt?: string;
+      /** Legacy transient shape from older builds. */
+      toolCalls?: ChatToolCall[];
     }
   | {
       id: string;

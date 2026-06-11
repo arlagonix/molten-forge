@@ -180,6 +180,35 @@
     font-family: var(--font-sans);
   }
 
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 18%, transparent)
+      transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    border: 0;
+    border-radius: 0;
+    background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 28%, transparent);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
   button:not(:disabled) {
     cursor: pointer;
   }
@@ -200,19 +229,29 @@
 
   .chat-scrollbar::-webkit-scrollbar {
     display: none;
+    width: 0;
+    height: 0;
   }
 
   .chat-message-scrollbar {
     scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, currentColor 18%, transparent)
+      transparent;
   }
 
   .chat-message-scrollbar::-webkit-scrollbar {
-    width: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   .chat-message-scrollbar::-webkit-scrollbar-thumb {
-    border-radius: 999px;
-    background-color: color-mix(in oklab, currentColor 22%, transparent);
+    border: 0;
+    border-radius: 0;
+    background-color: color-mix(in oklab, currentColor 18%, transparent);
+  }
+
+  .chat-message-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, currentColor 28%, transparent);
   }
 
   @keyframes chat-forge-loading-fade {

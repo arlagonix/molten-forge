@@ -45,3 +45,5 @@ The project intentionally keeps only UI components and dependencies that are imp
 
 - [Attachments and model context](docs/attachments.md)
 - [Chat folders and default workspaces](docs/chat-folders.md)
+- [MCP settings](docs/mcp-settings.md)
+- [Project instructions (`AGENTS.md`)](docs/project-instructions.md)

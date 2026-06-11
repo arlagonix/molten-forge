@@ -21,6 +21,7 @@ import type {
   SkillsSettings,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
+import type { ProjectInstructionsReadResult } from "@/lib/ai-chat/project-instructions";
 
 
 type AttachmentInput =
@@ -179,6 +180,10 @@ declare global {
         | { cancelled: false; path: string; name: string }
       >;
       openFolder: (folderPath: string) => Promise<void>;
+      loadProjectInstructions: (request: {
+        workspaceRoot: ChatWorkspaceRoot;
+        approveOversized?: boolean;
+      }) => Promise<ProjectInstructionsReadResult>;
     };
   }
 }

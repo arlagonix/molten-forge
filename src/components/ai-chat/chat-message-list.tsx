@@ -59,6 +59,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { getActiveVariant } from "@/lib/ai-chat/chat-utils";
+import { getToolBuildingVisibleMetadata } from "@/lib/ai-chat/tool-building";
 import {
   getToolBatchGroupLabel,
   getVisibleAssistantProcessSteps,
@@ -720,13 +721,9 @@ const ChatMessageItem = memo(
       }
 
       if (step.type === "tool_building") {
-        const toolNames = [
-          ...new Set(
-            step.toolCalls
-              .map((toolCall) => toolCall.function.name.trim())
-              .filter(Boolean),
-          ),
-        ];
+        const toolNames = step.toolCalls
+          ? getToolBuildingVisibleMetadata(step.toolCalls).toolNames
+          : (step.toolNames ?? []);
         const toolName = toolNames.join(", ");
 
         return (
@@ -1584,8 +1581,10 @@ export const ChatMessageList = memo(function ChatMessageList({
   // scroll element on every render — so the initial chat is no longer blank.
   const [, setScrollElementReady] = useState(false);
 
+  const timelineItemCount = messages.length;
+
   const virtualizer = useVirtualizer({
-    count: messages.length,
+    count: timelineItemCount,
     getScrollElement: () => scrollElementRef.current,
     estimateSize: (index) => estimateMessageHeight(messages[index]),
     overscan: VIRTUAL_MESSAGE_OVERSCAN,

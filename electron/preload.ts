@@ -286,6 +286,10 @@ contextBridge.exposeInMainWorld("chatForgeWorkspace", {
     return ipcRenderer.invoke("workspace:open-folder", folderPath);
   },
 
+  loadProjectInstructions(request: unknown) {
+    return ipcRenderer.invoke("workspace:load-project-instructions", request);
+  },
+
 });
 
 contextBridge.exposeInMainWorld("chatForgeTools", {

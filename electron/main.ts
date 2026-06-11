@@ -46,6 +46,10 @@ import {
 } from "./mcp-client";
 import { executePiTool } from "./pi-tools";
 import {
+  normalizeProjectInstructionsRequest,
+  readProjectInstructionsForWorkspace,
+} from "./project-instructions";
+import {
   getErrorMessage,
   isPlainObject,
   normalizeWorkspaceRoots,
@@ -5412,6 +5416,10 @@ ipcMain.handle("workspace:select-folder", async () => selectWorkspaceFolder());
 
 ipcMain.handle("workspace:open-folder", async (_event, folderPath: unknown) =>
   openWorkspaceFolder(folderPath),
+);
+
+ipcMain.handle("workspace:load-project-instructions", async (_event, request: unknown) =>
+  readProjectInstructionsForWorkspace(normalizeProjectInstructionsRequest(request)),
 );
 
 ipcMain.handle("tools:test", async (_event, request: unknown) => {

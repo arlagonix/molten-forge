@@ -38,6 +38,11 @@ import {
   createToolApprovalRequest,
 } from "@/lib/ai-chat/builtin-tools";
 import { streamProviderChat } from "@/lib/ai-chat/direct-provider-client";
+import {
+  areToolBuildingVisibleMetadataEqual,
+  getToolBuildingVisibleMetadata,
+  type ToolBuildingVisibleMetadata,
+} from "@/lib/ai-chat/tool-building";
 import type { StreamProviderChatResult } from "@/lib/ai-chat/direct-provider-client";
 import {
   appendBufferedAssistantVariant as appendBufferedAssistantVariantToBuffer,
@@ -78,6 +83,7 @@ import {
   validateSkillMentionsForRequest,
   validateToolMentionsForRequest,
 } from "@/lib/ai-chat/request-builder";
+import type { ProjectInstructionsSnapshot } from "@/lib/ai-chat/project-instructions";
 import type {
   AgentsSettings,
   AskUserResponse,
@@ -324,6 +330,7 @@ export function useChatGeneration({
   syncChatScrollState,
   executeExternalTool,
   onChatGenerationFinished,
+  ensureProjectInstructionsForChat,
   showError,
 }: {
   activeChat?: ChatSession;
@@ -385,6 +392,10 @@ export function useChatGeneration({
     chatId: string,
     options: { wasCancelled: boolean },
   ) => void;
+  ensureProjectInstructionsForChat: (
+    chat: ChatSession | undefined,
+    options?: { force?: boolean; approveOversized?: boolean },
+  ) => Promise<ProjectInstructionsSnapshot | undefined>;
   showError: (message: string, description?: string) => void;
 }) {
   const [, setStreamingAssistantByChatId] = useState<Record<string, string>>(
@@ -394,6 +405,9 @@ export function useChatGeneration({
   const streamBuffersRef = useRef<Record<string, StreamBuffer>>({});
   const streamActiveProcessStepRefs = useRef<
     Record<string, ActiveProcessStepRef>
+  >({});
+  const streamToolBuildingMetadataRefs = useRef<
+    Record<string, ToolBuildingVisibleMetadata>
   >({});
   const streamFlushTimeoutRefs = useRef<Record<string, number>>({});
   const chatsRef = useRef<ChatSession[]>(chats);
@@ -527,8 +541,9 @@ export function useChatGeneration({
   ) {
     updateChatMessages(
       chatId,
-      (currentMessages) =>
-        currentMessages.map((message) => {
+      (currentMessages) => {
+        let didChangeMessage = false;
+        const nextMessages = currentMessages.map((message) => {
           if (
             message.id !== assistantMessageId ||
             message.role !== "assistant"
@@ -536,13 +551,26 @@ export function useChatGeneration({
             return message;
           }
 
+          let didChangeVariant = false;
+          const nextVariants = message.variants.map((variant) => {
+            if (variant.id !== variantId) return variant;
+
+            const nextVariant = updater(variant);
+            if (nextVariant !== variant) didChangeVariant = true;
+            return nextVariant;
+          });
+
+          if (!didChangeVariant) return message;
+
+          didChangeMessage = true;
           return {
             ...message,
-            variants: message.variants.map((variant) =>
-              variant.id === variantId ? updater(variant) : variant,
-            ),
+            variants: nextVariants,
           };
-        }),
+        });
+
+        return didChangeMessage ? nextMessages : currentMessages;
+      },
       options,
     );
   }
@@ -946,7 +974,7 @@ export function useChatGeneration({
     bufferKey: string,
     toolCalls: ChatToolCall[],
   ) {
-    if (toolCalls.length === 0) return;
+    if (toolCalls.length === 0) return false;
 
     const activeStep = getActiveStreamProcessStep(bufferKey);
     if (activeStep?.type === "thinking" && activeStep.id) {
@@ -959,13 +987,29 @@ export function useChatGeneration({
       );
     }
 
-    const now = new Date().toISOString();
+    const visibleMetadata = getToolBuildingVisibleMetadata(toolCalls);
     const existingStepId =
       activeStep?.type === "tool_building" ? activeStep.id : undefined;
+
+    const previousVisibleMetadata =
+      streamToolBuildingMetadataRefs.current[bufferKey];
+    if (
+      existingStepId &&
+      previousVisibleMetadata &&
+      areToolBuildingVisibleMetadataEqual(
+        previousVisibleMetadata,
+        visibleMetadata,
+      )
+    ) {
+      return false;
+    }
+
+    const now = new Date().toISOString();
     const stepId = existingStepId ?? createId();
-    const toolCallIds = new Set(toolCalls.map((toolCall) => toolCall.id));
+    const toolCallIds = new Set(visibleMetadata.toolCallIds);
 
     let shouldKeepBuildingStep = true;
+    let didChangeVisibleStep = false;
 
     updateAssistantVariant(
       chatId,
@@ -982,36 +1026,69 @@ export function useChatGeneration({
         if (hasVisibleToolStep) {
           shouldKeepBuildingStep = false;
 
+          const filteredSteps = processSteps.filter(
+            (step) => step.type !== "tool_building",
+          );
+
+          if (filteredSteps.length === processSteps.length) {
+            return variant;
+          }
+
+          didChangeVisibleStep = true;
           return {
             ...variant,
-            processSteps: processSteps.filter(
-              (step) => step.type !== "tool_building",
+            processSteps: filteredSteps,
+          };
+        }
+
+        const existingToolBuildingStep = processSteps.find(
+          (
+            step,
+          ): step is Extract<
+            ChatAssistantProcessStep,
+            { type: "tool_building" }
+          > => step.id === stepId && step.type === "tool_building",
+        );
+
+        if (existingToolBuildingStep) {
+          if (
+            areToolBuildingVisibleMetadataEqual(
+              existingToolBuildingStep,
+              visibleMetadata,
+            )
+          ) {
+            return variant;
+          }
+
+          didChangeVisibleStep = true;
+          return {
+            ...variant,
+            processSteps: processSteps.map((step) =>
+              step.id === stepId && step.type === "tool_building"
+                ? {
+                    ...step,
+                    ...visibleMetadata,
+                    updatedAt: now,
+                    toolCalls: undefined,
+                  }
+                : step,
             ),
           };
         }
 
-        const hasExistingToolBuildingStep = processSteps.some(
-          (step) => step.id === stepId && step.type === "tool_building",
-        );
-
+        didChangeVisibleStep = true;
         return {
           ...variant,
-          processSteps: hasExistingToolBuildingStep
-            ? processSteps.map((step) =>
-                step.id === stepId && step.type === "tool_building"
-                  ? { ...step, toolCalls, updatedAt: now }
-                  : step,
-              )
-            : [
-                ...processSteps,
-                {
-                  id: stepId,
-                  type: "tool_building" as const,
-                  status: "running" as const,
-                  toolCalls,
-                  updatedAt: now,
-                },
-              ],
+          processSteps: [
+            ...processSteps,
+            {
+              id: stepId,
+              type: "tool_building" as const,
+              status: "running" as const,
+              ...visibleMetadata,
+              updatedAt: now,
+            },
+          ],
         };
       },
       { touch: false },
@@ -1022,9 +1099,13 @@ export function useChatGeneration({
         type: "tool_building",
         id: stepId,
       });
+      streamToolBuildingMetadataRefs.current[bufferKey] = visibleMetadata;
     } else if (activeStep?.type === "tool_building") {
       delete streamActiveProcessStepRefs.current[bufferKey];
+      delete streamToolBuildingMetadataRefs.current[bufferKey];
     }
+
+    return didChangeVisibleStep;
   }
 
   function removeToolBuildingProcessSteps(
@@ -1036,14 +1117,24 @@ export function useChatGeneration({
       chatId,
       assistantMessageId,
       variantId,
-      (variant) => ({
-        ...variant,
-        processSteps: (variant.processSteps ?? []).filter(
+      (variant) => {
+        const processSteps = variant.processSteps ?? [];
+        const filteredSteps = processSteps.filter(
           (step) => step.type !== "tool_building",
-        ),
-      }),
+        );
+
+        if (filteredSteps.length === processSteps.length) return variant;
+
+        return {
+          ...variant,
+          processSteps: filteredSteps,
+        };
+      },
       { touch: false },
     );
+    delete streamToolBuildingMetadataRefs.current[
+      getStreamBufferKey(chatId, assistantMessageId, variantId)
+    ];
   }
 
   function selectAssistantVariant(messageId: string, variantIndex: number) {
@@ -1417,6 +1508,7 @@ export function useChatGeneration({
     chat: ChatSession | undefined,
     activeSkillNames: string[],
     alreadyLoadedMentionedSkillNames: string[] = [],
+    projectInstructions?: ProjectInstructionsSnapshot,
   ) {
     void alreadyLoadedMentionedSkillNames;
     return buildSystemPromptWithActiveSkills({
@@ -1438,6 +1530,7 @@ export function useChatGeneration({
         activeSkillNames,
         availableSkillsByName,
       }),
+      projectInstructions,
     });
   }
 
@@ -1786,6 +1879,7 @@ export function useChatGeneration({
   function createAgentSystemPrompt(
     agent: LoadedAgentInfo,
     activeSkillNamesForAgent: string[],
+    projectInstructions?: ProjectInstructionsSnapshot,
   ) {
     const basePrompt = isBuiltInAgentName(agent.name)
       ? [
@@ -1821,6 +1915,7 @@ export function useChatGeneration({
       activeSkillNames: activeSkillNamesForAgent,
       availableSkillsByName,
       effectiveWorkspaceRoots: agentWorkspaceRoots,
+      projectInstructions,
     });
   }
 
@@ -1892,6 +1987,7 @@ export function useChatGeneration({
     userAttachments,
     inheritedToolsForRun,
     inheritedActiveSkillNames,
+    projectInstructionsForRun,
   }: {
     chatId: string;
     assistantMessageId: string;
@@ -1909,6 +2005,7 @@ export function useChatGeneration({
     userAttachments?: ChatAttachment[];
     inheritedToolsForRun: LoadedToolInfo[];
     inheritedActiveSkillNames: string[];
+    projectInstructionsForRun?: ProjectInstructionsSnapshot;
   }): Promise<{ agentCall: ChatAgentCall; toolResult: ChatToolResult }> {
     const toolCall =
       sourceToolCall ?? createSyntheticAgentToolCall(agentName, task);
@@ -2033,7 +2130,11 @@ export function useChatGeneration({
       {
         id: createId(),
         role: "system" as const,
-        content: createAgentSystemPrompt(agent, currentAgentActiveSkillNames),
+        content: createAgentSystemPrompt(
+          agent,
+          currentAgentActiveSkillNames,
+          projectInstructionsForRun,
+        ),
         createdAt: startedAt,
       },
       {
@@ -2133,7 +2234,11 @@ export function useChatGeneration({
 
         const result = await streamProviderChat({
           provider,
-          systemPrompt: createAgentSystemPrompt(agent, currentAgentActiveSkillNames),
+          systemPrompt: createAgentSystemPrompt(
+            agent,
+            currentAgentActiveSkillNames,
+            projectInstructionsForRun,
+          ),
           messages: currentMessages,
           userMessage: currentUserMessage,
           userAttachments: round === 0 ? userAttachments : undefined,
@@ -2467,6 +2572,7 @@ export function useChatGeneration({
                 userAttachments,
                 inheritedToolsForRun: currentInheritedToolsForRun,
                 inheritedActiveSkillNames: currentAgentActiveSkillNames,
+                projectInstructionsForRun,
               });
               return {
                 ...child.toolResult,
@@ -2790,6 +2896,7 @@ export function useChatGeneration({
     activeSkillNamesForRun,
     oneShotSkillNames = [],
     oneShotAgentNames = [],
+    projectInstructionsForRun,
   }: {
     chatId: string;
     contextMessages: ChatMessage[];
@@ -2803,6 +2910,7 @@ export function useChatGeneration({
     activeSkillNamesForRun: string[];
     oneShotSkillNames?: string[];
     oneShotAgentNames?: string[];
+    projectInstructionsForRun?: ProjectInstructionsSnapshot;
   }) {
     const controller = new AbortController();
     generationRefs.current[chatId] = {
@@ -3266,6 +3374,7 @@ export function useChatGeneration({
           userAttachments,
           inheritedToolsForRun: toolsForRun,
           inheritedActiveSkillNames: activeSkillNamesForRun,
+          projectInstructionsForRun,
         });
         const toolResult = {
           ...result.toolResult,
@@ -3376,6 +3485,7 @@ export function useChatGeneration({
             getCurrentChatSnapshot(chatId),
             currentActiveSkillNames,
             forcedSkillRequests,
+            projectInstructionsForRun,
           ),
           messages: currentMessages,
           userMessage: currentUserMessage,
@@ -3447,15 +3557,16 @@ export function useChatGeneration({
             }
           },
           onToolCallDelta: (toolCalls) => {
-            upsertToolBuildingProcessStep(
-              chatId,
-              assistantMessageId,
-              variantId,
-              bufferKey,
-              toolCalls,
-            );
+            const didChangeVisibleToolBuildingStep =
+              upsertToolBuildingProcessStep(
+                chatId,
+                assistantMessageId,
+                variantId,
+                bufferKey,
+                toolCalls,
+              );
 
-            if (chatId === activeChatId) {
+            if (didChangeVisibleToolBuildingStep && chatId === activeChatId) {
               scheduleStickyScrollToBottom({ settleFrames: 2 });
             }
           },
@@ -3547,6 +3658,7 @@ export function useChatGeneration({
                       userAttachments,
                       inheritedToolsForRun: currentToolsForRun,
                       inheritedActiveSkillNames: currentActiveSkillNames,
+                      projectInstructionsForRun,
                     });
                     return {
                       ...agentResult.toolResult,
@@ -3683,6 +3795,7 @@ export function useChatGeneration({
       );
     } finally {
       delete streamActiveProcessStepRefs.current[bufferKey];
+      delete streamToolBuildingMetadataRefs.current[bufferKey];
       delete streamBuffersRef.current[bufferKey];
       const currentGeneration = generationRefs.current[chatId];
       if (currentGeneration?.controller === controller) {
@@ -3729,6 +3842,10 @@ export function useChatGeneration({
       activeChat,
       userMessageId,
       attachments,
+    );
+    const projectInstructionsForRun = await ensureProjectInstructionsForChat(
+      chatForRun,
+      { force: true },
     );
     const toolsForRun = getToolsForChat(chatForRun, [], []);
     const userChatMessage: ChatMessage = {
@@ -3791,6 +3908,7 @@ export function useChatGeneration({
           userAttachments: attachmentsForRun,
           inheritedToolsForRun: toolsForRun,
           inheritedActiveSkillNames: [],
+          projectInstructionsForRun,
         });
 
         updateAssistantVariant(chatForRun.id, assistantMessageId, variantId, (variant) =>
@@ -3881,6 +3999,11 @@ export function useChatGeneration({
       attachments,
     );
 
+    const projectInstructionsForRun = await ensureProjectInstructionsForChat(
+      chatForRun,
+      { force: true },
+    );
+
     const activeSkillNamesForRun = getActiveSkillNamesForRun(
       chatForRun,
       oneShotSkillNames,
@@ -3947,6 +4070,7 @@ export function useChatGeneration({
       activeSkillNamesForRun,
       oneShotSkillNames,
       oneShotAgentNames,
+      projectInstructionsForRun,
     });
 
     return true;
@@ -4011,6 +4135,10 @@ export function useChatGeneration({
     const contextMessages = chatForRun.messages.slice(0, userIndex);
     const retainedMessages = chatForRun.messages.slice(0, userIndex + 1);
     const discardedMessages = chatForRun.messages.slice(userIndex + 1);
+    const projectInstructionsForRun = await ensureProjectInstructionsForChat(
+      chatForRun,
+      { force: true },
+    );
     const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
       activeSkillNames: chatForRun.activeSkillNames ?? [],
       retainedMessages,
@@ -4068,6 +4196,7 @@ export function useChatGeneration({
       activeSkillNamesForRun,
       oneShotSkillNames,
       oneShotAgentNames,
+      projectInstructionsForRun,
     });
   }
 
@@ -4108,6 +4237,10 @@ export function useChatGeneration({
     );
     const contextMessages = chatForRun.messages.slice(0, assistantIndex + 1);
     const discardedMessages = chatForRun.messages.slice(assistantIndex + 1);
+    const projectInstructionsForRun = await ensureProjectInstructionsForChat(
+      chatForRun,
+      { force: true },
+    );
     const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
       activeSkillNames: chatForRun.activeSkillNames ?? [],
       retainedMessages: contextMessages,
@@ -4152,6 +4285,7 @@ export function useChatGeneration({
       providerForRun,
       toolsForRun,
       activeSkillNamesForRun,
+      projectInstructionsForRun,
     });
   }
 
@@ -4213,6 +4347,10 @@ export function useChatGeneration({
     );
 
     const contextMessages = chatForRun.messages.slice(0, userIndex);
+    const projectInstructionsForRun = await ensureProjectInstructionsForChat(
+      chatForRun,
+      { force: true },
+    );
     const activeSkillNamesForRun = pruneActiveSkillNamesForRegeneration({
       activeSkillNames: chatForRun.activeSkillNames ?? [],
       retainedMessages: contextMessages,
@@ -4276,6 +4414,7 @@ export function useChatGeneration({
       activeSkillNamesForRun,
       oneShotSkillNames,
       oneShotAgentNames,
+      projectInstructionsForRun,
     });
   }
 

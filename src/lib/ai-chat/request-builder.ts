@@ -25,6 +25,7 @@ import {
   LOAD_SKILL_TOOL_NAME,
 } from "@/lib/ai-chat/builtin-tools";
 import { FEATURE_PERMISSION_KEY, getModeInstructionsBlock, getModePermissionMaps, resolvePermission, type ModeCapabilityContext } from "@/lib/ai-chat/modes";
+import { createProjectInstructionsContextBlock, type ProjectInstructionsSnapshot } from "@/lib/ai-chat/project-instructions";
 import type {
   AgentsSettings,
   ChatSession,
@@ -626,12 +627,14 @@ export function buildSystemPromptWithActiveSkills({
   availableSkillsByName,
   mode,
   effectiveWorkspaceRoots,
+  projectInstructions,
 }: {
   systemPrompt: string;
   activeSkillNames: string[];
   availableSkillsByName: Map<string, LoadedSkillInfo>;
   mode?: LoadedModeInfo;
   effectiveWorkspaceRoots?: ChatWorkspaceRoot[];
+  projectInstructions?: ProjectInstructionsSnapshot;
 }) {
   const modeBlock = getModeInstructionsBlock(mode);
   const modelVisibleSkills = [...availableSkillsByName.values()]
@@ -678,5 +681,9 @@ export function buildSystemPromptWithActiveSkills({
       ].join("\n")
     : "";
 
-  return [systemPrompt.trim(), modeBlock, workspaceBlock, skillsBlock].filter(Boolean).join("\n\n");
+  const projectInstructionsBlock = projectInstructions
+    ? createProjectInstructionsContextBlock(projectInstructions)
+    : "";
+
+  return [systemPrompt.trim(), modeBlock, workspaceBlock, projectInstructionsBlock, skillsBlock].filter(Boolean).join("\n\n");
 }

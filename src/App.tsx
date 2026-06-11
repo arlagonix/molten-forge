@@ -127,6 +127,12 @@ import {
   saveToolsSettings,
 } from "@/lib/ai-chat/storage";
 import { generateTitleFromChatContext } from "@/lib/ai-chat/title-generation";
+import {
+  getProjectInstructionsSnapshot,
+  shouldRefreshProjectInstructions,
+  type ProjectInstructionsSnapshot,
+  type ProjectInstructionsState,
+} from "@/lib/ai-chat/project-instructions";
 import type {
   AgentsSettings,
   AppSettings,
@@ -343,6 +349,12 @@ export default function Home() {
   const [loadedSkills, setLoadedSkills] = useState<LoadedSkillInfo[]>([]);
   const [loadedAgents, setLoadedAgents] = useState<LoadedAgentInfo[]>([]);
   const [chats, setChats] = useState<ChatSession[]>([]);
+  const [projectInstructionsByChatId, setProjectInstructionsByChatId] = useState<
+    Record<string, ProjectInstructionsState | undefined>
+  >({});
+  const projectInstructionsByChatIdRef = useRef<
+    Record<string, ProjectInstructionsState | undefined>
+  >({});
   const [activeChatId, setActiveChatId] = useState<string | undefined>();
   // When true, we're composing an unsaved "New chat". No chat exists yet; the
   // real chat is created on first send. The composer draft lives under
@@ -429,6 +441,10 @@ export default function Home() {
   const [collapsedThinkingStepIds, setCollapsedThinkingStepIds] = useState<
     Record<string, boolean>
   >({});
+
+  useEffect(() => {
+    projectInstructionsByChatIdRef.current = projectInstructionsByChatId;
+  }, [projectInstructionsByChatId]);
   const { messageContextMenu, captureMessageContext, closeMessageContextMenu } =
     useMessageContextMenu();
   const messageElementRefs = useRef(new Map<string, HTMLDivElement>());
@@ -1407,6 +1423,163 @@ export default function Home() {
     toast(message, description ? { description } : undefined);
   }
 
+
+  function getProjectInstructionsPathFromState(
+    state: ProjectInstructionsState | undefined,
+  ) {
+    if (!state) return undefined;
+    if (state.status === "none") {
+      return state.event === "discarded" ? state.discardedPath : undefined;
+    }
+    return state.path;
+  }
+
+  function getProjectInstructionsRootForChat(chat: ChatSession | undefined) {
+    return getEffectiveWorkspaceRoots({
+      workspaceRoots: chat?.workspaceRoots ?? [],
+      activeSkillNames: [],
+      availableSkillsByName,
+    })[0];
+  }
+
+  const ensureProjectInstructionsForChat = useStableCallback(
+    async (
+      chat: ChatSession | undefined,
+      options: { force?: boolean; approveOversized?: boolean } = {},
+    ): Promise<ProjectInstructionsSnapshot | undefined> => {
+      if (!chat) return undefined;
+
+      const workspaceRoot = getProjectInstructionsRootForChat(chat);
+      const previousState = projectInstructionsByChatIdRef.current[chat.id];
+      const previousPath = getProjectInstructionsPathFromState(previousState);
+
+      if (!workspaceRoot) {
+        const nextState: ProjectInstructionsState = previousPath
+          ? {
+              status: "none",
+              event: "discarded",
+              discardedPath: previousPath,
+            }
+          : { status: "none" };
+        setProjectInstructionsByChatId((current) => ({
+          ...current,
+          [chat.id]: nextState,
+        }));
+        projectInstructionsByChatIdRef.current = {
+          ...projectInstructionsByChatIdRef.current,
+          [chat.id]: nextState,
+        };
+        return undefined;
+      }
+
+      if (
+        !options.force &&
+        !options.approveOversized &&
+        !shouldRefreshProjectInstructions(previousState, workspaceRoot) &&
+        previousState?.status === "loaded"
+      ) {
+        return getProjectInstructionsSnapshot(previousState);
+      }
+
+      try {
+        const result = await getWorkspaceBridge().loadProjectInstructions({
+          workspaceRoot,
+          // Project instructions load silently in the background; there is no
+          // chat-timeline approval block for oversized AGENTS.md files.
+          approveOversized: true,
+        });
+
+        let nextState: ProjectInstructionsState;
+        if (result.status === "loaded") {
+          const unchanged =
+            previousState?.status === "loaded" &&
+            previousState.path === result.path &&
+            previousState.sizeBytes === result.sizeBytes &&
+            previousState.mtimeMs === result.mtimeMs;
+
+          if (unchanged) return previousState;
+
+          nextState = {
+            ...result,
+            event: previousState?.status === "loaded" ? "updated" : "loaded",
+            ...(previousPath && previousPath !== result.path
+              ? { replacedPath: previousPath }
+              : {}),
+          };
+        } else if (result.status === "approval_required") {
+          if (
+            previousState?.status === "loaded" &&
+            previousState.path === result.path &&
+            previousState.sizeBytes === result.sizeBytes &&
+            previousState.mtimeMs === result.mtimeMs
+          ) {
+            return previousState;
+          }
+
+          if (
+            previousState?.status === "skipped" &&
+            previousState.path === result.path &&
+            previousState.sizeBytes === result.sizeBytes &&
+            previousState.mtimeMs === result.mtimeMs
+          ) {
+            return undefined;
+          }
+
+          nextState = {
+            ...result,
+            event: "approval_required",
+          };
+        } else if (result.status === "failed") {
+          nextState = {
+            ...result,
+            event: "failed",
+          };
+        } else {
+          nextState = previousPath
+            ? {
+                status: "none",
+                event: "discarded",
+                workspacePath: workspaceRoot.path,
+                discardedPath: previousPath,
+              }
+            : { status: "none", workspacePath: workspaceRoot.path };
+        }
+
+        setProjectInstructionsByChatId((current) => ({
+          ...current,
+          [chat.id]: nextState,
+        }));
+        projectInstructionsByChatIdRef.current = {
+          ...projectInstructionsByChatIdRef.current,
+          [chat.id]: nextState,
+        };
+        return getProjectInstructionsSnapshot(nextState);
+      } catch (error) {
+        const nextState: ProjectInstructionsState = {
+          status: "failed",
+          event: "failed",
+          workspaceRoot,
+          path: `${workspaceRoot.path.replace(/[\\/]+$/, "")}/AGENTS.md`,
+          error: labelForError(error),
+        };
+        setProjectInstructionsByChatId((current) => ({
+          ...current,
+          [chat.id]: nextState,
+        }));
+        projectInstructionsByChatIdRef.current = {
+          ...projectInstructionsByChatIdRef.current,
+          [chat.id]: nextState,
+        };
+        return undefined;
+      }
+    },
+  );
+
+  useEffect(() => {
+    if (!activeChat || isNewChatDraft) return;
+    void ensureProjectInstructionsForChat(activeChat);
+  }, [activeChat?.id, activeChatVisibleWorkspaceRoots[0]?.path, isNewChatDraft, ensureProjectInstructionsForChat]);
+
   const activeChatIdRef = useRef(activeChatId);
 
   useEffect(() => {
@@ -1578,9 +1751,18 @@ export default function Home() {
     chatId: string,
     updater: (chat: ChatSession) => ChatSession,
   ) {
-    setChats((currentChats) =>
-      currentChats.map((chat) => (chat.id === chatId ? updater(chat) : chat)),
-    );
+    setChats((currentChats) => {
+      let didChange = false;
+      const nextChats = currentChats.map((chat) => {
+        if (chat.id !== chatId) return chat;
+
+        const nextChat = updater(chat);
+        if (nextChat !== chat) didChange = true;
+        return nextChat;
+      });
+
+      return didChange ? nextChats : currentChats;
+    });
   }
 
   function updateChatMessages(
@@ -1590,11 +1772,17 @@ export default function Home() {
   ) {
     const shouldTouch = options.touch ?? true;
 
-    updateChat(chatId, (chat) => ({
-      ...chat,
-      messages: updater(chat.messages),
-      ...(shouldTouch ? { updatedAt: new Date().toISOString() } : {}),
-    }));
+    updateChat(chatId, (chat) => {
+      const nextMessages = updater(chat.messages);
+
+      if (nextMessages === chat.messages && !shouldTouch) return chat;
+
+      return {
+        ...chat,
+        messages: nextMessages,
+        ...(shouldTouch ? { updatedAt: new Date().toISOString() } : {}),
+      };
+    });
   }
 
   function updateActiveChatMessages(
@@ -1811,6 +1999,7 @@ export default function Home() {
         ...new Set([...currentChatIds, chatId]),
       ]);
     },
+    ensureProjectInstructionsForChat,
     showError,
   });
 
