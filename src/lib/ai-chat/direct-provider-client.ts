@@ -13,6 +13,7 @@ import type {
 } from "./types";
 import { defaultGenerationSettings } from "./provider-presets";
 import { mergeReasoningMetadata } from "./chat-utils";
+import { ATTACHMENT_LIMITS } from "./attachment-limits";
 
 function getActiveAssistantContent(message: ChatMessage) {
   if (message.role !== "assistant") return message.content;
@@ -146,16 +147,23 @@ function getAttachmentDisplayText(attachment: ChatAttachment) {
   return notices.length ? `\n${notices.join("\n")}` : "";
 }
 
+function getAttachmentModelPath(attachment: ChatAttachment) {
+  return attachment.workspacePath || attachment.storagePath || "unavailable";
+}
+
 function getAttachmentManifestLine(attachment: ChatAttachment) {
-  const workspaceLocation = attachment.workspacePath
-    ? `workspacePath: ${attachment.workspacePath}`
-    : "workspacePath: unavailable";
-  const rootId = attachment.workspaceRootId
-    ? `rootId: ${attachment.workspaceRootId}`
-    : "rootId: unavailable";
+  const modelPath = getAttachmentModelPath(attachment);
   const size = `${attachment.sizeBytes} bytes`;
+  const temporary = attachment.temporary || attachment.storageMode === "temporary"
+    ? "; temporary: true"
+    : "";
+  const contentNote = attachment.extractedText
+    ? "; extracted text included below"
+    : attachment.kind === "image"
+      ? "; image is attached visually if the selected model supports vision"
+      : "; content not included or not extractable";
   const notes = getAttachmentDisplayText(attachment).trim();
-  return `- ${attachment.name} (${attachment.kind}, ${size}; ${rootId}; ${workspaceLocation})${notes ? ` ${notes}` : ""}`;
+  return `- ${attachment.name} (${attachment.kind}, ${size}; path: ${modelPath}${temporary}${contentNote})${notes ? ` ${notes}` : ""}`;
 }
 
 function buildAttachmentManifestBlock(attachments: ChatAttachment[]) {
@@ -169,14 +177,32 @@ function buildAttachmentManifestBlock(attachments: ChatAttachment[]) {
   if (!lines.length) return "";
 
   return [
-    "The user attached files. If a selected workspace contains these files, use read to inspect them. Otherwise rely on the attachment content already sent in the message.",
-    "The available coding tools are read, bash, edit, and write. They do not use rootId.",
-    "Attached files:",
+    "The user attached files. Use the listed path with read/search tools when you need to inspect a file beyond the inline content. Temporary paths may be unavailable in future sessions.",
+    "For images, read(path) returns visual image content when the selected model supports vision.",
+    "Attached files available to tools:",
     ...lines,
   ].join("\n");
 }
 
-async function buildUserApiContent(
+function buildExtractedAttachmentBlocks(attachments: ChatAttachment[]) {
+  const blocks: string[] = [];
+  const visit = (attachment: ChatAttachment) => {
+    if (attachment.extractedText) {
+      const path = getAttachmentModelPath(attachment);
+      const truncation = attachment.truncated
+        ? "\n[truncated: only a limited preview was included]"
+        : "";
+      blocks.push(
+        `----- Attached file: ${attachment.name} -----\npath: ${path}\ntype: ${attachment.kind}\n${truncation}\n${attachment.extractedText}`,
+      );
+    }
+    for (const child of attachment.children ?? []) visit(child);
+  };
+  for (const attachment of attachments) visit(attachment);
+  return blocks;
+}
+
+export async function buildUserApiContent(
   text: string,
   attachments: ChatAttachment[] | undefined,
 ): Promise<string | ApiContentPart[]> {
@@ -189,7 +215,11 @@ async function buildUserApiContent(
     if (attachment.kind !== "image") return;
 
     try {
-      if (attachment.storagePath) {
+      if (attachment.sizeBytes > ATTACHMENT_LIMITS.maxImageBytes) {
+        textBlocks.push(
+          `\n\n----- Attached image: ${attachment.name} -----\n[image not attached visually: file exceeds ${Math.round(ATTACHMENT_LIMITS.maxImageBytes / 1024 / 1024)} MB; use the listed path with read tools if needed]`,
+        );
+      } else if (attachment.storagePath) {
         const dataUrl = await assertElectronBridge().readAttachmentDataUrl({
           storagePath: attachment.storagePath,
           mimeType: attachment.mimeType,
@@ -223,7 +253,15 @@ async function buildUserApiContent(
   }
 
   const manifest = buildAttachmentManifestBlock(attachments);
-  const combinedText = [text, manifest ? `\n\n${manifest}` : "", ...textBlocks]
+  const extractedBlocks = buildExtractedAttachmentBlocks(attachments);
+  const combinedText = [
+    text,
+    manifest ? `\n\n${manifest}` : "",
+    extractedBlocks.length
+      ? `\n\nAttached file content included in this message:\n\n${extractedBlocks.join("\n\n")}`
+      : "",
+    ...textBlocks,
+  ]
     .filter(Boolean)
     .join("");
   return [
@@ -232,7 +270,47 @@ async function buildUserApiContent(
   ];
 }
 
-async function buildApiMessages({
+
+function readToolResultImages(result: ChatToolResult) {
+  if (result.images?.length) return result.images;
+
+  try {
+    const parsed = JSON.parse(result.content) as { type?: unknown; dataUrl?: unknown; mimeType?: unknown; path?: unknown };
+    if (
+      parsed?.type === "image" &&
+      typeof parsed.dataUrl === "string" &&
+      parsed.dataUrl.startsWith("data:image/")
+    ) {
+      return [
+        {
+          type: "image" as const,
+          dataUrl: parsed.dataUrl,
+          mimeType: typeof parsed.mimeType === "string" ? parsed.mimeType : "image/*",
+          path: typeof parsed.path === "string" ? parsed.path : undefined,
+        },
+      ];
+    }
+  } catch {
+    // Keep normal text-only tool results when content is not JSON.
+  }
+
+  return [];
+}
+
+function stripImageDataUrlsFromToolContent(content: string) {
+  try {
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    if (typeof parsed.dataUrl === "string" && parsed.dataUrl.startsWith("data:image/")) {
+      parsed.dataUrl = "[image data attached in the next user message]";
+      return JSON.stringify(parsed, null, 2);
+    }
+  } catch {
+    // Keep original content if it is not JSON.
+  }
+  return content;
+}
+
+export async function buildApiMessages({
   provider,
   systemPrompt,
   messages,
@@ -286,11 +364,28 @@ async function buildApiMessages({
     });
 
     for (const result of variant.toolResults ?? []) {
+      const images = readToolResultImages(result);
       apiMessages.push({
         role: "tool",
         tool_call_id: result.toolCallId,
-        content: result.content,
+        content: images.length ? stripImageDataUrlsFromToolContent(result.content) : result.content,
       });
+
+      if (images.length) {
+        apiMessages.push({
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: `Attached image(s) from tool result ${result.toolName}.`,
+            },
+            ...images.map((image) => ({
+              type: "image_url" as const,
+              image_url: { url: image.dataUrl },
+            })),
+          ],
+        });
+      }
     }
   }
 

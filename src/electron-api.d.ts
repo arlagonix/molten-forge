@@ -89,7 +89,7 @@ declare global {
       pickAttachments: () => Promise<AttachmentInput[]>;
       readClipboardFilePaths: () => Promise<string[]>;
       readClipboardFilePathsSync: () => string[];
-      cleanupChatMessageWorkspace: (request: { chatId: string; messageId: string; generatedFileStoragePaths?: string[] }) => Promise<{ deleted: number }>;
+      cleanupChatMessageWorkspace: (request: { chatId: string; messageId: string; generatedFileStoragePaths?: string[]; attachments?: ChatAttachment[] }) => Promise<{ deleted: number }>;
       processAttachments: (request: AttachmentInput[] | { inputs: AttachmentInput[] }) => Promise<AttachmentProcessResult>;
       readAttachmentDataUrl: (request: { storagePath: string; mimeType?: string }) => Promise<string>;
       exportAttachment: (request: { storagePath: string; name?: string }) => Promise<{ cancelled: boolean; path?: string }>;
@@ -191,6 +191,8 @@ declare global {
         name: string;
         args: unknown;
         workspaceRoots?: ChatWorkspaceRoot[];
+        allowedExactFilePaths?: string[];
+        allowedReadRoots?: ChatWorkspaceRoot[];
         timeoutMs?: number;
       }) => Promise<ToolCommandResult>;
       executeStream: (request: {
@@ -198,6 +200,8 @@ declare global {
         name: string;
         args: unknown;
         workspaceRoots?: ChatWorkspaceRoot[];
+        allowedExactFilePaths?: string[];
+        allowedReadRoots?: ChatWorkspaceRoot[];
         timeoutMs?: number;
       }) => Promise<ToolCommandResult>;
       onStreamEvent: (

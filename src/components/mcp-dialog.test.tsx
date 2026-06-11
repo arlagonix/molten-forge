@@ -147,24 +147,16 @@ describe("McpDialog", () => {
     const { user } = renderMcpDialog();
 
     expect(
-      screen.getByText((_, element) =>
-        Boolean(
-          element?.textContent?.includes(
-            "Tool switches here control whether MCP tools are visible",
-          ),
-        ),
+      screen.getByText(
+        /Tool switches here control whether MCP tools are visible in Tools settings and model context/i,
       ),
     ).toBeInTheDocument();
 
     await user.click(screen.getByText("github"));
 
     expect(
-      screen.queryByText((_, element) =>
-        Boolean(
-          element?.textContent?.includes(
-            "Tool switches here control whether MCP tools are visible",
-          ),
-        ),
+      screen.queryByText(
+        /Tool switches here control whether MCP tools are visible in Tools settings and model context/i,
       ),
     ).not.toBeInTheDocument();
   });

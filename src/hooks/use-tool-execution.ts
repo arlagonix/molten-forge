@@ -47,6 +47,8 @@ type PendingUserInputRequest = {
   reject: (error: unknown) => void;
   cleanup: () => void;
   workspaceRoots?: ChatWorkspaceRoot[];
+  allowedExactFilePaths?: string[];
+  allowedReadRoots?: ChatWorkspaceRoot[];
   signal?: AbortSignal;
   tool?: LoadedToolInfo;
 };
@@ -88,6 +90,8 @@ export function useToolExecution({
     args: unknown,
     context?: {
       workspaceRoots?: ChatWorkspaceRoot[];
+      allowedExactFilePaths?: string[];
+      allowedReadRoots?: ChatWorkspaceRoot[];
       signal?: AbortSignal;
       onTerminalStreamEvent?: (event: TerminalStreamEvent) => void;
       timeoutMs?: number;
@@ -247,6 +251,8 @@ export function useToolExecution({
       stepId: string;
       signal?: AbortSignal;
       workspaceRoots?: ChatWorkspaceRoot[];
+      allowedExactFilePaths?: string[];
+      allowedReadRoots?: ChatWorkspaceRoot[];
       fileToolAutoApproval?: ChatFileToolAutoApproval;
       tool?: LoadedToolInfo;
     },
@@ -305,6 +311,8 @@ export function useToolExecution({
         variantId: options.variantId,
         stepId: options.stepId,
         workspaceRoots: options.workspaceRoots ?? workspaceRoots,
+        allowedExactFilePaths: options.allowedExactFilePaths,
+        allowedReadRoots: options.allowedReadRoots,
         signal: options.signal,
         tool,
         resolve: settleResolve,
@@ -575,6 +583,8 @@ export function useToolExecution({
       variantId: string;
       stepId: string;
       workspaceRoots?: ChatWorkspaceRoot[];
+      allowedExactFilePaths?: string[];
+      allowedReadRoots?: ChatWorkspaceRoot[];
       signal?: AbortSignal;
       tool?: LoadedToolInfo;
     },
@@ -594,6 +604,8 @@ export function useToolExecution({
           toolName === BASH_TOOL_NAME
             ? {
                 workspaceRoots: options.workspaceRoots ?? workspaceRoots,
+                allowedExactFilePaths: options.allowedExactFilePaths,
+                allowedReadRoots: options.allowedReadRoots,
                 signal: options.signal,
                 onTerminalStreamEvent: createTerminalStreamHandler(toolCall, options),
                 timeoutMs: tool?.timeoutMs,
@@ -601,6 +613,8 @@ export function useToolExecution({
             : isFileToolName(toolName)
               ? {
                   workspaceRoots: options.workspaceRoots ?? workspaceRoots,
+                  allowedExactFilePaths: options.allowedExactFilePaths,
+                  allowedReadRoots: options.allowedReadRoots,
                   signal: options.signal,
                   timeoutMs: tool?.timeoutMs,
                 }
@@ -639,6 +653,8 @@ export function useToolExecution({
       signal?: AbortSignal;
       activeSkillNames?: string[];
       workspaceRoots?: ChatWorkspaceRoot[];
+      allowedExactFilePaths?: string[];
+      allowedReadRoots?: ChatWorkspaceRoot[];
       fileToolAutoApproval?: ChatFileToolAutoApproval;
       tool?: LoadedToolInfo;
       unavailableToolMessage?: string;
@@ -774,6 +790,8 @@ export function useToolExecution({
         } else {
           const execution = await executeExternalTool(toolCall.function.name, args, {
             workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,
+            allowedExactFilePaths: pendingRequest.allowedExactFilePaths,
+            allowedReadRoots: pendingRequest.allowedReadRoots,
             signal: pendingRequest.signal,
             timeoutMs: tool?.timeoutMs,
             ...(toolCall.function.name === BASH_TOOL_NAME

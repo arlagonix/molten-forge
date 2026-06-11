@@ -17,6 +17,10 @@ export type WorkspaceRoot = {
 
 export type ToolExecutionContext = {
   workspaceRoots?: WorkspaceRoot[];
+  /** Exact attachment files exposed without exposing their parent folders. */
+  allowedExactFilePaths?: string[];
+  /** Attachment staging folders exposed for temporary/pathless files. */
+  allowedReadRoots?: WorkspaceRoot[];
   signal?: AbortSignal;
   timeoutMs?: number;
 };

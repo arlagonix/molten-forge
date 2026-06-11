@@ -619,8 +619,8 @@ export const ChatComposer = memo(
             {hasImageAttachments && !supportsVision && (
               <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="size-3.5" />
-                This model is not marked as vision-capable. The request will
-                still be sent.
+                This model is not marked as vision-capable. Images will still
+                be sent, but the model may ignore them or the provider may reject the request.
               </div>
             )}
             <div className="relative">

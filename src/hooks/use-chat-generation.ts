@@ -249,6 +249,48 @@ function mergeChatWorkspaceRoot(
   return [{ ...root, automatic: true, kind: "chat" as const }, ...withoutChatRoot];
 }
 
+
+function collectAttachmentAccess(
+  messages: ChatMessage[],
+  liveAttachments?: ChatAttachment[],
+) {
+  const exactFiles = new Set<string>();
+  const readRoots = new Map<string, ChatWorkspaceRoot>();
+
+  const visitAttachment = (attachment: ChatAttachment) => {
+    if (attachment.storagePath && attachment.available !== false) {
+      exactFiles.add(attachment.storagePath);
+      if (attachment.temporary || attachment.storageMode === "temporary") {
+        const parts = attachment.storagePath.split(/[\\/]/);
+        parts.pop();
+        const rootPath = parts.join(attachment.storagePath.includes("\\") ? "\\" : "/");
+        if (rootPath && !readRoots.has(rootPath)) {
+          readRoots.set(rootPath, {
+            id: `attachment:${readRoots.size + 1}`,
+            name: "Temporary attachments",
+            path: rootPath,
+            createdAt: new Date(0).toISOString(),
+            automatic: true,
+            kind: "chat",
+          });
+        }
+      }
+    }
+    for (const child of attachment.children ?? []) visitAttachment(child);
+  };
+
+  for (const message of messages) {
+    if (message.role !== "user") continue;
+    for (const attachment of message.attachments ?? []) visitAttachment(attachment);
+  }
+  for (const attachment of liveAttachments ?? []) visitAttachment(attachment);
+
+  return {
+    allowedExactFilePaths: [...exactFiles],
+    allowedReadRoots: [...readRoots.values()],
+  };
+}
+
 export function useChatGeneration({
   activeChat,
   activeChatId,
@@ -332,8 +374,11 @@ export function useChatGeneration({
     args: unknown,
     context?: {
       workspaceRoots?: ChatWorkspaceRoot[];
+      allowedExactFilePaths?: string[];
+      allowedReadRoots?: ChatWorkspaceRoot[];
       signal?: AbortSignal;
       onTerminalStreamEvent?: (event: TerminalStreamEvent) => void;
+      timeoutMs?: number;
     },
   ) => Promise<ToolCommandResult>;
   onChatGenerationFinished?: (
@@ -3302,6 +3347,10 @@ export function useChatGeneration({
           chatSnapshot,
           currentActiveSkillNames,
         );
+        const attachmentAccess = collectAttachmentAccess(
+          currentMessages,
+          toolRound === 0 ? userAttachments : undefined,
+        );
 
         const thinkingStepId = createId();
         appendAssistantProcessSteps(chatId, assistantMessageId, variantId, [
@@ -3520,6 +3569,8 @@ export function useChatGeneration({
                   signal: controller.signal,
                   activeSkillNames: currentActiveSkillNames,
                   workspaceRoots: currentWorkspaceRoots,
+                  allowedExactFilePaths: attachmentAccess.allowedExactFilePaths,
+                  allowedReadRoots: attachmentAccess.allowedReadRoots,
                   fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
                   tool: currentToolsForRun.find(
                     (candidate) => candidate.name === toolCall.function.name,

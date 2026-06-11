@@ -9,6 +9,7 @@ export function formatAttachmentSize(bytes: number) {
     unitIndex += 1;
   }
 
-  const precision = value >= 10 || unitIndex === 0 ? 0 : 1;
+  const precision =
+    Number.isInteger(value) || value >= 10 || unitIndex === 0 ? 0 : 1;
   return `${value.toFixed(precision)} ${units[unitIndex]}`;
 }

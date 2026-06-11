@@ -81,6 +81,12 @@ import {
   normalizeModesState,
   resolveModeForChat,
 } from "@/lib/ai-chat/modes";
+import {
+  applyNewChatDraftSettings,
+  buildNewChatDraftSettings,
+  getFolderDefaultWorkspaceRoots,
+  type NewChatDraftSettings,
+} from "@/lib/ai-chat/chat-session-actions";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
   getEffectiveAgentPermission,
@@ -128,6 +134,7 @@ import type {
   ChatFolder,
   ChatMessage,
   ChatSession,
+  ChatThinkingMode,
   ChatToolCall,
   ChatToolResult,
   ChatWorkspaceRoot,
@@ -364,6 +371,9 @@ export default function Home() {
     string | undefined
   >();
   const [newChatDraftModeId, setNewChatDraftModeId] = useState(DEFAULT_MODE_ID);
+  const [newChatDraftSettings, setNewChatDraftSettings] = useState<
+    NewChatDraftSettings | undefined
+  >();
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [generatingChatIds, setGeneratingChatIds] = useState<string[]>([]);
   const [completedGenerationChatIds, setCompletedGenerationChatIds] = useState<
@@ -1773,6 +1783,8 @@ export default function Home() {
               name: toolName,
               args,
               workspaceRoots: workspaceRootsWithSkills,
+              allowedExactFilePaths: context?.allowedExactFilePaths,
+              allowedReadRoots: context?.allowedReadRoots,
               timeoutMs: tool?.timeoutMs,
             })
             .then(settleResolve, settleReject);
@@ -1785,6 +1797,8 @@ export default function Home() {
             name: toolName,
             args,
             workspaceRoots: workspaceRootsWithSkills,
+            allowedExactFilePaths: context?.allowedExactFilePaths,
+            allowedReadRoots: context?.allowedReadRoots,
             timeoutMs: tool?.timeoutMs,
           })
           .then(settleResolve, settleReject);
@@ -1835,14 +1849,15 @@ export default function Home() {
         ? newChatDraftFolderId
         : undefined;
 
-      const chat: ChatSession = {
-        ...emptyChat,
+      const chat: ChatSession = applyNewChatDraftSettings({
+        baseChat: emptyChat,
+        draftSettings: newChatDraftSettings,
         modeId: activeMode.id,
         folderId: draftFolderId,
-        workspaceRoots: workspaceRoots.length ? workspaceRoots : undefined,
-        fileToolAutoApproval:
+        workspaceRoots,
+        fileToolAutoApprovalDefaults:
           buildFileToolAutoApprovalFromToolsSettings(toolsSettings),
-      };
+      });
 
       saveCurrentChatScrollSnapshot();
       setChats((currentChats) => [chat, ...currentChats]);
@@ -1863,6 +1878,7 @@ export default function Home() {
       });
       setNewChatDraftWorkspaceRoots([]);
       setNewChatDraftFolderId(undefined);
+      setNewChatDraftSettings(undefined);
 
       pendingDraftSendRef.current = {
         chatId: chat.id,
@@ -1886,6 +1902,7 @@ export default function Home() {
       toolsSettings,
       newChatDraftWorkspaceRoots,
       newChatDraftFolderId,
+      newChatDraftSettings,
       appSettings.chatFolders,
       saveCurrentChatScrollSnapshot,
       resetChatScrollState,
@@ -2030,7 +2047,7 @@ export default function Home() {
     saveEditedUserMessage,
     stopGeneration,
     createNewChat,
-    createChatWithSameSettings,
+    cloneChat,
     switchChat,
     clearChat,
     removeChat,
@@ -2078,7 +2095,41 @@ export default function Home() {
     setNewChatDraftWorkspaceRoots([]);
     setNewChatDraftFolderId(undefined);
     setNewChatDraftModeId(DEFAULT_MODE_ID);
+    setNewChatDraftSettings(undefined);
     createNewChat();
+  }
+
+  function createNewChatWithSameSettings(chatId: string) {
+    const sourceChat = chats.find((chat) => chat.id === chatId);
+    if (!sourceChat) return;
+
+    const settings = buildNewChatDraftSettings(sourceChat);
+    const folderId = settings.folderId;
+    const draftFolderId = appSettings.chatFolders.some(
+      (folder) => folder.id === folderId,
+    )
+      ? folderId
+      : undefined;
+
+    setNewChatDraftSettings({ ...settings, folderId: draftFolderId });
+    setNewChatDraftWorkspaceRoots(settings.workspaceRoots ?? []);
+    setNewChatDraftFolderId(draftFolderId);
+    setNewChatDraftModeId(settings.modeId ?? DEFAULT_MODE_ID);
+    createNewChat();
+  }
+
+  function setActiveOrDraftChatThinkingMode(
+    thinkingMode: ChatThinkingMode,
+  ) {
+    if (isNewChatDraft) {
+      setNewChatDraftSettings((currentSettings) => ({
+        ...(currentSettings ?? {}),
+        thinkingMode,
+      }));
+      return;
+    }
+
+    setActiveChatThinkingMode(thinkingMode);
   }
 
   async function removeChatAndResetDraftState(chatId: string) {
@@ -2086,14 +2137,11 @@ export default function Home() {
     if (willOpenNewChatDraft) {
       setNewChatDraftWorkspaceRoots([]);
       setNewChatDraftFolderId(undefined);
+      setNewChatDraftSettings(undefined);
       setNewChatDraftModeId(DEFAULT_MODE_ID);
     }
 
     await removeChat(chatId);
-  }
-
-  function cloneWorkspaceRoots(roots?: ChatWorkspaceRoot[]) {
-    return roots?.map((root) => ({ ...root })) ?? [];
   }
 
   function updateChatFolders(updater: (folders: ChatFolder[]) => ChatFolder[]) {
@@ -2189,16 +2237,17 @@ export default function Home() {
           : folder,
       ),
     );
-    showSuccess("Default workspaces cleared.");
+    showSuccess("Default workspace removed.");
   }
 
   function createNewChatInFolder(folderId: string) {
     const folder = appSettings.chatFolders.find((item) => item.id === folderId);
     if (!folder) return;
 
-    setNewChatDraftWorkspaceRoots([]);
+    setNewChatDraftWorkspaceRoots(getFolderDefaultWorkspaceRoots(folder));
     setNewChatDraftFolderId(folder.id);
     setNewChatDraftModeId(DEFAULT_MODE_ID);
+    setNewChatDraftSettings(undefined);
     createNewChat();
   }
 
@@ -2429,6 +2478,7 @@ export default function Home() {
   const stableRenameChat = useStableCallback(renameChat);
   const stableToggleChatPinned = useStableCallback(toggleChatPinned);
   const stableGenerateChatTitle = useStableCallback(generateChatTitle);
+  const stableCloneChat = useStableCallback(cloneChat);
   const stableShowSuccess = useStableCallback(showSuccess);
   const stableShowError = useStableCallback(showError);
 
@@ -2563,6 +2613,7 @@ export default function Home() {
         onRenameChat={stableRenameChat}
         onToggleChatPinned={stableToggleChatPinned}
         onGenerateChatTitle={stableGenerateChatTitle}
+        onCloneChat={stableCloneChat}
         onRemoveChat={(chatId) => {
           setCompletedGenerationChatIds((currentChatIds) =>
             currentChatIds.filter((currentChatId) => currentChatId !== chatId),
@@ -2571,11 +2622,13 @@ export default function Home() {
         }}
         onCreateNewChat={createNewChatWithEmptyDraftState}
         onCreateChatInFolder={createNewChatInFolder}
-        onCreateChatWithSameSettings={createChatWithSameSettings}
+        onCreateChatWithSameSettings={createNewChatWithSameSettings}
         onOpenSettings={() => setSettingsOpen(true)}
         onCreateFolder={createFolder}
         onRenameFolder={renameFolder}
         onDeleteFolder={deleteFolder}
+        onSetFolderWorkspace={addFolderWorkspace}
+        onClearFolderWorkspace={clearFolderWorkspaces}
         onMoveChatToFolder={moveChatToFolder}
         onRemoveChatFromFolder={removeChatFromFolder}
         onClearChat={(chatId) => {
@@ -2826,8 +2879,12 @@ export default function Home() {
         globalAgentPermissions={globalAgentPermissions}
         modeAgentPermissions={activeModeAgentPermissions}
         modeName={activeMode.name || "Default"}
-        thinkingMode={activeChat?.thinkingMode ?? "model_default"}
-        onThinkingModeChange={setActiveChatThinkingMode}
+        thinkingMode={
+          isNewChatDraft
+            ? (newChatDraftSettings?.thinkingMode ?? "model_default")
+            : (activeChat?.thinkingMode ?? "model_default")
+        }
+        onThinkingModeChange={setActiveOrDraftChatThinkingMode}
         disabled={isSending}
       />
 

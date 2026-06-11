@@ -54,7 +54,7 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
           disabled={!activeChatExists || disabled}
           aria-expanded={open}
           className={cn(
-            "h-9 max-w-[13rem] shrink-0 gap-2 px-3",
+            "h-9 max-w-[13rem] shrink-0 gap-2 px-3 font-normal",
             visibleRoots.length === 0 && "text-muted-foreground",
           )}
           title={
@@ -67,7 +67,7 @@ export const WorkspaceRootsControl = memo(function WorkspaceRootsControl({
           aria-label="Manage workspace folder for this chat"
         >
           <FolderOpen className="size-4 shrink-0 opacity-70" />
-          <span className="min-w-0 truncate">{label}</span>
+          <span className="min-w-0 truncate font-normal">{label}</span>
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(26rem,calc(100vw-2rem))] p-0">

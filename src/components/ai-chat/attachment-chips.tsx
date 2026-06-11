@@ -76,9 +76,11 @@ function countArchiveChildren(attachment: ChatAttachment): number {
 function AttachmentIcon({
   attachment,
   onPreview,
+  iconClassName,
 }: {
   attachment: ChatAttachment;
   onPreview: (attachment: ChatAttachment) => void;
+  iconClassName?: string;
 }) {
   if (attachment.kind === "image" && attachment.thumbnailDataUrl) {
     return (
@@ -120,14 +122,14 @@ function AttachmentIcon({
         }}
         title="Preview image"
       >
-        <Icon className="size-5 text-muted-foreground" />
+        <Icon className={cn("size-5 text-muted-foreground", iconClassName)} />
       </button>
     );
   }
 
   return (
     <span className="flex size-8 shrink-0 items-center justify-center">
-      <Icon className="size-5 text-muted-foreground" />
+      <Icon className={cn("size-7 text-muted-foreground", iconClassName)} />
     </span>
   );
 }
@@ -138,12 +140,14 @@ export function AttachmentChips({
   isProcessing = false,
   onRemove,
   className,
+  tone = "default",
 }: {
   attachments: ChatAttachment[];
   readOnly?: boolean;
   isProcessing?: boolean;
   onRemove?: (attachmentId: string) => void;
   className?: string;
+  tone?: "default" | "onPrimary";
 }) {
   const [previewImage, setPreviewImage] = useState<PreviewState | null>(null);
   const [isDraggingPreview, setIsDraggingPreview] = useState(false);
@@ -398,6 +402,17 @@ export function AttachmentChips({
 
   if (!attachments.length && !isProcessing) return null;
 
+  const isOnPrimary = tone === "onPrimary";
+  const mutedTextClassName = isOnPrimary
+    ? "text-primary-foreground/75"
+    : "text-muted-foreground";
+  const chipClassName = isOnPrimary
+    ? "border-primary-foreground/35 bg-primary-foreground/10 text-primary-foreground"
+    : "border bg-muted/25";
+  const actionButtonClassName = isOnPrimary
+    ? "h-7 w-7 shrink-0 bg-primary-foreground/10 text-primary-foreground hover:bg-primary-foreground/20 hover:text-primary-foreground"
+    : "h-7 w-7 shrink-0 bg-muted/40 hover:bg-muted";
+
   return (
     <>
       <div className={cn("max-h-36 overflow-y-auto pr-1", className)}>
@@ -412,23 +427,36 @@ export function AttachmentChips({
               <div
                 key={attachment.id}
                 className={cn(
-                  "flex min-h-12 min-w-0 max-w-[15rem] items-center gap-2 border bg-muted/25 px-2 py-1.5 text-xs",
+                  "flex min-h-12 min-w-0 max-w-[15rem] items-center gap-2 px-2 py-1.5 text-xs",
+                  chipClassName,
                   attachment.error && "border-destructive/40 bg-destructive/10",
                 )}
-                title={attachment.error ?? attachment.name}
+                title={
+                  attachment.available === false
+                    ? `${attachment.name} (unavailable)`
+                    : (attachment.error ?? attachment.name)
+                }
               >
                 <AttachmentIcon
                   attachment={attachment}
                   onPreview={handlePreviewImage}
+                  iconClassName={mutedTextClassName}
                 />
                 <span className="grid min-w-0 flex-1 gap-0.5">
-                  <span className="truncate font-medium">{attachment.name}</span>
-                  <span className="truncate text-muted-foreground">
+                  <span className="truncate font-medium">
+                    {attachment.name}
+                  </span>
+                  <span className={cn("truncate", mutedTextClassName)}>
                     {attachment.kind === "archive" && childCount
                       ? `${childCount} files · ${formatAttachmentSize(attachment.sizeBytes)}`
                       : formatAttachmentSize(attachment.sizeBytes)}
                   </span>
                 </span>
+                {attachment.available === false && (
+                  <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                    unavailable
+                  </Badge>
+                )}
                 {attachment.truncated && (
                   <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
                     truncated
@@ -443,7 +471,7 @@ export function AttachmentChips({
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      className="h-7 w-7 shrink-0 bg-muted/40 hover:bg-muted"
+                      className={actionButtonClassName}
                       onClick={(event) => {
                         event.stopPropagation();
                         void handleDownloadAttachment(attachment);
@@ -458,7 +486,7 @@ export function AttachmentChips({
                       type="button"
                       variant="ghost"
                       size="icon-sm"
-                      className="h-7 w-7 shrink-0 bg-muted/40 hover:bg-muted"
+                      className={actionButtonClassName}
                       onClick={() => onRemove(attachment.id)}
                       title="Remove attachment"
                     >

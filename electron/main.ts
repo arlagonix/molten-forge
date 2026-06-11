@@ -1977,6 +1977,14 @@ function getStoragePaths() {
   };
 }
 
+function getTempAttachmentRoot() {
+  return path.join(app.getPath("temp"), "chat-forge", "attachments");
+}
+
+function getPendingTempAttachmentPath(id: string) {
+  return path.join(getTempAttachmentRoot(), "pending", sanitizeFileNamePart(id));
+}
+
 const CHAT_WORKSPACE_ROOT_ID = "chat";
 
 function getChatWorkspacePath(chatId: string) {
@@ -2013,6 +2021,7 @@ function normalizeManagedFilePath(storagePath: string) {
   const roots = [
     path.resolve(getStoragePaths().attachmentsDir),
     path.resolve(getStoragePaths().chatWorkspacesDir),
+    path.resolve(getTempAttachmentRoot()),
   ];
   const resolvedStoragePath = path.resolve(storagePath);
 
@@ -2170,9 +2179,11 @@ async function exportManagedFile(request: unknown) {
     safeString(value.name).trim() || path.basename(storagePath),
   );
   const sourcePath = storagePath
-    ? normalizeManagedFilePath(storagePath)
+    ? normalizeManagedFilePath(storagePath) ?? path.resolve(storagePath)
     : undefined;
-  if (!sourcePath) throw new Error("File is outside managed app storage.");
+  if (!sourcePath) throw new Error("File is unavailable.");
+  const sourceStats = await fs.stat(sourcePath);
+  if (!sourceStats.isFile()) throw new Error("File is unavailable.");
 
   const browserWindow =
     BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
@@ -2283,8 +2294,13 @@ async function cleanupChatMessageWorkspace(request: unknown) {
         (item): item is string => typeof item === "string",
       )
     : [];
+  const attachments = Array.isArray(value.attachments) ? value.attachments : [];
 
   if (!chatId || !messageId) return { deleted: 0 };
+
+  const attachmentCleanup = await deleteTemporaryAttachmentStoragePaths(
+    collectAttachmentStoragePaths(attachments),
+  );
 
   const chatWorkspacePath = getChatWorkspacePath(chatId);
   const workspaceRoot = path.resolve(chatWorkspacePath);
@@ -2328,7 +2344,7 @@ async function cleanupChatMessageWorkspace(request: unknown) {
     deleted += 1;
   }
 
-  return { deleted };
+  return { deleted: deleted + attachmentCleanup.deleted };
 }
 
 type AttachmentInput =
@@ -2407,6 +2423,9 @@ function inferMimeType(
     ".webp": "image/webp",
     ".gif": "image/gif",
     ".pdf": "application/pdf",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".zip": "application/zip",
     ".tar": "application/x-tar",
     ".tar.gz": "application/gzip",
@@ -2459,6 +2478,12 @@ function classifyAttachment(
   if (extension === ".pdf" || normalizedMimeType === "application/pdf") {
     return "pdf";
   }
+  if (
+    [".docx", ".xlsx", ".pptx"].includes(extension) ||
+    normalizedMimeType.includes("officedocument")
+  ) {
+    return "office";
+  }
   if (hasArchiveExtension(name)) return "archive";
   return "text";
 }
@@ -2482,32 +2507,49 @@ function isLikelyBinary(buffer: Buffer) {
   return nonPrintable / sample.length > 0.3;
 }
 
-async function storeAttachmentBuffer(buffer: Buffer, originalName: string) {
+async function storeTemporaryAttachmentBuffer(buffer: Buffer, originalName: string) {
   const id = randomUUID();
   const safeName = sanitizeFileNamePart(path.basename(originalName));
-  const directory = path.join(getStoragePaths().attachmentsDir, id);
+  const directory = getPendingTempAttachmentPath(id);
   const storagePath = path.join(directory, safeName);
   await fs.mkdir(directory, { recursive: true });
   await fs.writeFile(storagePath, buffer);
   return { id, storagePath };
 }
 
+function isPathInsideRoot(rootPath: string, candidatePath: string) {
+  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function getAttachmentStorageMode(storagePath: string | undefined) {
+  if (!storagePath) return undefined;
+  if (isPathInsideRoot(getTempAttachmentRoot(), storagePath)) return "temporary" as const;
+  if (normalizeManagedFilePath(storagePath)) return "managed" as const;
+  return "original" as const;
+}
+
 async function readAttachmentInput(input: AttachmentInput) {
   if ("path" in input && typeof input.path === "string") {
-    const buffer = await fs.readFile(input.path);
+    const resolvedPath = path.resolve(input.path);
+    const stats = await fs.stat(resolvedPath);
+    if (!stats.isFile()) throw new Error(`Attachment path is not a file: ${input.path}`);
     return {
-      name: input.name || path.basename(input.path),
-      sourcePath: input.path,
-      buffer,
+      name: input.name || path.basename(resolvedPath),
+      sourcePath: resolvedPath,
+      buffer: undefined as Buffer | undefined,
+      sizeBytes: stats.size,
       mimeType: input.mimeType,
     };
   }
 
   if ("bytes" in input) {
+    const buffer = bufferFromUnknownBytes(input.bytes);
     return {
       name: input.name,
       sourcePath: undefined,
-      buffer: bufferFromUnknownBytes(input.bytes),
+      buffer,
+      sizeBytes: buffer.byteLength,
       mimeType: input.mimeType,
     };
   }
@@ -2516,6 +2558,7 @@ async function readAttachmentInput(input: AttachmentInput) {
     name: input.name,
     sourcePath: undefined,
     buffer: Buffer.alloc(0),
+    sizeBytes: 0,
     mimeType: input.mimeType,
   };
 }
@@ -2571,41 +2614,104 @@ function applyTextCaps(text: string, state: AttachmentProcessState) {
   return { text: nextText, truncated };
 }
 
+async function readAttachmentFileBuffer(
+  sourcePath: string | undefined,
+  buffer: Buffer | undefined,
+) {
+  if (buffer) return buffer;
+  if (!sourcePath) return Buffer.alloc(0);
+  return fs.readFile(sourcePath);
+}
+
+function createPathBackedAttachment({
+  id = randomUUID(),
+  name,
+  kind,
+  mimeType,
+  sizeBytes,
+  storagePath,
+  extractedText,
+  truncated,
+  error,
+  tokenEstimate,
+}: {
+  id?: string;
+  name: string;
+  kind: AttachmentKind;
+  mimeType: string;
+  sizeBytes: number;
+  storagePath?: string;
+  extractedText?: string;
+  truncated?: boolean;
+  error?: string;
+  tokenEstimate?: number;
+}): ChatAttachment {
+  const storageMode = getAttachmentStorageMode(storagePath);
+  return {
+    id,
+    name,
+    kind,
+    mimeType,
+    sizeBytes,
+    storagePath,
+    storageMode,
+    temporary: storageMode === "temporary",
+    available: Boolean(storagePath),
+    extractedText,
+    truncated,
+    error,
+    tokenEstimate,
+  };
+}
+
 async function processImageAttachment({
   name,
   buffer,
+  sourcePath,
+  sizeBytes,
   mimeType,
 }: {
   name: string;
-  buffer: Buffer;
+  buffer?: Buffer;
+  sourcePath?: string;
+  sizeBytes: number;
   mimeType?: string;
 }): Promise<ChatAttachment> {
-  if (buffer.byteLength > ATTACHMENT_LIMITS.maxImageBytes) {
+  if (sizeBytes > ATTACHMENT_LIMITS.maxImageBytes && !sourcePath) {
     return makeAttachmentError({
       name,
       kind: "image",
       mimeType: mimeType ?? inferMimeType(name),
-      sizeBytes: buffer.byteLength,
-      error: `Image exceeds ${Math.round(ATTACHMENT_LIMITS.maxImageBytes / 1024 / 1024)} MB limit`,
+      sizeBytes,
+      error: `Image exceeds ${Math.round(ATTACHMENT_LIMITS.maxImageBytes / 1024 / 1024)} MB staging limit`,
     });
   }
 
-  const stored = await storeAttachmentBuffer(buffer, name);
+  const stored = sourcePath
+    ? { id: randomUUID(), storagePath: sourcePath }
+    : await storeTemporaryAttachmentBuffer(buffer ?? Buffer.alloc(0), name);
   const resolvedMimeType = mimeType ?? inferMimeType(name, "image/*");
-  const thumbnailDataUrl =
-    buffer.byteLength <= 512 * 1024
-      ? `data:${resolvedMimeType};base64,${buffer.toString("base64")}`
+  const imageBuffer =
+    sizeBytes <= 512 * 1024
+      ? await readAttachmentFileBuffer(sourcePath, buffer)
       : undefined;
+  const thumbnailDataUrl = imageBuffer
+    ? `data:${resolvedMimeType};base64,${imageBuffer.toString("base64")}`
+    : undefined;
 
-  const attachment: ChatAttachment = {
+  const attachment = createPathBackedAttachment({
     id: stored.id,
     name,
     kind: "image",
     mimeType: resolvedMimeType,
-    sizeBytes: buffer.byteLength,
+    sizeBytes,
     storagePath: stored.storagePath,
-    thumbnailDataUrl,
-  };
+    ...(sizeBytes > ATTACHMENT_LIMITS.maxImageBytes
+      ? { error: `Image was not inserted visually because it exceeds ${Math.round(ATTACHMENT_LIMITS.maxImageBytes / 1024 / 1024)} MB.` }
+      : {}),
+    tokenEstimate: 0,
+  });
+  attachment.thumbnailDataUrl = thumbnailDataUrl;
   attachment.tokenEstimate = estimateAttachmentTokens(attachment);
   return attachment;
 }
@@ -2613,46 +2719,71 @@ async function processImageAttachment({
 async function processTextAttachment({
   name,
   buffer,
+  sourcePath,
+  sizeBytes,
   mimeType,
   state,
 }: {
   name: string;
-  buffer: Buffer;
+  buffer?: Buffer;
+  sourcePath?: string;
+  sizeBytes: number;
   mimeType?: string;
   state: AttachmentProcessState;
 }): Promise<ChatAttachment> {
-  if (buffer.byteLength > ATTACHMENT_LIMITS.maxFileBytes) {
+  if (sizeBytes > ATTACHMENT_LIMITS.maxFileBytes) {
+    if (sourcePath) {
+      const attachment = createPathBackedAttachment({
+        name,
+        kind: "text",
+        mimeType: mimeType ?? inferMimeType(name),
+        sizeBytes,
+        storagePath: sourcePath,
+        error: `Content was not injected because the file exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB. Use read/search tools for targeted inspection.`,
+        tokenEstimate: 0,
+      });
+      return attachment;
+    }
     return makeAttachmentError({
       name,
       kind: "text",
       mimeType: mimeType ?? inferMimeType(name),
-      sizeBytes: buffer.byteLength,
-      error: `File exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB limit`,
+      sizeBytes,
+      error: `Pathless file exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB staging limit`,
     });
   }
 
-  if (isLikelyBinary(buffer)) {
-    return makeAttachmentError({
+  const fileBuffer = await readAttachmentFileBuffer(sourcePath, buffer);
+  if (isLikelyBinary(fileBuffer)) {
+    const stored = sourcePath
+      ? { id: randomUUID(), storagePath: sourcePath }
+      : await storeTemporaryAttachmentBuffer(fileBuffer, name);
+    return createPathBackedAttachment({
+      id: stored.id,
       name,
       kind: "text",
       mimeType: mimeType ?? inferMimeType(name),
-      sizeBytes: buffer.byteLength,
-      error: "Binary file skipped",
+      sizeBytes,
+      storagePath: stored.storagePath,
+      error: "Binary-looking file skipped; raw bytes were not injected.",
+      tokenEstimate: 0,
     });
   }
 
-  const stored = await storeAttachmentBuffer(buffer, name);
-  const capped = applyTextCaps(buffer.toString("utf8"), state);
-  const attachment: ChatAttachment = {
+  const stored = sourcePath
+    ? { id: randomUUID(), storagePath: sourcePath }
+    : await storeTemporaryAttachmentBuffer(fileBuffer, name);
+  const capped = applyTextCaps(fileBuffer.toString("utf8"), state);
+  const attachment = createPathBackedAttachment({
     id: stored.id,
     name,
     kind: "text",
     mimeType: mimeType ?? inferMimeType(name, "text/plain"),
-    sizeBytes: buffer.byteLength,
+    sizeBytes,
     storagePath: stored.storagePath,
     extractedText: capped.text,
     truncated: capped.truncated,
-  };
+  });
   attachment.tokenEstimate = estimateAttachmentTokens(attachment);
   return attachment;
 }
@@ -2660,39 +2791,133 @@ async function processTextAttachment({
 async function processPdfAttachment({
   name,
   buffer,
+  sourcePath,
+  sizeBytes,
   state,
 }: {
   name: string;
-  buffer: Buffer;
+  buffer?: Buffer;
+  sourcePath?: string;
+  sizeBytes: number;
   state: AttachmentProcessState;
 }): Promise<ChatAttachment> {
-  if (buffer.byteLength > ATTACHMENT_LIMITS.maxFileBytes) {
+  if (sizeBytes > ATTACHMENT_LIMITS.maxFileBytes) {
+    if (sourcePath) {
+      return createPathBackedAttachment({
+        name,
+        kind: "pdf",
+        mimeType: "application/pdf",
+        sizeBytes,
+        storagePath: sourcePath,
+        error: `PDF text was not injected because the file exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB.`,
+        tokenEstimate: 0,
+      });
+    }
     return makeAttachmentError({
       name,
       kind: "pdf",
       mimeType: "application/pdf",
-      sizeBytes: buffer.byteLength,
-      error: `PDF exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB limit`,
+      sizeBytes,
+      error: `Pathless PDF exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB staging limit`,
     });
   }
 
-  const stored = await storeAttachmentBuffer(buffer, name);
-  const data = await pdfParse(buffer);
+  const fileBuffer = await readAttachmentFileBuffer(sourcePath, buffer);
+  const stored = sourcePath
+    ? { id: randomUUID(), storagePath: sourcePath }
+    : await storeTemporaryAttachmentBuffer(fileBuffer, name);
+  const data = await pdfParse(fileBuffer);
   const extracted = data.text ?? "";
   const capped = applyTextCaps(extracted, state);
-  const attachment: ChatAttachment = {
+  const attachment = createPathBackedAttachment({
     id: stored.id,
     name,
     kind: "pdf",
     mimeType: "application/pdf",
-    sizeBytes: buffer.byteLength,
+    sizeBytes,
     storagePath: stored.storagePath,
     extractedText: capped.text,
     truncated: capped.truncated,
     ...(extracted.trim()
       ? {}
       : { error: "No extractable text (PDF may be scanned)" }),
-  };
+  });
+  attachment.tokenEstimate = estimateAttachmentTokens(attachment);
+  return attachment;
+}
+
+async function convertOfficeAttachment(filePath: string) {
+  const officeParser = await import("officeparser");
+  const parseOfficeAsync =
+    (officeParser as { parseOfficeAsync?: (filePath: string, config?: unknown) => Promise<unknown> }).parseOfficeAsync ??
+    ((officeParser as { default?: { parseOfficeAsync?: (filePath: string, config?: unknown) => Promise<unknown> } }).default?.parseOfficeAsync);
+
+  if (!parseOfficeAsync) {
+    throw new Error("officeparser is installed but does not expose parseOfficeAsync.");
+  }
+
+  const parsed = await parseOfficeAsync(filePath);
+  return String(parsed ?? "");
+}
+
+async function processOfficeAttachment({
+  name,
+  buffer,
+  sourcePath,
+  sizeBytes,
+  state,
+}: {
+  name: string;
+  buffer?: Buffer;
+  sourcePath?: string;
+  sizeBytes: number;
+  state: AttachmentProcessState;
+}): Promise<ChatAttachment> {
+  if (sizeBytes > ATTACHMENT_LIMITS.maxFileBytes) {
+    if (sourcePath) {
+      return createPathBackedAttachment({
+        name,
+        kind: "office",
+        mimeType: inferMimeType(name),
+        sizeBytes,
+        storagePath: sourcePath,
+        error: `Office document text was not injected because the file exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB.`,
+        tokenEstimate: 0,
+      });
+    }
+    return makeAttachmentError({
+      name,
+      kind: "office",
+      mimeType: inferMimeType(name),
+      sizeBytes,
+      error: `Pathless Office document exceeds ${Math.round(ATTACHMENT_LIMITS.maxFileBytes / 1024 / 1024)} MB staging limit`,
+    });
+  }
+
+  let stored: { id: string; storagePath: string };
+  let parsePath: string;
+  if (sourcePath) {
+    stored = { id: randomUUID(), storagePath: sourcePath };
+    parsePath = sourcePath;
+  } else {
+    const fileBuffer = await readAttachmentFileBuffer(undefined, buffer);
+    stored = await storeTemporaryAttachmentBuffer(fileBuffer, name);
+    parsePath = stored.storagePath;
+  }
+
+  const extracted = await convertOfficeAttachment(parsePath);
+  const capped = applyTextCaps(extracted, state);
+  const attachment = createPathBackedAttachment({
+    id: stored.id,
+    name,
+    kind: "office",
+    mimeType: inferMimeType(name),
+    sizeBytes,
+    storagePath: stored.storagePath,
+    extractedText: capped.text,
+    truncated: capped.truncated,
+    ...(extracted.trim() ? {} : { error: "No readable text was extracted from this Office document." }),
+  });
   attachment.tokenEstimate = estimateAttachmentTokens(attachment);
   return attachment;
 }
@@ -2735,13 +2960,15 @@ async function processAttachmentBuffer({
   name,
   buffer,
   sourcePath,
+  sizeBytes,
   mimeType,
   state,
   depth,
 }: {
   name: string;
-  buffer: Buffer;
+  buffer?: Buffer;
   sourcePath?: string;
+  sizeBytes: number;
   mimeType?: string;
   state: AttachmentProcessState;
   depth: number;
@@ -2750,11 +2977,15 @@ async function processAttachmentBuffer({
 
   try {
     if (kind === "image") {
-      return processImageAttachment({ name, buffer, mimeType });
+      return processImageAttachment({ name, buffer, sourcePath, sizeBytes, mimeType });
     }
 
     if (kind === "pdf") {
-      return processPdfAttachment({ name, buffer, state });
+      return processPdfAttachment({ name, buffer, sourcePath, sizeBytes, state });
+    }
+
+    if (kind === "office") {
+      return processOfficeAttachment({ name, buffer, sourcePath, sizeBytes, state });
     }
 
     if (kind === "archive") {
@@ -2762,18 +2993,19 @@ async function processAttachmentBuffer({
         name,
         buffer,
         sourcePath,
+        sizeBytes,
         state,
         depth,
       });
     }
 
-    return processTextAttachment({ name, buffer, mimeType, state });
+    return processTextAttachment({ name, buffer, sourcePath, sizeBytes, mimeType, state });
   } catch (error) {
     return makeAttachmentError({
       name,
       kind: kind === "binary" ? "text" : kind,
       mimeType: mimeType ?? inferMimeType(name),
-      sizeBytes: buffer.byteLength,
+      sizeBytes,
       error:
         error instanceof Error ? error.message : "Failed to process attachment",
     });
@@ -2783,46 +3015,116 @@ async function processAttachmentBuffer({
 async function processArchiveAttachment({
   name,
   buffer,
+  sourcePath,
+  sizeBytes,
+  state,
+  depth,
 }: {
   name: string;
-  buffer: Buffer;
+  buffer?: Buffer;
   sourcePath?: string;
+  sizeBytes: number;
   state: AttachmentProcessState;
   depth: number;
 }): Promise<ChatAttachment> {
-  if (buffer.byteLength > ATTACHMENT_LIMITS.maxArchiveBytes) {
+  if (sizeBytes > ATTACHMENT_LIMITS.maxArchiveBytes) {
+    if (sourcePath) {
+      return createPathBackedAttachment({
+        name,
+        kind: "archive",
+        mimeType: inferMimeType(name),
+        sizeBytes,
+        storagePath: sourcePath,
+        error: `Archive was not inspected because it exceeds ${Math.round(ATTACHMENT_LIMITS.maxArchiveBytes / 1024 / 1024)} MB.`,
+        tokenEstimate: 0,
+      });
+    }
     return makeAttachmentError({
       name,
       kind: "archive",
       mimeType: inferMimeType(name),
-      sizeBytes: buffer.byteLength,
-      error: `Archive exceeds ${Math.round(ATTACHMENT_LIMITS.maxArchiveBytes / 1024 / 1024)} MB limit`,
+      sizeBytes,
+      error: `Pathless archive exceeds ${Math.round(ATTACHMENT_LIMITS.maxArchiveBytes / 1024 / 1024)} MB staging limit`,
     });
   }
 
-  const stored = await storeAttachmentBuffer(buffer, name);
-  return {
+  let stored: { id: string; storagePath: string };
+  if (sourcePath) {
+    stored = { id: randomUUID(), storagePath: sourcePath };
+  } else {
+    stored = await storeTemporaryAttachmentBuffer(buffer ?? Buffer.alloc(0), name);
+  }
+
+  const archive = createPathBackedAttachment({
     id: stored.id,
     name,
     kind: "archive",
     mimeType: inferMimeType(name),
-    sizeBytes: buffer.byteLength,
+    sizeBytes,
     storagePath: stored.storagePath,
-    children: [],
     tokenEstimate: 0,
-  };
+  });
+
+  if (depth >= ATTACHMENT_LIMITS.maxArchiveDepth) {
+    archive.error = `Archive nested deeper than ${ATTACHMENT_LIMITS.maxArchiveDepth}; children were not extracted.`;
+    return archive;
+  }
+
+  const extractRoot = path.join(getTempAttachmentRoot(), "extracted", stored.id);
+  try {
+    await fs.rm(extractRoot, { recursive: true, force: true });
+    await fs.mkdir(extractRoot, { recursive: true });
+    await extractArchiveToDirectory(stored.storagePath, extractRoot);
+    const files = await walkFiles(extractRoot);
+    if (files.length > ATTACHMENT_LIMITS.maxEntriesPerArchive) {
+      archive.error = `Archive has more than ${ATTACHMENT_LIMITS.maxEntriesPerArchive} entries; only the first entries were inspected.`;
+    }
+
+    const children: ChatAttachment[] = [];
+    for (const filePath of files.slice(0, ATTACHMENT_LIMITS.maxEntriesPerArchive)) {
+      if (state.totalEntries >= ATTACHMENT_LIMITS.maxEntriesTotal) {
+        pushWarning(state, `Only the first ${ATTACHMENT_LIMITS.maxEntriesTotal} archive entries were processed.`);
+        break;
+      }
+      const stats = await fs.stat(filePath);
+      if (!stats.isFile()) continue;
+      if (state.totalExtractedBytes + stats.size > ATTACHMENT_LIMITS.maxExtractedBytesTotal) {
+        pushWarning(state, `Archive extraction stopped after ${Math.round(ATTACHMENT_LIMITS.maxExtractedBytesTotal / 1024 / 1024)} MB of extracted files.`);
+        break;
+      }
+      state.totalEntries += 1;
+      state.totalExtractedBytes += stats.size;
+      const childName = path.relative(extractRoot, filePath).split(path.sep).join("/");
+      children.push(await processAttachmentBuffer({
+        name: childName,
+        sourcePath: filePath,
+        sizeBytes: stats.size,
+        mimeType: inferMimeType(childName),
+        state,
+        depth: depth + 1,
+      }));
+    }
+    archive.children = children;
+    archive.tokenEstimate = estimateAttachmentTokens(archive);
+    return archive;
+  } catch (error) {
+    archive.error = `Archive extraction failed: ${getErrorMessage(error)}`;
+    archive.children = [];
+    return archive;
+  }
 }
 
 async function processAttachmentInput(
   input: AttachmentInput,
   state: AttachmentProcessState,
 ) {
-  const { name, sourcePath, buffer, mimeType } =
+  const { name, sourcePath, buffer, sizeBytes, mimeType } =
     await readAttachmentInput(input);
   return processAttachmentBuffer({
     name,
     buffer,
     sourcePath,
+    sizeBytes,
     mimeType,
     state,
     depth: 0,
@@ -2859,12 +3161,23 @@ function collectAttachmentStoragePaths(
   return paths;
 }
 
-function normalizeAttachmentStoragePath(storagePath: string) {
-  const storageRoot = path.resolve(getStoragePaths().attachmentsDir);
+function normalizeDeletableAttachmentStoragePath(storagePath: string) {
+  const deletableRoots = [
+    path.resolve(getStoragePaths().attachmentsDir),
+    path.resolve(getTempAttachmentRoot()),
+  ];
   const resolvedStoragePath = path.resolve(storagePath);
-  const relative = path.relative(storageRoot, resolvedStoragePath);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) return undefined;
-  return resolvedStoragePath;
+  for (const storageRoot of deletableRoots) {
+    const relative = path.relative(storageRoot, resolvedStoragePath);
+    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+      return { storageRoot, resolvedStoragePath };
+    }
+  }
+  return undefined;
+}
+
+function normalizeAttachmentStoragePath(storagePath: string) {
+  return normalizeDeletableAttachmentStoragePath(storagePath)?.resolvedStoragePath;
 }
 
 function collectNormalizedAttachmentStoragePaths(value: unknown) {
@@ -2905,18 +3218,30 @@ async function collectReferencedAttachmentStoragePaths() {
 }
 
 async function deleteAttachmentStoragePath(storagePath: string) {
-  const normalized = normalizeAttachmentStoragePath(storagePath);
+  const normalized = normalizeDeletableAttachmentStoragePath(storagePath);
   if (!normalized) return false;
 
-  const storageRoot = path.resolve(getStoragePaths().attachmentsDir);
-  const parentDirectory = path.dirname(normalized);
-  const relativeParent = path.relative(storageRoot, parentDirectory);
-  if (relativeParent.startsWith("..") || path.isAbsolute(relativeParent)) {
+  let deleteTarget = path.dirname(normalized.resolvedStoragePath);
+  const tempRoot = path.resolve(getTempAttachmentRoot());
+  if (normalized.storageRoot === tempRoot) {
+    const relativeToTempRoot = path.relative(tempRoot, normalized.resolvedStoragePath);
+    const [bucket, ownerId] = relativeToTempRoot.split(path.sep);
+    if ((bucket === "pending" || bucket === "extracted") && ownerId) {
+      deleteTarget = path.join(tempRoot, bucket, ownerId);
+    }
+  }
+
+  const relativeTarget = path.relative(normalized.storageRoot, deleteTarget);
+  if (
+    !relativeTarget ||
+    relativeTarget.startsWith("..") ||
+    path.isAbsolute(relativeTarget)
+  ) {
     return false;
   }
 
   try {
-    await fs.rm(parentDirectory, { recursive: true, force: true });
+    await fs.rm(deleteTarget, { recursive: true, force: true });
     return true;
   } catch (error) {
     console.error("Failed to delete attachment storage path:", error);
@@ -4684,9 +5009,10 @@ ipcMain.handle(
       throw new Error("Attachment storage path is required.");
     }
 
-    const resolvedStoragePath = normalizeManagedFilePath(request.storagePath);
-    if (!resolvedStoragePath) {
-      throw new Error("Attachment path is outside managed app storage.");
+    const resolvedStoragePath = normalizeManagedFilePath(request.storagePath) ?? path.resolve(request.storagePath);
+    const stats = await fs.stat(resolvedStoragePath);
+    if (!stats.isFile()) {
+      throw new Error("Attachment path is not a file.");
     }
 
     const buffer = await fs.readFile(resolvedStoragePath);
@@ -4960,6 +5286,10 @@ ipcMain.handle("tools:execute-stream", async (event, request: unknown) => {
       value.args,
       {
         workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
+        allowedExactFilePaths: Array.isArray(value.allowedExactFilePaths)
+          ? value.allowedExactFilePaths.filter((item): item is string => typeof item === "string")
+          : [],
+        allowedReadRoots: normalizeWorkspaceRoots(value.allowedReadRoots),
         signal: controller.signal,
         timeoutMs: normalizeOptionalTimeoutMs(value.timeoutMs),
       },
@@ -4989,6 +5319,10 @@ ipcMain.handle("tools:execute", async (_event, request: unknown) => {
   try {
     return await executeToolManifest(value.name, value.args, {
       workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
+      allowedExactFilePaths: Array.isArray(value.allowedExactFilePaths)
+        ? value.allowedExactFilePaths.filter((item): item is string => typeof item === "string")
+        : [],
+      allowedReadRoots: normalizeWorkspaceRoots(value.allowedReadRoots),
       signal: controller.signal,
       timeoutMs: normalizeOptionalTimeoutMs(value.timeoutMs),
     });

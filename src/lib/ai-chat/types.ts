@@ -178,11 +178,19 @@ export type ChatGeneratedFile = {
   description?: string;
 };
 
+export type ChatToolResultImage = {
+  type: "image";
+  dataUrl: string;
+  mimeType: string;
+  path?: string;
+};
+
 export type ChatToolResult = {
   toolCallId: string;
   toolName: string;
   content: string;
   isError?: boolean;
+  images?: ChatToolResultImage[];
   execution?: ToolExecutionPreview;
   changePreview?: FileToolChangePreview;
   loadedSkillName?: string;
@@ -389,7 +397,9 @@ export type ChatAssistantVariant = {
   processSteps?: ChatAssistantProcessStep[];
 };
 
-export type AttachmentKind = "image" | "text" | "pdf" | "archive";
+export type AttachmentKind = "image" | "text" | "pdf" | "office" | "archive";
+
+export type AttachmentStorageMode = "original" | "temporary" | "managed";
 
 export type ChatAttachment = {
   id: string;
@@ -397,7 +407,11 @@ export type ChatAttachment = {
   kind: AttachmentKind;
   mimeType: string;
   sizeBytes: number;
+  /** Absolute path used by tools/model context. Original files are not copied; pathless files are staged in temp storage. */
   storagePath?: string;
+  storageMode?: AttachmentStorageMode;
+  temporary?: boolean;
+  available?: boolean;
   workspaceRootId?: string;
   workspacePath?: string;
   thumbnailDataUrl?: string;

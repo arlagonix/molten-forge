@@ -14,6 +14,10 @@ import {
   sortChatsByUpdatedAt,
   titleFromMessage,
 } from "@/lib/ai-chat/chat-utils";
+import {
+  buildClonedChat,
+  renameChatWithoutActivityUpdate,
+} from "@/lib/ai-chat/chat-session-actions";
 import type {
   ChatAttachment,
   ChatFileToolAutoApproval,
@@ -53,6 +57,7 @@ function cleanupDeletedMessageWorkspace(chatId: string, message: ChatMessage) {
       chatId,
       messageId: message.id,
       generatedFileStoragePaths: collectGeneratedFileStoragePathsFromMessage(message),
+      ...(message.role === "user" ? { attachments: message.attachments } : {}),
     })
     .catch((error) => {
       console.error("Failed to clean up deleted message workspace files:", error);
@@ -261,39 +266,12 @@ export function useChatActions({
     focusDraftTextarea();
   }
 
-  async function createChatWithSameSettings(chatId: string) {
+  async function cloneChat(chatId: string) {
     const sourceChat = chats.find((chat) => chat.id === chatId);
     if (!sourceChat) return;
 
     const now = new Date().toISOString();
-    const chat: ChatSession = {
-      ...createEmptyChat(),
-      modeId: sourceChat.modeId,
-      enabledToolNames: sourceChat.enabledToolNames
-        ? [...sourceChat.enabledToolNames]
-        : undefined,
-      disabledToolNames: sourceChat.disabledToolNames
-        ? [...sourceChat.disabledToolNames]
-        : undefined,
-      enabledSkillNames: sourceChat.enabledSkillNames
-        ? [...sourceChat.enabledSkillNames]
-        : undefined,
-      disabledSkillNames: sourceChat.disabledSkillNames
-        ? [...sourceChat.disabledSkillNames]
-        : undefined,
-      enabledAgentNames: sourceChat.enabledAgentNames
-        ? [...sourceChat.enabledAgentNames]
-        : undefined,
-      disabledAgentNames: sourceChat.disabledAgentNames
-        ? [...sourceChat.disabledAgentNames]
-        : undefined,
-      fileToolAutoApproval: sourceChat.fileToolAutoApproval
-        ? { ...sourceChat.fileToolAutoApproval }
-        : undefined,
-      thinkingMode: sourceChat.thinkingMode,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const chat = buildClonedChat(sourceChat, createEmptyChat(), now);
 
     saveCurrentChatScrollSnapshot();
     setChats((currentChats) => [chat, ...currentChats]);
@@ -301,14 +279,14 @@ export function useChatActions({
     setIsNewChatDraft(false);
     setEditingMessageId(null);
     resetChatScrollState();
-    focusDraftTextarea();
 
     try {
       await saveChat(chat);
       await saveActiveChatId(chat.id);
-      showSuccess("Chat created with same settings.");
+      showSuccess("Chat cloned.");
     } catch (error) {
-      console.error("Failed to save chat with same settings:", error);
+      console.error("Failed to clone chat:", error);
+      showError("Failed to clone chat.");
     }
   }
 
@@ -622,15 +600,7 @@ export function useChatActions({
   }
 
   function renameChat(chatId: string, title: string) {
-    const nextTitle = normalizeManualChatTitle(title);
-    if (!nextTitle) return;
-
-    updateChat(chatId, (chat) => ({
-      ...chat,
-      title: nextTitle,
-      titleMode: "manual",
-      updatedAt: new Date().toISOString(),
-    }));
+    updateChat(chatId, (chat) => renameChatWithoutActivityUpdate(chat, title));
   }
 
   function toggleChatPinned(chatId: string) {
@@ -654,7 +624,7 @@ export function useChatActions({
     saveEditedUserMessage,
     stopGeneration,
     createNewChat,
-    createChatWithSameSettings,
+    cloneChat,
     switchChat,
     clearChat,
     removeChat,

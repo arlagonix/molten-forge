@@ -469,7 +469,7 @@ function normalizeChatFolderWorkspaceRoots(
     })
     .filter((root): root is NonNullable<typeof root> => Boolean(root));
 
-  return roots.length ? roots : undefined;
+  return roots.length ? roots.slice(0, 1) : undefined;
 }
 
 function normalizeChatFolders(value: unknown): ChatFolder[] {
@@ -494,6 +494,10 @@ function normalizeChatFolders(value: unknown): ChatFolder[] {
           ? folder.createdAt
           : now;
 
+      const workspaceRoots = normalizeChatFolderWorkspaceRoots(
+        folder.workspaceRoots,
+      );
+
       return {
         id,
         name:
@@ -505,6 +509,7 @@ function normalizeChatFolders(value: unknown): ChatFolder[] {
           typeof folder.updatedAt === "string" && folder.updatedAt.trim()
             ? folder.updatedAt
             : createdAt,
+        ...(workspaceRoots ? { workspaceRoots } : {}),
       } satisfies ChatFolder;
     })
     .filter((folder): folder is ChatFolder => folder !== undefined);

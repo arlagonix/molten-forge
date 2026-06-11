@@ -86,8 +86,13 @@ type ParsedSkillInvocation = {
   rest: string;
 };
 
-function parseSkillInvocationMessage(content: string): ParsedSkillInvocation | null {
-  const match = /^<skill\s+name="([^"]+)"\s+location="([^"]*)">\s*([\s\S]*?)\s*<\/skill>\s*([\s\S]*)$/.exec(content.trim());
+function parseSkillInvocationMessage(
+  content: string,
+): ParsedSkillInvocation | null {
+  const match =
+    /^<skill\s+name="([^"]+)"\s+location="([^"]*)">\s*([\s\S]*?)\s*<\/skill>\s*([\s\S]*)$/.exec(
+      content.trim(),
+    );
   if (!match) return null;
 
   return {
@@ -106,9 +111,15 @@ function formatSkillDirectory(location: string) {
 }
 
 function parseSlashInvocation(content: string) {
-  const match = /^(\s*)(\/(?:skill|s|agent|a):[A-Za-z0-9_-]+)([\s\S]*)$/.exec(content);
+  const match = /^(\s*)(\/(?:skill|s|agent|a):[A-Za-z0-9_-]+)([\s\S]*)$/.exec(
+    content,
+  );
   if (!match) return null;
-  return { leading: match[1] ?? "", command: match[2] ?? "", rest: match[3] ?? "" };
+  return {
+    leading: match[1] ?? "",
+    command: match[2] ?? "",
+    rest: match[3] ?? "",
+  };
 }
 
 function MarkdownIcon({ className }: { className?: string }) {
@@ -621,7 +632,9 @@ const ChatMessageItem = memo(
           status === "streaming" && isLatestProcessStep;
 
         const manualCollapsed = collapsedThinkingStepIds[step.id];
-        const isCollapsed = manualCollapsed ?? (thinkingAutoCollapse ? true : !isThinkingStreaming);
+        const isCollapsed =
+          manualCollapsed ??
+          (thinkingAutoCollapse ? true : !isThinkingStreaming);
 
         return (
           <ThinkingBlock
@@ -1017,6 +1030,7 @@ const ChatMessageItem = memo(
                     <AttachmentChips
                       attachments={message.attachments}
                       readOnly
+                      tone="onPrimary"
                       className={cn(content && "mb-3")}
                     />
                   ) : null}

@@ -88,7 +88,10 @@ function getSelectedWorkspace(context: ToolExecutionContext): WorkspaceRoot {
 }
 
 function getToolRoots(context: ToolExecutionContext): WorkspaceRoot[] {
-  const roots = normalizeWorkspaceRoots(context.workspaceRoots);
+  const roots = [
+    ...normalizeWorkspaceRoots(context.workspaceRoots),
+    ...normalizeWorkspaceRoots(context.allowedReadRoots),
+  ];
   const hasPrimaryRoot = roots.some((candidate) => candidate.kind !== "skill");
   return hasPrimaryRoot ? roots : [getDefaultUserWorkspace(), ...roots];
 }
@@ -125,6 +128,25 @@ async function resolveToolPath(
   );
   const targetRealPath = await realpathIfExists(absolutePath);
   const containmentPath = targetRealPath ?? absolutePath;
+
+  for (const allowedPath of context.allowedExactFilePaths ?? []) {
+    const allowedAbsolute = path.resolve(allowedPath);
+    const allowedRealPath = await realpathIfExists(allowedAbsolute);
+    const allowedContainmentPath = allowedRealPath ?? allowedAbsolute;
+    if (path.resolve(containmentPath) === path.resolve(allowedContainmentPath)) {
+      return {
+        root: {
+          id: "attachment",
+          name: "Attached file",
+          path: path.dirname(allowedAbsolute),
+          kind: "manual",
+        },
+        requestedPath: trimmedPath,
+        absolutePath,
+        relativePath: path.basename(absolutePath),
+      };
+    }
+  }
 
   for (const root of roots) {
     const rootRealPath = await fs.realpath(root.path);

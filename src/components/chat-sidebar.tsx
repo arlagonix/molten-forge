@@ -36,6 +36,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -95,6 +96,7 @@ type ChatSidebarProps = {
   onToggleChatPinned: (chatId: string) => void;
   onGenerateChatTitle: (chatId: string) => void;
   onRemoveChat: (chatId: string) => void;
+  onCloneChat: (chatId: string) => void;
   onCreateNewChat: () => void;
   onCreateChatInFolder: (folderId: string) => void;
   onCreateChatWithSameSettings: (chatId: string) => void;
@@ -103,6 +105,8 @@ type ChatSidebarProps = {
   onCreateFolder: (name: string) => void;
   onRenameFolder: (folderId: string, name: string) => void;
   onDeleteFolder: (folderId: string, mode: DeleteFolderMode) => void;
+  onSetFolderWorkspace: (folderId: string) => void;
+  onClearFolderWorkspace: (folderId: string) => void;
   onMoveChatToFolder: (chatId: string, folderId: string) => void;
   onRemoveChatFromFolder: (chatId: string) => void;
 };
@@ -207,6 +211,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onToggleChatPinned,
   onGenerateChatTitle,
   onRemoveChat,
+  onCloneChat,
   onCreateNewChat,
   onCreateChatInFolder,
   onCreateChatWithSameSettings,
@@ -215,6 +220,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   onCreateFolder,
   onRenameFolder,
   onDeleteFolder,
+  onSetFolderWorkspace,
+  onClearFolderWorkspace,
   onMoveChatToFolder,
   onRemoveChatFromFolder,
 }: ChatSidebarProps) {
@@ -518,7 +525,7 @@ export const ChatSidebar = memo(function ChatSidebar({
     const targetFolders = folders.filter(
       (folder) => folder.id !== chat.folderId,
     );
-    if (targetFolders.length === 0) return null;
+    if (targetFolders.length === 0 && !chat.folderId) return null;
 
     return (
       <DropdownMenuSub>
@@ -531,6 +538,17 @@ export const ChatSidebar = memo(function ChatSidebar({
           alignOffset={0}
           className="max-h-[min(18rem,var(--radix-dropdown-menu-content-available-height))] min-w-52 overflow-y-auto"
         >
+          {chat.folderId ? (
+            <DropdownMenuItem
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemoveChatFromFolder(chat.id);
+              }}
+            >
+              <FolderOpen className="size-4" />
+              Chats
+            </DropdownMenuItem>
+          ) : null}
           {targetFolders.map((folder) => (
             <DropdownMenuItem
               key={folder.id}
@@ -565,6 +583,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       relativeTimeNow,
     );
     const fullDateLabel = formatChatActivityDate(getChatActivityDate(chat));
+    const moveToFolderItems = renderMoveToFolderItems(chat);
 
     return (
       <div
@@ -673,6 +692,20 @@ export const ChatSidebar = memo(function ChatSidebar({
                   Rename
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  disabled={Boolean(chat.folderId)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleChatPinned(chat.id);
+                  }}
+                >
+                  {chat.isPinned ? (
+                    <PinOff className="size-4" />
+                  ) : (
+                    <Pin className="size-4" />
+                  )}
+                  {chat.isPinned ? "Unpin" : "Pin"}
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   disabled={
                     isGenerating ||
                     isGeneratingTitle ||
@@ -692,40 +725,30 @@ export const ChatSidebar = memo(function ChatSidebar({
                   Generate title
                 </DropdownMenuItem>
                 <DropdownMenuItem
+                  disabled={isGenerating}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onCloneChat(chat.id);
+                  }}
+                >
+                  <Copy className="size-4" />
+                  Clone
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   onClick={(event) => {
                     event.stopPropagation();
                     onCreateChatWithSameSettings(chat.id);
                   }}
                 >
-                  <Copy className="size-4" />
+                  <Plus className="size-4" />
                   New with same settings
                 </DropdownMenuItem>
-                {renderMoveToFolderItems(chat)}
-                {chat.folderId ? (
-                  <DropdownMenuItem
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onRemoveChatFromFolder(chat.id);
-                    }}
-                  >
-                    <FolderOpen className="size-4" />
-                    Remove from folder
-                  </DropdownMenuItem>
-                ) : (
-                  <DropdownMenuItem
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggleChatPinned(chat.id);
-                    }}
-                  >
-                    {chat.isPinned ? (
-                      <PinOff className="size-4" />
-                    ) : (
-                      <Pin className="size-4" />
-                    )}
-                    {chat.isPinned ? "Unpin" : "Pin"}
-                  </DropdownMenuItem>
-                )}
+                {moveToFolderItems ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    {moveToFolderItems}
+                  </>
+                ) : null}
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   variant="destructive"
@@ -771,6 +794,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       !isSearching && visibleChats.length < folderChats.length;
     const isFolderOptionsOpen = openFolderOptionsFolderId === folder.id;
     const isDragOverFolder = dragOverFolderId === folder.id;
+    const folderWorkspaceRoot = folder.workspaceRoots?.[0];
 
     return (
       <section
@@ -854,19 +878,6 @@ export const ChatSidebar = memo(function ChatSidebar({
           )}
           {!isRenamingFolder ? (
             <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="h-7 w-7 shrink-0 opacity-0 transition-none hover:bg-muted hover:text-foreground group-hover/folder:opacity-100 focus-visible:opacity-100"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onCreateChatInFolder(folder.id);
-                }}
-                title="New chat in folder"
-              >
-                <Plus className="size-3.5" />
-              </Button>
               <DropdownMenu
                 open={isFolderOptionsOpen}
                 onOpenChange={(open) =>
@@ -893,6 +904,15 @@ export const ChatSidebar = memo(function ChatSidebar({
                   onCloseAutoFocus={(event) => event.preventDefault()}
                 >
                   <DropdownMenuItem
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onCreateChatInFolder(folder.id);
+                    }}
+                  >
+                    <Plus className="size-4" />
+                    New chat
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
                     onSelect={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
@@ -903,6 +923,47 @@ export const ChatSidebar = memo(function ChatSidebar({
                     <Edit3 className="size-4" />
                     Rename folder
                   </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  {folderWorkspaceRoot ? (
+                    <>
+                      <DropdownMenuLabel
+                        className="max-w-64 truncate font-normal text-muted-foreground"
+                        title={folderWorkspaceRoot.path}
+                      >
+                        Workspace: {folderWorkspaceRoot.name}
+                      </DropdownMenuLabel>
+                      <DropdownMenuItem
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setOpenFolderOptionsFolderId(null);
+                          onSetFolderWorkspace(folder.id);
+                        }}
+                      >
+                        <FolderOpen className="size-4" />
+                        Change workspace
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onClearFolderWorkspace(folder.id);
+                        }}
+                      >
+                        <X className="size-4" />
+                        Remove workspace
+                      </DropdownMenuItem>
+                    </>
+                  ) : (
+                    <DropdownMenuItem
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setOpenFolderOptionsFolderId(null);
+                        onSetFolderWorkspace(folder.id);
+                      }}
+                    >
+                      <FolderOpen className="size-4" />
+                      Set workspace
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="destructive"
