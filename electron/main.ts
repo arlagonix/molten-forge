@@ -290,6 +290,7 @@ type AppSettings = {
   fontFamily: "sans" | "mono";
   chatFolders: ChatFolder[];
   thinkingAutoCollapse?: boolean;
+  renderMarkdownWhileStreaming?: boolean;
 };
 
 type ToolLoadError = {
@@ -411,6 +412,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   fontFamily: "sans",
   chatFolders: [],
   thinkingAutoCollapse: false,
+  renderMarkdownWhileStreaming: true,
 };
 const DEFAULT_MCP_SETTINGS: McpSettings = {
   enabled: true,
@@ -779,6 +781,10 @@ function normalizeAppSettings(value: unknown): AppSettings {
     thinkingAutoCollapse:
       typeof value.thinkingAutoCollapse === "boolean"
         ? value.thinkingAutoCollapse
+        : true,
+    renderMarkdownWhileStreaming:
+      typeof value.renderMarkdownWhileStreaming === "boolean"
+        ? value.renderMarkdownWhileStreaming
         : true,
   };
 }

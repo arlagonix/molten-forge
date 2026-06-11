@@ -118,4 +118,23 @@ describe("chat storage normalization", () => {
       },
     ]);
   });
+
+  it("defaults streaming Markdown rendering to enabled", () => {
+    expect(normalizeAppSettings({}).renderMarkdownWhileStreaming).toBe(true);
+  });
+
+  it("preserves disabled streaming Markdown rendering", () => {
+    expect(
+      normalizeAppSettings({ renderMarkdownWhileStreaming: false })
+        .renderMarkdownWhileStreaming,
+    ).toBe(false);
+  });
+
+  it("preserves enabled streaming Markdown rendering", () => {
+    expect(
+      normalizeAppSettings({ renderMarkdownWhileStreaming: true })
+        .renderMarkdownWhileStreaming,
+    ).toBe(true);
+  });
+
 });

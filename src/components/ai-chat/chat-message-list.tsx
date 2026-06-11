@@ -182,6 +182,7 @@ type ChatMessageListProps = {
   collapsedToolStepIds: Record<string, boolean>;
   collapsedThinkingStepIds: Record<string, boolean>;
   thinkingAutoCollapse?: boolean;
+  renderMarkdownWhileStreaming?: boolean;
   toolDisplayKey: string;
   skillDisplayKey: string;
   agentDisplayKey: string;
@@ -548,6 +549,7 @@ const ChatMessageItem = memo(
     collapsedToolStepIds,
     collapsedThinkingStepIds,
     thinkingAutoCollapse,
+    renderMarkdownWhileStreaming = true,
     toolMentionOptions,
     skillMentionOptions,
     agentMentionOptions,
@@ -648,6 +650,7 @@ const ChatMessageItem = memo(
             isCollapsed={isCollapsed}
             flushVersion={stepFlushVersion}
             forceInstant={!isThinkingStreaming}
+            renderMarkdownWhileStreaming={renderMarkdownWhileStreaming}
             onToggleCollapsed={() => {
               const nextCollapsed = !isCollapsed;
               if (nextCollapsed) {
@@ -697,6 +700,7 @@ const ChatMessageItem = memo(
                     messageId={`${message.id}:${step.id}`}
                     isApiStreaming={isAssistantBlockStreaming}
                     skipSyntaxHighlight={isAssistantBlockStreaming}
+                    renderMarkdownWhileStreaming={renderMarkdownWhileStreaming}
                     flushVersion={stepFlushVersion}
                     onVisualProgress={() =>
                       onAssistantVisualProgress(activeChatId)
@@ -1042,6 +1046,7 @@ const ChatMessageItem = memo(
                       messageId={`${message.id}:content`}
                       isApiStreaming={status === "streaming"}
                       skipSyntaxHighlight={status === "streaming"}
+                      renderMarkdownWhileStreaming={renderMarkdownWhileStreaming}
                       flushVersion={visualFlushRequests[message.id] ?? 0}
                       onVisualProgress={() =>
                         onAssistantVisualProgress(activeChatId)
@@ -1470,6 +1475,12 @@ const ChatMessageItem = memo(
     if (previous.toolDisplayKey !== next.toolDisplayKey) return false;
     if (previous.skillDisplayKey !== next.skillDisplayKey) return false;
     if (previous.agentDisplayKey !== next.agentDisplayKey) return false;
+    if (
+      previous.renderMarkdownWhileStreaming !==
+      next.renderMarkdownWhileStreaming
+    ) {
+      return false;
+    }
 
     const messageId = previous.message.id;
     if (

@@ -332,6 +332,7 @@ export default function Home() {
     fontFamily: "sans",
     chatFolders: [],
     thinkingAutoCollapse: false,
+    renderMarkdownWhileStreaming: true,
   });
   const [mcpSettings, setMcpSettings] =
     useState<McpSettings>(DEFAULT_MCP_SETTINGS);
@@ -2707,6 +2708,9 @@ export default function Home() {
                   thinkingAutoCollapse={
                     appSettings.thinkingAutoCollapse ?? true
                   }
+                  renderMarkdownWhileStreaming={
+                    appSettings.renderMarkdownWhileStreaming ?? true
+                  }
                   toolDisplayKey={toolDisplayKey}
                   skillDisplayKey={skillDisplayKey}
                   agentDisplayKey={agentDisplayKey}
@@ -2894,6 +2898,9 @@ export default function Home() {
         chatTitleGenerationMode={appSettings.chatTitleGenerationMode}
         appFontFamily={appSettings.fontFamily}
         thinkingAutoCollapse={appSettings.thinkingAutoCollapse ?? true}
+        renderMarkdownWhileStreaming={
+          appSettings.renderMarkdownWhileStreaming ?? true
+        }
         theme={theme}
         resolvedTheme={resolvedTheme}
         onToggleAiTitleGeneration={(checked) =>
@@ -2913,6 +2920,12 @@ export default function Home() {
           setAppSettings((currentSettings) => ({
             ...currentSettings,
             thinkingAutoCollapse: checked,
+          }))
+        }
+        onRenderMarkdownWhileStreamingChange={(checked) =>
+          setAppSettings((currentSettings) => ({
+            ...currentSettings,
+            renderMarkdownWhileStreaming: checked,
           }))
         }
         onOpenProviders={() => setProviderSettingsOpen(true)}

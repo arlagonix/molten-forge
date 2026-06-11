@@ -5,6 +5,7 @@ import {
   Bot,
   Brain,
   Cpu,
+  FileText,
   MessageSquareText,
   Moon,
   Layers3,
@@ -159,12 +160,14 @@ type SettingsDialogProps = {
   chatTitleGenerationMode: ChatTitleGenerationMode;
   appFontFamily: AppFontFamily;
   thinkingAutoCollapse: boolean;
+  renderMarkdownWhileStreaming: boolean;
   theme: ThemePreference;
   resolvedTheme: "light" | "dark";
   onToggleAiTitleGeneration: (checked: boolean) => void;
   onSetTheme: (theme: ThemePreference) => void;
   onSetAppFontFamily: (fontFamily: AppFontFamily) => void;
   onThinkingAutoCollapseChange: (checked: boolean) => void;
+  onRenderMarkdownWhileStreamingChange: (checked: boolean) => void;
   onOpenProviders: () => void;
   onOpenTools: () => void;
   onOpenSkills: () => void;
@@ -180,12 +183,14 @@ export const SettingsDialog = memo(function SettingsDialog({
   chatTitleGenerationMode,
   appFontFamily,
   thinkingAutoCollapse,
+  renderMarkdownWhileStreaming,
   theme,
   resolvedTheme,
   onToggleAiTitleGeneration,
   onSetTheme,
   onSetAppFontFamily,
   onThinkingAutoCollapseChange,
+  onRenderMarkdownWhileStreamingChange,
   onOpenProviders,
   onOpenTools,
   onOpenSkills,
@@ -293,6 +298,13 @@ export const SettingsDialog = memo(function SettingsDialog({
                   description="Always collapse thinking blocks, including while the model is still reasoning."
                   checked={thinkingAutoCollapse}
                   onCheckedChange={onThinkingAutoCollapseChange}
+                />
+                <SettingsSwitchRow
+                  icon={<FileText className="size-4" />}
+                  title="Render Markdown while streaming"
+                  description="Render assistant text as Markdown before the response finishes. This looks better for live lists, links, and formatting, but can use more CPU on long or fast responses. Disable it if streaming feels laggy."
+                  checked={renderMarkdownWhileStreaming}
+                  onCheckedChange={onRenderMarkdownWhileStreamingChange}
                 />
                 <SettingsSwitchRow
                   icon={<SlidersHorizontal className="size-4" />}

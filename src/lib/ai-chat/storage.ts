@@ -53,6 +53,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   fontFamily: "sans",
   chatFolders: [],
   thinkingAutoCollapse: false,
+  renderMarkdownWhileStreaming: true,
 };
 
 export const DEFAULT_MCP_SETTINGS: McpSettings = {
@@ -524,6 +525,8 @@ export function normalizeAppSettings(
     fontFamily: value?.fontFamily === "mono" ? "mono" : "sans",
     chatFolders: normalizeChatFolders(value?.chatFolders),
     thinkingAutoCollapse: value?.thinkingAutoCollapse ?? true,
+    renderMarkdownWhileStreaming:
+      value?.renderMarkdownWhileStreaming ?? true,
   };
 }
 

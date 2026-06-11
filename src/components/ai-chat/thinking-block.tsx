@@ -1,5 +1,5 @@
 import { Brain, Check, ChevronDown, ChevronRight } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { SmoothAssistantMessageContent } from "@/components/ai-chat/smooth-assistant-message";
 import { Spinner } from "@/components/ui/spinner";
@@ -80,7 +80,7 @@ function renderThinkingStatus(status: ThinkingStatus) {
   );
 }
 
-export function ThinkingBlock({
+function ThinkingBlockComponent({
   id,
   content,
   status,
@@ -90,6 +90,7 @@ export function ThinkingBlock({
   isCollapsed,
   flushVersion,
   forceInstant = false,
+  renderMarkdownWhileStreaming = true,
   onToggleCollapsed,
   onVisualProgress,
   onVisualStreamingChange,
@@ -103,6 +104,7 @@ export function ThinkingBlock({
   isCollapsed: boolean;
   flushVersion: number;
   forceInstant?: boolean;
+  renderMarkdownWhileStreaming?: boolean;
   onToggleCollapsed: () => void;
   onVisualProgress?: () => void;
   onVisualStreamingChange?: (isStreaming: boolean) => void;
@@ -230,6 +232,7 @@ export function ThinkingBlock({
               className="chat-markdown-compact shrink-0"
               isApiStreaming={isStreaming}
               skipSyntaxHighlight={isStreaming}
+              renderMarkdownWhileStreaming={renderMarkdownWhileStreaming}
               flushVersion={flushVersion}
               forceInstant={forceInstant}
               onVisualProgress={onVisualProgress}
@@ -241,3 +244,18 @@ export function ThinkingBlock({
     </article>
   );
 }
+
+export const ThinkingBlock = memo(
+  ThinkingBlockComponent,
+  (previous, next) =>
+    previous.id === next.id &&
+    previous.content === next.content &&
+    previous.status === next.status &&
+    previous.startedAt === next.startedAt &&
+    previous.completedAt === next.completedAt &&
+    previous.isStreaming === next.isStreaming &&
+    previous.isCollapsed === next.isCollapsed &&
+    previous.flushVersion === next.flushVersion &&
+    previous.forceInstant === next.forceInstant &&
+    previous.renderMarkdownWhileStreaming === next.renderMarkdownWhileStreaming,
+);

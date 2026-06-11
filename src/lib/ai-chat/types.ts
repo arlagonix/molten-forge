@@ -494,6 +494,7 @@ export type AppSettings = {
   fontFamily: AppFontFamily;
   chatFolders: ChatFolder[];
   thinkingAutoCollapse?: boolean;
+  renderMarkdownWhileStreaming?: boolean;
 };
 
 export type ChatWorkspaceRoot = {

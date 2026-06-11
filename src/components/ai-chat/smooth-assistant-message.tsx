@@ -37,14 +37,16 @@ const AssistantMessageContent = memo(function AssistantMessageContent({
   messageId,
   isStreaming = false,
   skipSyntaxHighlight = false,
+  renderMarkdownWhileStreaming = true,
 }: {
   content: string;
   className?: string;
   messageId?: string;
   isStreaming?: boolean;
   skipSyntaxHighlight?: boolean;
+  renderMarkdownWhileStreaming?: boolean;
 }) {
-  if (isStreaming) {
+  if (isStreaming && !renderMarkdownWhileStreaming) {
     return <StreamingPlainTextContent content={content} className={className} />;
   }
 
@@ -68,6 +70,7 @@ type SmoothAssistantMessageContentProps = {
   onVisualProgress?: () => void;
   onVisualStreamingChange?: (isVisuallyStreaming: boolean) => void;
   skipSyntaxHighlight?: boolean;
+  renderMarkdownWhileStreaming?: boolean;
 };
 
 export const SmoothAssistantMessageContent = memo(
@@ -80,6 +83,7 @@ export const SmoothAssistantMessageContent = memo(
     onVisualStreamingChange,
     isApiStreaming,
     skipSyntaxHighlight = false,
+    renderMarkdownWhileStreaming = true,
   }: SmoothAssistantMessageContentProps) {
     const onVisualProgressRef = useRef(onVisualProgress);
     const onVisualStreamingChangeRef = useRef(onVisualStreamingChange);
@@ -102,6 +106,7 @@ export const SmoothAssistantMessageContent = memo(
         messageId={messageId}
         isStreaming={isApiStreaming}
         skipSyntaxHighlight={shouldSkipSyntaxHighlight}
+        renderMarkdownWhileStreaming={renderMarkdownWhileStreaming}
       />
     );
   },
@@ -112,5 +117,6 @@ export const SmoothAssistantMessageContent = memo(
     previous.isApiStreaming === next.isApiStreaming &&
     previous.flushVersion === next.flushVersion &&
     previous.forceInstant === next.forceInstant &&
-    previous.skipSyntaxHighlight === next.skipSyntaxHighlight,
+    previous.skipSyntaxHighlight === next.skipSyntaxHighlight &&
+    previous.renderMarkdownWhileStreaming === next.renderMarkdownWhileStreaming,
 );
