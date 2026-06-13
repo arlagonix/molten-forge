@@ -1,28 +1,3 @@
-declare module "7zip-bin" {
-  const value: { path7za: string };
-  export default value;
-}
-
-declare module "node-7z" {
-  import type { EventEmitter } from "node:events";
-
-  type SevenOptions = {
-    $bin?: string;
-    recursive?: boolean;
-  };
-
-  const Seven: {
-    extractFull: (
-      archivePath: string,
-      outputDir: string,
-      options?: SevenOptions,
-    ) => EventEmitter;
-  };
-
-  export default Seven;
-}
-
-declare module "pdf-parse" {
-  function pdfParse(buffer: Buffer): Promise<{ text: string }>;
-  export default pdfParse;
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:00e63a555b41c96a9c9985ad10fcdc1036b5730cc675ccd17389f594bb50e1be
+size 540

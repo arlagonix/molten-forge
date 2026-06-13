@@ -1,13 +1,3 @@
-import { cn } from "@/lib/utils";
-
-function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="skeleton"
-      className={cn("bg-accent animate-pulse ", className)}
-      {...props}
-    />
-  );
-}
-
-export { Skeleton };
+version https://git-lfs.github.com/spec/v1
+oid sha256:4a107904cede73ef53a2b43bc453fe9cf479bafc06ca7971f44f04ba2a925272
+size 269

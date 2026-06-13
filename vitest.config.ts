@@ -1,17 +1,3 @@
-import { defineConfig } from "vitest/config";
-import react from "@vitejs/plugin-react";
-import path from "node:path";
-
-export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
-    },
-  },
-  test: {
-    environment: "jsdom",
-    globals: true,
-    setupFiles: ["./src/test/setup.ts"],
-  },
-});
+version https://git-lfs.github.com/spec/v1
+oid sha256:d5ad620debcb70bcda7e71b0120025b79633fa1f6f61785691012008e5a92faa
+size 357

@@ -1,27 +1,3 @@
-/// <reference types="vite-plugin-electron/electron-env" />
-
-declare namespace NodeJS {
-  interface ProcessEnv {
-    /**
-     * The built directory structure
-     *
-     * ```tree
-     * ├─┬─┬ dist
-     * │ │ └── index.html
-     * │ │
-     * │ ├─┬ dist-electron
-     * │ │ ├── main.js
-     * │ │ └── preload.js
-     * │
-     * ```
-     */
-    APP_ROOT: string
-    /** /dist/ or /public/ */
-    VITE_PUBLIC: string
-  }
-}
-
-// Used in Renderer process, expose in `preload.ts`
-interface Window {
-  ipcRenderer: import('electron').IpcRenderer
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:bc931a3b158b7a4a75bae6693812dff43603ee3be93019168838e027e923ac0c
+size 621

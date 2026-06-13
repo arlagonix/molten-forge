@@ -1,15 +1,3 @@
-export function formatAttachmentSize(bytes: number) {
-  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  let value = bytes;
-  let unitIndex = 0;
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-
-  const precision =
-    Number.isInteger(value) || value >= 10 || unitIndex === 0 ? 0 : 1;
-  return `${value.toFixed(precision)} ${units[unitIndex]}`;
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:8d4c71b793ac37883dc5f78032cfaca1b03b18d6d4170d60a11de7fb6245c9f0
+size 452

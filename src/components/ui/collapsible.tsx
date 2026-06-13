@@ -1,33 +1,3 @@
-'use client'
-
-import * as CollapsiblePrimitive from '@radix-ui/react-collapsible'
-
-function Collapsible({
-  ...props
-}: React.ComponentProps<typeof CollapsiblePrimitive.Root>) {
-  return <CollapsiblePrimitive.Root data-slot="collapsible" {...props} />
-}
-
-function CollapsibleTrigger({
-  ...props
-}: React.ComponentProps<typeof CollapsiblePrimitive.CollapsibleTrigger>) {
-  return (
-    <CollapsiblePrimitive.CollapsibleTrigger
-      data-slot="collapsible-trigger"
-      {...props}
-    />
-  )
-}
-
-function CollapsibleContent({
-  ...props
-}: React.ComponentProps<typeof CollapsiblePrimitive.CollapsibleContent>) {
-  return (
-    <CollapsiblePrimitive.CollapsibleContent
-      data-slot="collapsible-content"
-      {...props}
-    />
-  )
-}
-
-export { Collapsible, CollapsibleTrigger, CollapsibleContent }
+version https://git-lfs.github.com/spec/v1
+oid sha256:89d052508dd671fdc6c823cc299a53537edd00c7067ae9508a2af0a8eeb4348b
+size 800

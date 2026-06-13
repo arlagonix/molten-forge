@@ -1,16 +1,3 @@
-import { useCallback, useRef } from "react";
-
-export function useStableCallback<Args extends unknown[], Result>(
-  callback: (...args: Args) => Result,
-): (...args: Args) => Result {
-  const callbackRef = useRef(callback);
-
-  // Keep the latest callback available immediately during render. Some callers use
-  // this helper for render callbacks, so waiting for an effect would render stale
-  // state for one commit.
-  callbackRef.current = callback;
-
-  return useCallback((...args: Args) => {
-    return callbackRef.current(...args);
-  }, []);
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e730eec7800b834e8b837ba16a45d546e9b6253e55cd81335dd33660b6124de9
+size 548

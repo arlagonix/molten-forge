@@ -1,25 +1,3 @@
-import type { ReactNode } from "react";
-
-import type {
-  AgentCallStatus,
-  ChatToolCall,
-  ChatToolResult,
-  ToolExecutionStatus,
-} from "@/lib/ai-chat/types";
-
-export type RenderAgentToolExecutionBlock = (args: {
-  id: string;
-  toolCall: ChatToolCall;
-  toolResult?: ChatToolResult;
-  status?: ToolExecutionStatus;
-  isCollapsed?: boolean;
-  onToggleCollapsed?: (stepId: string, nextCollapsed: boolean) => void;
-}) => ReactNode;
-
-export function formatAgentStatus(status: AgentCallStatus) {
-  if (status === "failed") return "Failed";
-  if (status === "cancelled") return "Cancelled";
-  if (status === "complete") return "Complete";
-  if (status === "pending") return "Waiting";
-  return "Running";
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:0c9649452b8e860aada40860cdd3791307b330fb88f6d27357572224808ef977
+size 704

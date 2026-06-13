@@ -1,24 +1,3 @@
-'use client'
-
-import * as React from 'react'
-import * as LabelPrimitive from '@radix-ui/react-label'
-
-import { cn } from '@/lib/utils'
-
-function Label({
-  className,
-  ...props
-}: React.ComponentProps<typeof LabelPrimitive.Root>) {
-  return (
-    <LabelPrimitive.Root
-      data-slot="label"
-      className={cn(
-        'flex items-center gap-2 text-base leading-none font-medium select-none group-data-[disabled=true]:pointer-events-none group-data-[disabled=true]:opacity-50 peer-disabled:cursor-not-allowed peer-disabled:opacity-50',
-        className,
-      )}
-      {...props}
-    />
-  )
-}
-
-export { Label }
+version https://git-lfs.github.com/spec/v1
+oid sha256:31c8ef4cb4a62b4492bfd7456fcf94594f6c28b50cc7638918391fe79652350b
+size 614
