@@ -112,7 +112,7 @@ type ChatForgeStorageApi = {
     skill: LoadedSkillInfo,
     previousName?: string,
   ) => Promise<LoadedSkillInfo>;
-  deleteSkill: (skillName: string) => Promise<void>;
+  deleteSkill: (skill: LoadedSkillInfo) => Promise<void>;
   importSkills: () => Promise<SkillImportResult>;
   exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
   exportSkills: (skills: LoadedSkillInfo[]) => Promise<SkillExportResult>;
@@ -296,7 +296,7 @@ function normalizeToolsSettings(
       true,
       true,
     ),
-    skill: legacyToolPermission(value?.loadSkillEnabled, false, true),
+    skill: legacyToolPermission(value?.loadSkillEnabled, true, true),
     web_fetch: legacyToolPermission(value?.webFetchEnabled, false, false),
     read: legacyToolPermission(
       readEnabled,
@@ -1248,11 +1248,11 @@ export async function saveSkill(
   throw new Error("Skill storage requires the Electron app.");
 }
 
-export async function deleteSkill(skillName: string): Promise<void> {
+export async function deleteSkill(skill: LoadedSkillInfo): Promise<void> {
   const api = await ensureJsonStorageReady();
 
   if (api) {
-    await api.deleteSkill(skillName);
+    await api.deleteSkill(skill);
     return;
   }
 

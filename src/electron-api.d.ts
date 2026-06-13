@@ -156,7 +156,7 @@ declare global {
       openToolsFolder: () => Promise<void>;
       loadSkills: (request?: { workspaceRoots?: ChatWorkspaceRoot[] }) => Promise<LoadedSkillInfo[]>;
       saveSkill: (skill: LoadedSkillInfo, previousName?: string) => Promise<LoadedSkillInfo>;
-      deleteSkill: (skillName: string) => Promise<void>;
+      deleteSkill: (skill: LoadedSkillInfo) => Promise<void>;
       importSkills: () => Promise<SkillImportResult>;
       exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
       exportSkills: (skills: LoadedSkillInfo[]) => Promise<SkillExportResult>;

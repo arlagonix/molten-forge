@@ -652,6 +652,11 @@ export type ToolDefinition = {
 
 export type LoadedToolInfo = ToolDefinition;
 
+export type SkillFolderTreeItem = {
+  name: string;
+  type: "file" | "directory";
+};
+
 export type SkillDefinition = {
   name: string;
   /** Legacy field kept for older saved data. Readonly filesystem skills are not toggled in the UI. */
@@ -675,6 +680,12 @@ export type SkillDefinition = {
   sourceKind?: "global" | "workspace";
   /** Directory that was scanned to discover this skill. */
   sourcePath?: string;
+  /** Active chat workspace roots supplied for create/move validation. Not persisted as part of the skill. */
+  workspaceRoots?: ChatWorkspaceRoot[];
+  /** Level-one file tree for the skill folder. */
+  fileTree?: SkillFolderTreeItem[];
+  /** Human-readable validation or duplicate-name conflict. */
+  conflict?: string;
   /** True when another skill with the same name has higher resolution priority. */
   shadowed?: boolean;
 };

@@ -49,6 +49,7 @@ type PendingUserInputRequest = {
   workspaceRoots?: ChatWorkspaceRoot[];
   allowedExactFilePaths?: string[];
   allowedReadRoots?: ChatWorkspaceRoot[];
+  activeSkillNames?: string[];
   signal?: AbortSignal;
   tool?: LoadedToolInfo;
 };
@@ -254,6 +255,7 @@ export function useToolExecution({
       allowedExactFilePaths?: string[];
       allowedReadRoots?: ChatWorkspaceRoot[];
       fileToolAutoApproval?: ChatFileToolAutoApproval;
+      activeSkillNames?: string[];
       tool?: LoadedToolInfo;
     },
   ): Promise<ChatToolResult> {
@@ -313,6 +315,7 @@ export function useToolExecution({
         workspaceRoots: options.workspaceRoots ?? workspaceRoots,
         allowedExactFilePaths: options.allowedExactFilePaths,
         allowedReadRoots: options.allowedReadRoots,
+        activeSkillNames: options.activeSkillNames,
         signal: options.signal,
         tool,
         resolve: settleResolve,
@@ -363,6 +366,7 @@ export function useToolExecution({
 
   async function executeLoadSkillToolCall(
     toolCall: ChatToolCall,
+    activeSkillNamesForCall: string[] = activeSkillNames,
   ): Promise<ChatToolResult> {
     const argsText = toolCall.function.arguments.trim() || "{}";
     const args = JSON.parse(argsText);
@@ -378,6 +382,12 @@ export function useToolExecution({
 
     const skill = availableSkillsByName.get(skillName);
     if (!skill) throw new Error(`Skill not found: ${skillName}`);
+    if (
+      !modelSelectableSkillNames.includes(skillName) &&
+      !activeSkillNamesForCall.includes(skillName)
+    ) {
+      throw new Error(`Skill is not available in this chat or mode: ${skillName}`);
+    }
 
     const loadedInstructions = buildLoadedSkillInstructions(skill);
     const resultPayload = {
@@ -690,7 +700,10 @@ export function useToolExecution({
       }
 
       if (toolName === LOAD_SKILL_TOOL_NAME) {
-        return await executeLoadSkillToolCall(toolCall);
+        return await executeLoadSkillToolCall(
+          toolCall,
+          options.activeSkillNames ?? activeSkillNames,
+        );
       }
 
       return await executeExternalToolCall(toolCall, optionsWithTool);
@@ -786,7 +799,10 @@ export function useToolExecution({
         }
 
         if (toolCall.function.name === LOAD_SKILL_TOOL_NAME) {
-          toolResult = await executeLoadSkillToolCall(toolCall);
+          toolResult = await executeLoadSkillToolCall(
+            toolCall,
+            pendingRequest.activeSkillNames ?? activeSkillNames,
+          );
         } else {
           const execution = await executeExternalTool(toolCall.function.name, args, {
             workspaceRoots: pendingRequest.workspaceRoots ?? workspaceRoots,

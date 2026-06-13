@@ -216,6 +216,11 @@ function throwIfAborted(signal?: AbortSignal) {
 
 type PublicToolDefinition = ToolDefinition;
 
+type SkillFolderTreeItem = {
+  name: string;
+  type: "file" | "directory";
+};
+
 type SkillDefinition = {
   name: string;
   enabled: boolean;
@@ -229,6 +234,9 @@ type SkillDefinition = {
   source?: string;
   sourceKind?: "global" | "workspace";
   sourcePath?: string;
+  workspaceRoots?: ChatWorkspaceRoot[];
+  fileTree?: SkillFolderTreeItem[];
+  conflict?: string;
   shadowed?: boolean;
 };
 
@@ -283,6 +291,9 @@ type ToolsSettings = {
 
 type SkillsSettings = {
   enabled?: boolean;
+  skillsPermission?: FeaturePermission;
+  skillPermissions?: Record<string, Permission>;
+  permissionModelVersion?: 2;
 };
 
 type AgentsSettings = {
@@ -380,7 +391,7 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   enabled: true,
   askUserEnabled: true,
   taskToolsEnabled: true,
-  loadSkillEnabled: false,
+  loadSkillEnabled: true,
   webFetchEnabled: false,
   readEnabled: true,
   bashEnabled: true,
@@ -395,7 +406,7 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   toolPermissions: {
     ask_user: "allow",
     update_tasks: "allow",
-    skill: "ask",
+    skill: "allow",
     web_fetch: "deny",
     read: "ask",
     bash: "ask",
@@ -407,6 +418,9 @@ const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
 };
 const DEFAULT_SKILLS_SETTINGS: SkillsSettings = {
   enabled: true,
+  skillsPermission: "custom",
+  skillPermissions: {},
+  permissionModelVersion: 2,
 };
 const DEFAULT_AGENTS_SETTINGS: AgentsSettings = {
   enabled: true,
@@ -668,7 +682,7 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
       true,
       true,
     ),
-    skill: legacyToolPermission(value.loadSkillEnabled, false, true),
+    skill: legacyToolPermission(value.loadSkillEnabled, true, true),
     web_fetch: legacyToolPermission(value.webFetchEnabled, false, false),
     read: legacyToolPermission(readEnabled, value.readAutoApproveEnabled, true),
     bash: legacyToolPermission(bashEnabled, value.bashAutoApproveEnabled, true),
@@ -717,8 +731,22 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
 function normalizeSkillsSettings(value: unknown): SkillsSettings {
   if (!isPlainObject(value)) return DEFAULT_SKILLS_SETTINGS;
 
+  const permissionModelVersion = value.permissionModelVersion === 2 ? 2 : undefined;
+  const skillsPermission: FeaturePermission =
+    permissionModelVersion === 2
+      ? normalizeFeaturePermission(value.skillsPermission, "custom")
+      : "custom";
+
   return {
-    enabled: typeof value.enabled === "boolean" ? value.enabled : true,
+    enabled:
+      permissionModelVersion === 2
+        ? skillsPermission !== "deny"
+        : typeof value.enabled === "boolean"
+          ? value.enabled
+          : true,
+    skillsPermission,
+    skillPermissions: normalizePermissionMap(value.skillPermissions),
+    permissionModelVersion: 2,
   };
 }
 
@@ -942,6 +970,23 @@ function normalizeSkillDefinition(candidate: unknown): SkillDefinition {
       return value === "global" || value === "workspace" ? value : undefined;
     })(),
     sourcePath: safeString(source.sourcePath).trim() || undefined,
+    workspaceRoots: normalizeWorkspaceRoots(source.workspaceRoots).map(
+      (root) => ({
+        ...root,
+        createdAt: root.createdAt ?? new Date(0).toISOString(),
+      }) satisfies ChatWorkspaceRoot,
+    ),
+    fileTree: Array.isArray(source.fileTree)
+      ? source.fileTree
+          .map((item) => {
+            if (!isPlainObject(item)) return undefined;
+            const name = safeString(item.name).trim();
+            const type = item.type === "directory" ? "directory" : "file";
+            return name ? { name, type } : undefined;
+          })
+          .filter((item): item is SkillFolderTreeItem => Boolean(item))
+      : undefined,
+    conflict: safeString(source.conflict).trim() || undefined,
     shadowed: source.shadowed === true,
   };
 }
@@ -4247,16 +4292,16 @@ async function openJsonToolsFolder() {
 }
 
 // ---------------------------------------------------------------------------
-// Readonly skill discovery.
+// Editable filesystem skill discovery.
 //
-// Skills are filesystem folders with SKILL.md. Chat Forge does not edit or
-// enable/disable them. It discovers the global ~/.agents/skills folder plus the
-// selected workspace .agents/skills fallback, shows SKILL.md readonly,
-// advertises metadata to the model, and loads skill content through the
-// built-in skill tool.
+// Skills are folders with SKILL.md. Chat Forge discovers the global
+// ~/.agents/skills folder plus the selected workspace .agents/skills folder,
+// lets the user edit the raw SKILL.md, and creates/deletes the whole skill
+// folder when requested.
 // ---------------------------------------------------------------------------
 
 const SKILL_MANIFEST_FILENAME = "SKILL.md";
+const INVALID_SKILL_FOLDER_CHARS = /[<>:"/\\|?*\x00-\x1F]/;
 
 type SkillFolderRecord = {
   skill: SkillDefinition;
@@ -4310,12 +4355,51 @@ function normalizeSkillName(value: string) {
   return value.trim();
 }
 
-function buildSkillFromManifest(
+function validateSkillName(value: string) {
+  const name = normalizeSkillName(value);
+  if (!name) throw new Error("Skill name is required.");
+  if (name.length > 64) {
+    throw new Error("Skill name must be at most 64 characters.");
+  }
+  if (!TOOL_NAME_PATTERN.test(name)) {
+    throw new Error(
+      "Skill name must use only letters, numbers, underscores, or hyphens.",
+    );
+  }
+  if (name.toLowerCase() === "skill") {
+    throw new Error("skill is a built-in tool name and cannot be used by a skill.");
+  }
+  if (name === "." || name === ".." || INVALID_SKILL_FOLDER_CHARS.test(name)) {
+    throw new Error("Skill name cannot contain path separators or reserved characters.");
+  }
+  return name;
+}
+
+async function readSkillFolderTree(folderPath: string): Promise<SkillFolderTreeItem[]> {
+  try {
+    const entries = await fs.readdir(folderPath, { withFileTypes: true });
+    return entries
+      .map((entry) => ({
+        name: entry.name,
+        type: entry.isDirectory() ? "directory" as const : "file" as const,
+      }))
+      .sort((left, right) => {
+        if (left.name === SKILL_MANIFEST_FILENAME) return -1;
+        if (right.name === SKILL_MANIFEST_FILENAME) return 1;
+        if (left.type !== right.type) return left.type === "directory" ? -1 : 1;
+        return left.name.localeCompare(right.name);
+      });
+  } catch {
+    return [];
+  }
+}
+
+async function buildSkillFromManifest(
   folderPath: string,
   content: string,
   sourceKind: "global" | "workspace",
   sourcePath: string,
-): SkillDefinition {
+): Promise<SkillDefinition> {
   const { frontmatter, body } = parseSkillManifest(content);
   const manifestPath = path.join(folderPath, SKILL_MANIFEST_FILENAME);
   const name = normalizeSkillName(
@@ -4335,6 +4419,7 @@ function buildSkillFromManifest(
     sourceKind,
     sourcePath,
     source: sourceKind === "global" ? "Global" : "Workspace",
+    fileTree: await readSkillFolderTree(folderPath),
   });
 }
 
@@ -4370,6 +4455,12 @@ function uniqueStrings(values: string[]) {
   return result;
 }
 
+function getSkillPathKey(value: string | undefined) {
+  if (!value) return "";
+  const normalized = path.resolve(value);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
 async function tryReadSkillFolder(
   folderPath: string,
   sourceKind: "global" | "workspace",
@@ -4388,7 +4479,7 @@ async function tryReadSkillFolder(
     throw error;
   }
 
-  const skill = buildSkillFromManifest(
+  const skill = await buildSkillFromManifest(
     folderPath,
     content,
     sourceKind,
@@ -4433,7 +4524,7 @@ async function discoverSkillsInDir(
   return records;
 }
 
-async function loadJsonSkills(request?: unknown) {
+async function discoverSkillRecords(request?: unknown) {
   const workspaceRoots = isPlainObject(request)
     ? request.workspaceRoots
     : undefined;
@@ -4453,18 +4544,41 @@ async function loadJsonSkills(request?: unknown) {
     );
   }
 
+  return { globalRecords, workspaceRecords };
+}
+
+function annotateSkillConflicts(records: SkillDefinition[]) {
+  const counts = new Map<string, number>();
+  for (const skill of records) {
+    const key = skill.name.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+
+  return records.map((skill) => {
+    const duplicate = (counts.get(skill.name.toLowerCase()) ?? 0) > 1;
+    return duplicate
+      ? {
+          ...skill,
+          conflict: `Duplicate skill name: ${skill.name}`,
+        }
+      : skill;
+  });
+}
+
+async function loadJsonSkills(request?: unknown) {
+  const { globalRecords, workspaceRecords } = await discoverSkillRecords(request);
   const workspaceSkillNames = new Set(
-    workspaceRecords.map((record) => record.skill.name),
+    workspaceRecords.map((record) => record.skill.name.toLowerCase()),
   );
   const allSkills = [
     ...globalRecords.map((record) => ({
       ...record.skill,
-      shadowed: workspaceSkillNames.has(record.skill.name),
+      shadowed: workspaceSkillNames.has(record.skill.name.toLowerCase()),
     })),
     ...workspaceRecords.map((record) => ({ ...record.skill, shadowed: false })),
   ];
 
-  return allSkills
+  return annotateSkillConflicts(allSkills)
     .sort((left, right) => {
       const sourceOrder =
         (left.sourceKind === "global" ? 0 : 1) -
@@ -4475,14 +4589,168 @@ async function loadJsonSkills(request?: unknown) {
     .map(toPublicSkill);
 }
 
-async function saveJsonSkill(..._args: unknown[]) {
-  throw new Error("Skills are readonly. Edit SKILL.md in the skills folder.");
+function getSkillSaveRoot(skill: SkillDefinition) {
+  if (skill.sourcePath) return path.resolve(skill.sourcePath);
+  if (skill.sourceKind === "workspace") {
+    const workspaceRoot = skill.workspaceRoots?.[0];
+    if (workspaceRoot?.path?.trim()) {
+      return path.resolve(workspaceRoot.path.trim(), ".agents", "skills");
+    }
+    throw new Error("Workspace skill creation requires an active workspace.");
+  }
+  return path.resolve(getGlobalSkillSearchDirs()[0]);
 }
 
-async function deleteJsonSkill(..._args: unknown[]) {
-  throw new Error(
-    "Skills are readonly. Delete the skill folder from the filesystem.",
+
+function getWorkspaceRootFromSkillsDir(skillsDir: string): ChatWorkspaceRoot | undefined {
+  const resolvedSkillsDir = path.resolve(skillsDir);
+  if (path.basename(resolvedSkillsDir) !== "skills") return undefined;
+  const agentsDir = path.dirname(resolvedSkillsDir);
+  if (path.basename(agentsDir) !== ".agents") return undefined;
+  const rootPath = path.dirname(agentsDir);
+  if (!rootPath || rootPath === agentsDir) return undefined;
+  return {
+    id: `skill-workspace:${rootPath}`,
+    name: path.basename(rootPath) || rootPath,
+    path: rootPath,
+    createdAt: new Date(0).toISOString(),
+    kind: "manual",
+  };
+}
+
+function mergeWorkspaceRootsForSkillSave(
+  skill: SkillDefinition,
+  targetSourceKind: "global" | "workspace",
+  targetSourcePath: string,
+): ChatWorkspaceRoot[] {
+  const roots = [...(skill.workspaceRoots ?? [])];
+  const maybeAddRootFromSkillsDir = (skillsDir?: string) => {
+    if (!skillsDir) return;
+    const root = getWorkspaceRootFromSkillsDir(skillsDir);
+    if (!root) return;
+    if (roots.some((candidate) => getSkillPathKey(candidate.path) === getSkillPathKey(root.path))) {
+      return;
+    }
+    roots.push(root);
+  };
+
+  if (targetSourceKind === "workspace") maybeAddRootFromSkillsDir(targetSourcePath);
+  if (skill.sourceKind === "workspace") maybeAddRootFromSkillsDir(skill.sourcePath);
+
+  return roots;
+}
+
+async function assertSkillNameUnique({
+  name,
+  currentDirectoryPath,
+  request,
+}: {
+  name: string;
+  currentDirectoryPath?: string;
+  request?: unknown;
+}) {
+  const skills = await loadJsonSkills(request);
+  const currentKey = getSkillPathKey(currentDirectoryPath);
+  const duplicate = skills.find((skill) => {
+    if (skill.name.toLowerCase() !== name.toLowerCase()) return false;
+    return getSkillPathKey(skill.directoryPath) !== currentKey;
+  });
+  if (duplicate) {
+    throw new Error(`A skill named "${name}" already exists.`);
+  }
+}
+
+async function saveJsonSkill(value: unknown, _previousName?: unknown) {
+  const skill = normalizeSkillDefinition(value);
+  const manifestContent = safeString(skill.manifestContent);
+  if (!manifestContent.trim()) throw new Error("SKILL.md content is required.");
+
+  const parsed = parseSkillManifest(manifestContent);
+  const effectiveName = validateSkillName(parsed.frontmatter.name || skill.name);
+  const sourceKind = skill.sourceKind === "workspace" ? "workspace" : "global";
+  const sourcePath = getSkillSaveRoot({ ...skill, sourceKind });
+  const currentDirectoryPath = skill.directoryPath
+    ? path.resolve(skill.directoryPath)
+    : undefined;
+  const existing = Boolean(currentDirectoryPath);
+  const sourcePathKey = getSkillPathKey(sourcePath);
+  const currentDirectoryPathKey = getSkillPathKey(currentDirectoryPath);
+  const isRootSkill = Boolean(currentDirectoryPathKey) && currentDirectoryPathKey === sourcePathKey;
+
+  await fs.mkdir(sourcePath, { recursive: true });
+  await assertSkillNameUnique({
+    name: effectiveName,
+    currentDirectoryPath,
+    request: {
+      workspaceRoots: mergeWorkspaceRootsForSkillSave(skill, sourceKind, sourcePath),
+    },
+  });
+
+  const targetDirectoryPath = path.resolve(sourcePath, effectiveName);
+  if (!targetDirectoryPath.startsWith(sourcePath + path.sep) && targetDirectoryPath !== sourcePath) {
+    throw new Error("Skill path is outside the skills folder.");
+  }
+
+  let finalDirectoryPath = currentDirectoryPath ?? targetDirectoryPath;
+  let renamed = false;
+  if (!existing) {
+    try {
+      await fs.mkdir(targetDirectoryPath, { recursive: false });
+    } catch (error) {
+      const code = typeof error === "object" && error && "code" in error ? (error as { code?: string }).code : undefined;
+      if (code === "EEXIST") throw new Error(`A skill folder named "${effectiveName}" already exists.`);
+      throw error;
+    }
+    finalDirectoryPath = targetDirectoryPath;
+  } else if (!isRootSkill && currentDirectoryPath && getSkillPathKey(currentDirectoryPath) !== getSkillPathKey(targetDirectoryPath)) {
+    try {
+      await fs.rename(currentDirectoryPath, targetDirectoryPath);
+      renamed = true;
+      finalDirectoryPath = targetDirectoryPath;
+    } catch (error) {
+      throw new Error(`Failed to rename skill folder: ${getErrorMessage(error)}`);
+    }
+  }
+
+  try {
+    await fs.writeFile(path.join(finalDirectoryPath, SKILL_MANIFEST_FILENAME), manifestContent, "utf8");
+  } catch (error) {
+    if (renamed && currentDirectoryPath) {
+      try {
+        await fs.rename(finalDirectoryPath, currentDirectoryPath);
+      } catch (rollbackError) {
+        throw new Error(
+          `Failed to save SKILL.md after renaming the folder, and rollback failed: ${getErrorMessage(rollbackError)}`,
+        );
+      }
+    }
+    throw error;
+  }
+
+  return toPublicSkill(
+    await buildSkillFromManifest(
+      finalDirectoryPath,
+      manifestContent,
+      sourceKind,
+      sourcePath,
+    ),
   );
+}
+
+async function deleteJsonSkill(value: unknown) {
+  const skill = normalizeSkillDefinition(value);
+  const directoryPath = skill.directoryPath?.trim();
+  if (!directoryPath) throw new Error("Skill folder is unknown.");
+  const root = getSkillSaveRoot(skill);
+  const target = path.resolve(directoryPath);
+  const resolvedRoot = path.resolve(root);
+  if (!target.startsWith(resolvedRoot + path.sep) && target !== resolvedRoot) {
+    throw new Error("Refusing to delete a folder outside the skills folder.");
+  }
+  if (getSkillPathKey(target) === getSkillPathKey(resolvedRoot)) {
+    throw new Error("Refusing to delete the root skills folder.");
+  }
+  await fs.rm(target, { recursive: true, force: true });
 }
 
 function createEmptySkillImportResult(cancelled: boolean): SkillImportResult {
@@ -4504,7 +4772,7 @@ async function exportJsonSkillToFile(
   ..._args: unknown[]
 ): Promise<SkillExportResult> {
   throw new Error(
-    "Skills are readonly. Copy the skill folder from the filesystem.",
+    "Skill export is not supported yet. Copy the skill folder from the filesystem.",
   );
 }
 
@@ -4512,7 +4780,7 @@ async function exportJsonSkillsToFolder(
   ..._args: unknown[]
 ): Promise<SkillExportResult> {
   throw new Error(
-    "Skills are readonly. Copy the skill folders from the filesystem.",
+    "Skill export is not supported yet. Copy the skill folders from the filesystem.",
   );
 }
 

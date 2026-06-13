@@ -6,9 +6,8 @@ import {
   Folder,
   FolderOpen,
   Loader2,
+  Menu,
   MoreHorizontal,
-  PanelLeftClose,
-  PanelLeftOpen,
   Pin,
   PinOff,
   Plus,
@@ -1087,10 +1086,21 @@ export const ChatSidebar = memo(function ChatSidebar({
               onClick={() => onCollapsedChange(true)}
               title="Hide sidebar"
             >
-              <PanelLeftClose className="size-4" />
+              <Menu className="size-4" />
             </Button>
 
-            <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <span
+                className="inline-flex shrink-0 items-center justify-center text-primary"
+                aria-hidden="true"
+              >
+                <img
+                  src="/icon.png"
+                  alt=""
+                  aria-hidden="true"
+                  className="size-6 shrink-0 rounded-sm"
+                />
+              </span>
               <h1 className="flex min-w-0 items-baseline gap-1 truncate text-base font-semibold leading-6">
                 <span className="truncate">{appName}</span>
                 <span className="shrink-0 text-muted-foreground">
@@ -1126,7 +1136,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         </div>
 
         <div
-          className="min-h-0 flex-1 overflow-y-auto p-2 chat-scrollbar"
+          className="min-h-0 flex-1 overflow-y-scroll overflow-x-hidden p-2 [scrollbar-gutter:stable_both-edges] chat-scrollbar"
           onScroll={handleChatListScroll}
         >
           <div className="grid gap-3">
@@ -1222,7 +1232,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             onClick={() => onCollapsedChange(false)}
             title="Show sidebar"
           >
-            <PanelLeftOpen className="size-4" />
+            <Menu className="size-4" />
           </Button>
           <Button
             type="button"

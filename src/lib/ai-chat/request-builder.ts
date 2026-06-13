@@ -102,7 +102,7 @@ export function getGlobalToolPermission(
 
   if (toolName === ASK_USER_TOOL_NAME) return toolsSettings.askUserEnabled ? "allow" : "deny";
   if (isTaskToolName(toolName)) return toolsSettings.taskToolsEnabled ? "allow" : "deny";
-  if (toolName === LOAD_SKILL_TOOL_NAME) return toolsSettings.loadSkillEnabled ? "ask" : "deny";
+  if (toolName === LOAD_SKILL_TOOL_NAME) return toolsSettings.loadSkillEnabled ? "allow" : "deny";
   if (toolName === WEB_FETCH_TOOL_NAME) return toolsSettings.webFetchEnabled ? "ask" : "deny";
   if (toolName === READ_TOOL_NAME) return toolsSettings.readEnabled ? (toolsSettings.readAutoApproveEnabled ? "allow" : "ask") : "deny";
   if (toolName === BASH_TOOL_NAME) return toolsSettings.bashEnabled ? (toolsSettings.bashAutoApproveEnabled ? "allow" : "ask") : "deny";
@@ -135,7 +135,7 @@ export function getEffectiveGlobalSkillPermission(
 ): Permission {
   return resolveMasterPermission(
     skillsSettings.skillsPermission ?? "custom",
-    skillsSettings.skillPermissions?.[skillName] ?? (skillsSettings.enabled === false ? "deny" : "ask"),
+    skillsSettings.skillPermissions?.[skillName] ?? (skillsSettings.enabled === false ? "deny" : "allow"),
   );
 }
 
@@ -333,7 +333,7 @@ export function getEffectiveWorkspaceRoots({
   const selectedRoots: ChatWorkspaceRoot[] = [];
 
   for (const root of workspaceRoots) {
-    if (root.automatic || root.kind === "chat" || root.kind === "skill" || root.id === "chat" || root.id.startsWith("skill:")) {
+    if (root.automatic || root.kind === "skill" || root.id.startsWith("skill:")) {
       continue;
     }
 

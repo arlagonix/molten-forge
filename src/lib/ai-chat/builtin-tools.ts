@@ -48,7 +48,7 @@ export const DEFAULT_TOOLS_SETTINGS: ToolsSettings = {
   toolPermissions: {
     ask_user: "allow",
     update_tasks: "allow",
-    skill: "ask",
+    skill: "allow",
     web_fetch: "deny",
     read: "ask",
     bash: "ask",

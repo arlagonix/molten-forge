@@ -263,7 +263,7 @@ export const McpDialog = memo(function McpDialog({
             <DialogTitle>MCP</DialogTitle>
           </DialogHeader>
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden md:grid-cols-[400px_minmax(0,1fr)]">
             <aside className="flex min-h-0 flex-col border-b bg-card/70 md:border-b-0 md:border-r">
               <div className="min-h-0 flex-1 overflow-y-auto p-2">
                 <div
@@ -282,7 +282,9 @@ export const McpDialog = memo(function McpDialog({
                     <span className="flex items-center gap-1.5 font-medium">
                       Enable MCP globally
                       <InfoTooltip label="Enable MCP globally">
-                        Master switch for MCP. When disabled, all server switches appear off, but their saved values are preserved.
+                        Master switch for MCP. When disabled, all server
+                        switches appear off, but their saved values are
+                        preserved.
                       </InfoTooltip>
                     </span>
                     <span className="block select-none text-sm leading-5 text-muted-foreground">
@@ -666,8 +668,8 @@ export const McpDialog = memo(function McpDialog({
                                 Discovered tools
                               </h4>
                               <InfoTooltip label="Discovered tools">
-                                Tools discovered from this server. Enable a
-                                tool here to show it in Tools settings and model
+                                Tools discovered from this server. Enable a tool
+                                here to show it in Tools settings and model
                                 context; permissions are configured in Tools
                                 settings.
                               </InfoTooltip>

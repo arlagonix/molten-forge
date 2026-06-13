@@ -72,6 +72,7 @@ import {
   getEnabledSkillsForChat,
   getEffectiveWorkspaceRoots,
   getEffectiveToolPermission,
+  getEffectiveSkillPermission,
   getEnabledToolsForChat,
   getGlobalEnabledAgents,
   getGlobalEnabledSkills,
@@ -88,6 +89,7 @@ import type {
   AgentsSettings,
   AskUserResponse,
   ToolApprovalResponse,
+  ToolApprovalRequest,
   ChatAgentCall,
   ChatFileToolAutoApproval,
   ChatAssistantProcessStep,
@@ -106,6 +108,7 @@ import type {
   LoadedToolInfo,
   ProviderConfig,
   ModesState,
+  Permission,
   SkillsSettings,
   ToolCommandResult,
   TerminalStreamEvent,
@@ -846,6 +849,101 @@ export function useChatGeneration({
         !isTaskToolName(toolResult.toolName) ||
         toolResult.toolCallId === finalTaskToolResult.toolCallId,
     );
+  }
+
+
+  function getLoadSkillNameFromToolCall(toolCall: ChatToolCall) {
+    if (toolCall.function.name !== LOAD_SKILL_TOOL_NAME) return undefined;
+    try {
+      const argsText = toolCall.function.arguments.trim() || "{}";
+      const args = JSON.parse(argsText);
+      if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
+      const rawName = (args as Record<string, unknown>).name ?? (args as Record<string, unknown>).skillName;
+      return typeof rawName === "string" ? rawName.trim() || undefined : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function getLoadSkillToolCallPermission(toolCall: ChatToolCall, chat: ChatSession) {
+    const skillName = getLoadSkillNameFromToolCall(toolCall);
+    if (!skillName) return "allow" as Permission;
+    return getEffectiveSkillPermission({
+      skillName,
+      skillsSettings,
+      mode: getModeForChat(chat),
+      modeCapabilityContext,
+    });
+  }
+
+  function createLoadSkillApprovalRequest(toolCall: ChatToolCall): ToolApprovalRequest {
+    const skillName = getLoadSkillNameFromToolCall(toolCall) ?? "";
+    const skill = skillName ? availableSkillsByName.get(skillName) : undefined;
+    const details = [
+      { label: "Skill", value: skillName || "Unknown" },
+      ...(skill?.description?.trim()
+        ? [{ label: "Description", value: skill.description.trim() }]
+        : []),
+      ...(skill?.sourceKind
+        ? [{ label: "Source", value: skill.sourceKind === "workspace" ? "Workspace" : "Global" }]
+        : []),
+      { label: "Approval mode", value: "Manual user approval required" },
+    ];
+
+    return {
+      title: "Approve skill loading",
+      description: skillName
+        ? `The model wants to load the skill \`${skillName}\`.`
+        : "The model wants to load a skill.",
+      toolName: LOAD_SKILL_TOOL_NAME,
+      action: "operation",
+      details,
+    };
+  }
+
+  function createApprovalRequestForToolCall(
+    toolCall: ChatToolCall,
+    tool: LoadedToolInfo | undefined,
+    workspaceRoots: ChatWorkspaceRoot[],
+  ) {
+    if (requiresFileToolApproval(toolCall.function.name)) {
+      return parseFileToolApprovalRequestFromToolCall(toolCall, workspaceRoots);
+    }
+    if (toolCall.function.name === LOAD_SKILL_TOOL_NAME) {
+      return createLoadSkillApprovalRequest(toolCall);
+    }
+    return createToolApprovalRequest(toolCall, tool);
+  }
+
+  function requiresApprovalForToolCall(
+    toolCall: ChatToolCall,
+    tool: LoadedToolInfo | undefined,
+    chat: ChatSession,
+  ) {
+    if (toolCall.function.name === LOAD_SKILL_TOOL_NAME) {
+      const loaderPermission = getEffectiveToolPermission({
+        toolName: LOAD_SKILL_TOOL_NAME,
+        toolsSettings,
+        mode: getModeForChat(chat),
+        modeCapabilityContext,
+      });
+      if (loaderPermission === "ask") return true;
+      return getLoadSkillToolCallPermission(toolCall, chat) === "ask";
+    }
+
+    return requiresToolApproval(toolCall.function.name, tool);
+  }
+
+  function toolForExecution(
+    toolCall: ChatToolCall,
+    tool: LoadedToolInfo | undefined,
+    chat: ChatSession,
+  ) {
+    if (!tool) return undefined;
+    if (toolCall.function.name !== LOAD_SKILL_TOOL_NAME) return tool;
+    return requiresApprovalForToolCall(toolCall, tool, chat)
+      ? { ...tool, requiresApproval: true }
+      : { ...tool, requiresApproval: false };
   }
 
   function executeTaskTool(toolCall: ChatToolCall, chatId: string): ChatToolResult {
@@ -2384,9 +2482,10 @@ export function useChatGeneration({
           const childTool = currentAgentToolsForRun.find(
             (candidate) => candidate.name === childToolCall.function.name,
           );
-          const childNeedsApproval = requiresToolApproval(
-            childToolCall.function.name,
+          const childNeedsApproval = requiresApprovalForToolCall(
+            childToolCall,
             childTool,
+            getCurrentChatSnapshot(chatId),
           );
           const shouldMirrorApproval = childNeedsApproval;
           const stepToolBatchId =
@@ -2411,15 +2510,14 @@ export function useChatGeneration({
                 toolBatchId: stepToolBatchId,
                 status: "waiting" as const,
                 toolCall: childToolCall,
-                request: requiresFileToolApproval(childToolCall.function.name)
-                  ? parseFileToolApprovalRequestFromToolCall(
-                      childToolCall,
-                      getEffectiveWorkspaceRootsForChat(
-                        getCurrentChatSnapshot(chatId),
-                        currentAgentActiveSkillNames,
-                      ),
-                    )
-                  : createToolApprovalRequest(childToolCall, childTool),
+                request: createApprovalRequestForToolCall(
+                  childToolCall,
+                  childTool,
+                  getEffectiveWorkspaceRootsForChat(
+                    getCurrentChatSnapshot(chatId),
+                    currentAgentActiveSkillNames,
+                  ),
+                ),
               });
             } catch {
               // Keep invalid approval calls visible as failed tool executions
@@ -2624,7 +2722,7 @@ export function useChatGeneration({
               (candidate) => candidate.name === childToolCall.function.name,
             );
 
-            if (requiresToolApproval(childToolCall.function.name, childTool)) {
+            if (requiresApprovalForToolCall(childToolCall, childTool, getCurrentChatSnapshot(chatId))) {
               const approvalStepId = createId();
               appendAssistantProcessSteps(
                 chatId,
@@ -2637,12 +2735,11 @@ export function useChatGeneration({
                     toolBatchId: childToolBatchId,
                     status: "waiting" as const,
                     toolCall: childToolCall,
-                    request: requiresFileToolApproval(childToolCall.function.name)
-                      ? parseFileToolApprovalRequestFromToolCall(
-                          childToolCall,
-                          childWorkspaceRoots,
-                        )
-                      : createToolApprovalRequest(childToolCall, childTool),
+                    request: createApprovalRequestForToolCall(
+                      childToolCall,
+                      childTool,
+                      childWorkspaceRoots,
+                    ),
                   },
                 ],
               );
@@ -2655,7 +2752,7 @@ export function useChatGeneration({
                 signal,
                 activeSkillNames: currentAgentActiveSkillNames,
                 workspaceRoots: childWorkspaceRoots,
-                tool: childTool,
+                tool: toolForExecution(childToolCall, childTool, getCurrentChatSnapshot(chatId)),
                 unavailableToolMessage: createUnavailableToolMessageForChat(
                   chatId,
                   childToolCall.function.name,
@@ -2679,7 +2776,7 @@ export function useChatGeneration({
               activeSkillNames: currentAgentActiveSkillNames,
               workspaceRoots: childWorkspaceRoots,
               fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
-              tool: childTool,
+              tool: toolForExecution(childToolCall, childTool, getCurrentChatSnapshot(chatId)),
               unavailableToolMessage: createUnavailableToolMessageForChat(
                 chatId,
                 childToolCall.function.name,
@@ -3005,7 +3102,7 @@ export function useChatGeneration({
         const tool = toolsForRun.find(
           (candidate) => candidate.name === toolCall.function.name,
         );
-        if (requiresToolApproval(toolCall.function.name, tool)) {
+        if (requiresApprovalForToolCall(toolCall, tool, getCurrentChatSnapshot(chatId))) {
           try {
             const approvalGroupId = toolBatchId ?? createId();
             toolBatchIdsByToolCallId.set(toolCall.id, approvalGroupId);
@@ -3015,15 +3112,14 @@ export function useChatGeneration({
               toolBatchId: approvalGroupId,
               status: "waiting" as const,
               toolCall,
-              request: requiresFileToolApproval(toolCall.function.name)
-                ? parseFileToolApprovalRequestFromToolCall(
-                    toolCall,
-                    getEffectiveWorkspaceRootsForChat(
-                      getCurrentChatSnapshot(chatId),
-                      currentActiveSkillNames,
-                    ),
-                  )
-                : createToolApprovalRequest(toolCall, tool),
+              request: createApprovalRequestForToolCall(
+                toolCall,
+                tool,
+                getEffectiveWorkspaceRootsForChat(
+                  getCurrentChatSnapshot(chatId),
+                  currentActiveSkillNames,
+                ),
+              ),
             });
             toolSteps.push({
               id: createId(),
@@ -3684,8 +3780,12 @@ export function useChatGeneration({
                   allowedExactFilePaths: attachmentAccess.allowedExactFilePaths,
                   allowedReadRoots: attachmentAccess.allowedReadRoots,
                   fileToolAutoApproval: getChatFileToolAutoApproval(chatId),
-                  tool: currentToolsForRun.find(
-                    (candidate) => candidate.name === toolCall.function.name,
+                  tool: toolForExecution(
+                    toolCall,
+                    currentToolsForRun.find(
+                      (candidate) => candidate.name === toolCall.function.name,
+                    ),
+                    getCurrentChatSnapshot(chatId),
                   ),
                   unavailableToolMessage: createUnavailableToolMessageForChat(
                     chatId,
