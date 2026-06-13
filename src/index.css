@@ -254,21 +254,21 @@
     background-color: color-mix(in oklab, currentColor 28%, transparent);
   }
 
-  @keyframes chat-forge-loading-fade {
+  @keyframes molten-forge-loading-fade {
     to {
       opacity: 0;
     }
   }
 
-  .chat-forge-loading-text {
+  .molten-forge-loading-text {
     font-weight: 700;
     font-family: var(--font-sans);
     font-size: 30px;
     line-height: 1.25;
-    animation: chat-forge-loading-fade 1s linear infinite alternate;
+    animation: molten-forge-loading-fade 1s linear infinite alternate;
   }
 
-  .chat-forge-loading-text::before {
+  .molten-forge-loading-text::before {
     content: "Loading...";
   }
 
@@ -285,23 +285,23 @@
     /* font-family: var(--font-mono); */
   }
 
-  .chat-forge-radix-theme,
-  .chat-forge-radix-theme.radix-themes,
-  .chat-forge-radix-theme .radix-themes {
+  .molten-forge-radix-theme,
+  .molten-forge-radix-theme.radix-themes,
+  .molten-forge-radix-theme .radix-themes {
     --default-font-family: var(--font-sans);
     --heading-font-family: var(--font-sans);
     --code-font-family: var(--font-mono);
     font-family: var(--font-sans);
   }
 
-  .chat-forge-radix-theme.radix-themes {
+  .molten-forge-radix-theme.radix-themes {
     min-height: auto;
     background: transparent;
     color: inherit;
   }
 
   @supports (min-height: 100dvh) {
-    .chat-forge-radix-theme.radix-themes:where([data-is-root-theme="true"]) {
+    .molten-forge-radix-theme.radix-themes:where([data-is-root-theme="true"]) {
       min-height: auto;
     }
   }

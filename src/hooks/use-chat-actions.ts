@@ -2,11 +2,9 @@ import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { toast } from "sonner";
 
 import {
-  createEmptyChat,
-  deleteChat,
-  saveActiveChatId,
-  saveChat,
-} from "@/lib/ai-chat/storage";
+  buildClonedChat,
+  renameChatWithoutActivityUpdate,
+} from "@/lib/ai-chat/chat-session-actions";
 import {
   getActiveVariant,
   isAutoTitledChat,
@@ -15,9 +13,11 @@ import {
   titleFromMessage,
 } from "@/lib/ai-chat/chat-utils";
 import {
-  buildClonedChat,
-  renameChatWithoutActivityUpdate,
-} from "@/lib/ai-chat/chat-session-actions";
+  createEmptyChat,
+  deleteChat,
+  saveActiveChatId,
+  saveChat,
+} from "@/lib/ai-chat/storage";
 import type {
   ChatAttachment,
   ChatFileToolAutoApproval,
@@ -52,15 +52,19 @@ function collectGeneratedFileStoragePathsFromMessage(message: ChatMessage) {
 }
 
 function cleanupDeletedMessageWorkspace(chatId: string, message: ChatMessage) {
-  void window.codeForgeAI
+  void window.moltenForgeAI
     ?.cleanupChatMessageWorkspace?.({
       chatId,
       messageId: message.id,
-      generatedFileStoragePaths: collectGeneratedFileStoragePathsFromMessage(message),
+      generatedFileStoragePaths:
+        collectGeneratedFileStoragePathsFromMessage(message),
       ...(message.role === "user" ? { attachments: message.attachments } : {}),
     })
     .catch((error) => {
-      console.error("Failed to clean up deleted message workspace files:", error);
+      console.error(
+        "Failed to clean up deleted message workspace files:",
+        error,
+      );
     });
 }
 
@@ -165,7 +169,8 @@ export function useChatActions({
     const deletedMessage = activeChat.messages.find(
       (message) => message.id === messageId,
     );
-    if (deletedMessage) cleanupDeletedMessageWorkspace(activeChat.id, deletedMessage);
+    if (deletedMessage)
+      cleanupDeletedMessageWorkspace(activeChat.id, deletedMessage);
 
     updateActiveChatMessages((currentMessages) =>
       currentMessages.filter((message) => message.id !== messageId),
@@ -198,7 +203,6 @@ export function useChatActions({
     }
   }
 
-
   async function saveEditedUserMessage(
     messageId: string,
     editedContent: string,
@@ -219,7 +223,8 @@ export function useChatActions({
       return;
     }
 
-    const finalAttachments = editedAttachments ?? currentMessage.attachments ?? [];
+    const finalAttachments =
+      editedAttachments ?? currentMessage.attachments ?? [];
     if (!userMessage && finalAttachments.length === 0) {
       showError("Message is required.");
       return;
@@ -229,7 +234,9 @@ export function useChatActions({
       ...chat,
       title:
         userIndex === 0 && isAutoTitledChat(chat)
-          ? titleFromMessage(userMessage || finalAttachments[0]?.name || "Attached files")
+          ? titleFromMessage(
+              userMessage || finalAttachments[0]?.name || "Attached files",
+            )
           : chat.title,
       titleMode:
         userIndex === 0 && isAutoTitledChat(chat) ? "auto" : chat.titleMode,

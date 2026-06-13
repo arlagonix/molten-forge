@@ -1,11 +1,11 @@
 # Project instructions (`AGENTS.md`)
 
-Chat Forge automatically loads workspace project instructions from `AGENTS.md` in the background.
+Molten Forge automatically loads workspace project instructions from `AGENTS.md` in the background.
 
 ## When instructions are loaded
 
 - `AGENTS.md` loading is always enabled.
-- Chat Forge only checks for instructions when a chat has a user-selected workspace.
+- Molten Forge only checks for instructions when a chat has a user-selected workspace.
 - Only the workspace root file is loaded: `<workspace>/AGENTS.md`.
 - Nested `AGENTS.md`, `CLAUDE.md`, Cursor rules, and custom instruction paths are not loaded in this version.
 - If a chat has no workspace, no project instructions are loaded.
@@ -20,7 +20,7 @@ A running generation keeps the instruction snapshot that existed when that gener
 
 ## Workspace changes
 
-When a workspace is added or changed in an existing chat, Chat Forge immediately checks the new workspace root for `AGENTS.md`.
+When a workspace is added or changed in an existing chat, Molten Forge immediately checks the new workspace root for `AGENTS.md`.
 
 If previous project instructions were loaded, they are discarded from future model context. If the new workspace has `AGENTS.md`, the new file is loaded silently. If the new workspace does not have `AGENTS.md`, no project instructions are loaded.
 
@@ -28,7 +28,7 @@ No project-instructions status is rendered in the chat timeline.
 
 ## Refresh behavior
 
-Chat Forge refreshes project instructions automatically:
+Molten Forge refreshes project instructions automatically:
 
 - when a workspace is set or changed,
 - when a chat is opened or the app reloads,
@@ -48,17 +48,21 @@ Keep `AGENTS.md` short and operational:
 # AGENTS.md
 
 ## Project overview
+
 Electron + React + TypeScript app.
 
 ## Commands
+
 - Typecheck: `npm run build`
 - Tests: `npm test`
 
 ## Coding rules
+
 - Keep IPC contracts typed.
 - Do not change persisted settings without migration.
 - Avoid rendering collapsed hidden content.
 
 ## Verification
+
 After UI changes, run relevant tests and the production build.
 ```

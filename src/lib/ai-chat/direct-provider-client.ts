@@ -1,3 +1,6 @@
+import { ATTACHMENT_LIMITS } from "./attachment-limits";
+import { mergeReasoningMetadata } from "./chat-utils";
+import { defaultGenerationSettings } from "./provider-presets";
 import type {
   ApiChatMessage,
   ApiContentPart,
@@ -11,9 +14,6 @@ import type {
   ProviderConfig,
   ProviderGenerationSettings,
 } from "./types";
-import { defaultGenerationSettings } from "./provider-presets";
-import { mergeReasoningMetadata } from "./chat-utils";
-import { ATTACHMENT_LIMITS } from "./attachment-limits";
 
 function getActiveAssistantContent(message: ChatMessage) {
   if (message.role !== "assistant") return message.content;
@@ -28,10 +28,20 @@ function getDeltaText(value: unknown): string {
     return value
       .map((item) => {
         if (typeof item === "string") return item;
-        if (item && typeof item === "object" && "text" in item && typeof item.text === "string") {
+        if (
+          item &&
+          typeof item === "object" &&
+          "text" in item &&
+          typeof item.text === "string"
+        ) {
           return item.text;
         }
-        if (item && typeof item === "object" && "content" in item && typeof item.content === "string") {
+        if (
+          item &&
+          typeof item === "object" &&
+          "content" in item &&
+          typeof item.content === "string"
+        ) {
           return item.content;
         }
         return "";
@@ -87,15 +97,21 @@ function readReasoningDelta(data: unknown): string {
   const delta = choices[0]?.delta;
   if (!delta || typeof delta !== "object") return "";
   return (
-    getDeltaText("reasoning_content" in delta ? delta.reasoning_content : undefined) ||
+    getDeltaText(
+      "reasoning_content" in delta ? delta.reasoning_content : undefined,
+    ) ||
     getDeltaText("reasoning" in delta ? delta.reasoning : undefined) ||
     getDeltaText("thinking" in delta ? delta.thinking : undefined) ||
-    getDeltaText("reasoning_details" in delta ? delta.reasoning_details : undefined)
+    getDeltaText(
+      "reasoning_details" in delta ? delta.reasoning_details : undefined,
+    )
   );
 }
 
 function readNumber(value: unknown) {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 function readUsage(data: unknown): ChatTokenUsage | undefined {
@@ -104,11 +120,15 @@ function readUsage(data: unknown): ChatTokenUsage | undefined {
   const usage = data.usage;
   if (!usage || typeof usage !== "object") return undefined;
 
-  const promptTokens = readNumber("prompt_tokens" in usage ? usage.prompt_tokens : undefined);
+  const promptTokens = readNumber(
+    "prompt_tokens" in usage ? usage.prompt_tokens : undefined,
+  );
   const completionTokens = readNumber(
     "completion_tokens" in usage ? usage.completion_tokens : undefined,
   );
-  const totalTokens = readNumber("total_tokens" in usage ? usage.total_tokens : undefined);
+  const totalTokens = readNumber(
+    "total_tokens" in usage ? usage.total_tokens : undefined,
+  );
 
   if (
     promptTokens === undefined &&
@@ -138,7 +158,6 @@ function getActiveAssistantVariant(message: ChatMessage) {
   return message.variants[message.activeVariantIndex];
 }
 
-
 function getAttachmentDisplayText(attachment: ChatAttachment) {
   const notices = [
     attachment.error ? `[attachment note: ${attachment.error}]` : "",
@@ -154,9 +173,10 @@ function getAttachmentModelPath(attachment: ChatAttachment) {
 function getAttachmentManifestLine(attachment: ChatAttachment) {
   const modelPath = getAttachmentModelPath(attachment);
   const size = `${attachment.sizeBytes} bytes`;
-  const temporary = attachment.temporary || attachment.storageMode === "temporary"
-    ? "; temporary: true"
-    : "";
+  const temporary =
+    attachment.temporary || attachment.storageMode === "temporary"
+      ? "; temporary: true"
+      : "";
   const contentNote = attachment.extractedText
     ? "; extracted text included below"
     : attachment.kind === "image"
@@ -236,7 +256,8 @@ export async function buildUserApiContent(
         );
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : "image file is unavailable";
+      const message =
+        error instanceof Error ? error.message : "image file is unavailable";
       textBlocks.push(
         `\n\n----- Attached image: ${attachment.name} -----\n[attachment missing: ${message}]`,
       );
@@ -265,17 +286,24 @@ export async function buildUserApiContent(
     .filter(Boolean)
     .join("");
   return [
-    { type: "text", text: combinedText || "Please analyze the attached files." },
+    {
+      type: "text",
+      text: combinedText || "Please analyze the attached files.",
+    },
     ...imageParts,
   ];
 }
-
 
 function readToolResultImages(result: ChatToolResult) {
   if (result.images?.length) return result.images;
 
   try {
-    const parsed = JSON.parse(result.content) as { type?: unknown; dataUrl?: unknown; mimeType?: unknown; path?: unknown };
+    const parsed = JSON.parse(result.content) as {
+      type?: unknown;
+      dataUrl?: unknown;
+      mimeType?: unknown;
+      path?: unknown;
+    };
     if (
       parsed?.type === "image" &&
       typeof parsed.dataUrl === "string" &&
@@ -285,7 +313,8 @@ function readToolResultImages(result: ChatToolResult) {
         {
           type: "image" as const,
           dataUrl: parsed.dataUrl,
-          mimeType: typeof parsed.mimeType === "string" ? parsed.mimeType : "image/*",
+          mimeType:
+            typeof parsed.mimeType === "string" ? parsed.mimeType : "image/*",
           path: typeof parsed.path === "string" ? parsed.path : undefined,
         },
       ];
@@ -300,7 +329,10 @@ function readToolResultImages(result: ChatToolResult) {
 function stripImageDataUrlsFromToolContent(content: string) {
   try {
     const parsed = JSON.parse(content) as Record<string, unknown>;
-    if (typeof parsed.dataUrl === "string" && parsed.dataUrl.startsWith("data:image/")) {
+    if (
+      typeof parsed.dataUrl === "string" &&
+      parsed.dataUrl.startsWith("data:image/")
+    ) {
       parsed.dataUrl = "[image data attached in the next user message]";
       return JSON.stringify(parsed, null, 2);
     }
@@ -335,7 +367,10 @@ export async function buildApiMessages({
     if (message.role === "user") {
       apiMessages.push({
         role: "user",
-        content: await buildUserApiContent(message.content, message.attachments),
+        content: await buildUserApiContent(
+          message.content,
+          message.attachments,
+        ),
       });
       continue;
     }
@@ -368,7 +403,9 @@ export async function buildApiMessages({
       apiMessages.push({
         role: "tool",
         tool_call_id: result.toolCallId,
-        content: images.length ? stripImageDataUrlsFromToolContent(result.content) : result.content,
+        content: images.length
+          ? stripImageDataUrlsFromToolContent(result.content)
+          : result.content,
       });
 
       if (images.length) {
@@ -405,7 +442,9 @@ export async function buildApiMessages({
   return apiMessages;
 }
 
-export function getActiveModelSettings(provider: ProviderConfig): ProviderGenerationSettings {
+export function getActiveModelSettings(
+  provider: ProviderConfig,
+): ProviderGenerationSettings {
   return {
     ...defaultGenerationSettings,
     ...(provider.defaultSettings ?? {}),
@@ -414,7 +453,11 @@ export function getActiveModelSettings(provider: ProviderConfig): ProviderGenera
   };
 }
 
-function normalizeOptionalNumber(value: number | undefined, min: number, max: number) {
+function normalizeOptionalNumber(
+  value: number | undefined,
+  min: number,
+  max: number,
+) {
   if (value === undefined || !Number.isFinite(value)) return undefined;
   return Math.min(Math.max(value, min), max);
 }
@@ -620,8 +663,10 @@ export type LoadedProviderModel = {
 
 function getModelId(model: ModelLike) {
   if (typeof model.id === "string" && model.id.trim()) return model.id;
-  if (typeof model.name === "string" && model.name.trim()) return model.name.replace(/^models\//, "");
-  if (typeof model.display_name === "string" && model.display_name.trim()) return model.display_name;
+  if (typeof model.name === "string" && model.name.trim())
+    return model.name.replace(/^models\//, "");
+  if (typeof model.display_name === "string" && model.display_name.trim())
+    return model.display_name;
   return undefined;
 }
 
@@ -642,7 +687,9 @@ function readNestedContextLength(value: unknown, path: string[]) {
   return readPositiveNumber(current);
 }
 
-function getModelContextMetadata(model: ModelLike): Pick<LoadedProviderModel, "contextLength" | "contextLengthSource"> {
+function getModelContextMetadata(
+  model: ModelLike,
+): Pick<LoadedProviderModel, "contextLength" | "contextLengthSource"> {
   const loadedInstances = Array.isArray(model.loaded_instances)
     ? model.loaded_instances
     : [];
@@ -683,8 +730,20 @@ function getModelContextMetadata(model: ModelLike): Pick<LoadedProviderModel, "c
 function normalizeLoadedModelList(data: unknown): LoadedProviderModel[] {
   const source = (() => {
     if (Array.isArray(data)) return data;
-    if (data && typeof data === "object" && "data" in data && Array.isArray(data.data)) return data.data;
-    if (data && typeof data === "object" && "models" in data && Array.isArray(data.models)) return data.models;
+    if (
+      data &&
+      typeof data === "object" &&
+      "data" in data &&
+      Array.isArray(data.data)
+    )
+      return data.data;
+    if (
+      data &&
+      typeof data === "object" &&
+      "models" in data &&
+      Array.isArray(data.models)
+    )
+      return data.models;
     return [];
   })();
 
@@ -706,11 +765,14 @@ function normalizeLoadedModelList(data: unknown): LoadedProviderModel[] {
     byId.set(id, {
       id,
       contextLength: existing?.contextLength ?? context.contextLength,
-      contextLengthSource: existing?.contextLengthSource ?? context.contextLengthSource,
+      contextLengthSource:
+        existing?.contextLengthSource ?? context.contextLengthSource,
     });
   }
 
-  return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
+  return [...byId.values()].sort((left, right) =>
+    left.id.localeCompare(right.id),
+  );
 }
 
 function createReasoningTagParser({
@@ -726,13 +788,24 @@ function createReasoningTagParser({
   const closeTag = /<\/(think|thinking|reasoning|reason|thought)>/i;
   const longestTagLength = "</reasoning>".length;
 
-  function emitSafely(text: string, emit: (delta: string) => void, keepTagType: "open" | "close") {
+  function emitSafely(
+    text: string,
+    emit: (delta: string) => void,
+    keepTagType: "open" | "close",
+  ) {
     if (!text) return "";
 
     const lower = text.toLowerCase();
-    const possibleTags = keepTagType === "open"
-      ? ["<think>", "<thinking>", "<reasoning>", "<reason>", "<thought>"]
-      : ["</think>", "</thinking>", "</reasoning>", "</reason>", "</thought>"];
+    const possibleTags =
+      keepTagType === "open"
+        ? ["<think>", "<thinking>", "<reasoning>", "<reason>", "<thought>"]
+        : [
+            "</think>",
+            "</thinking>",
+            "</reasoning>",
+            "</reason>",
+            "</thought>",
+          ];
 
     let keepLength = 0;
     const maxKeep = Math.min(longestTagLength - 1, text.length);
@@ -766,7 +839,11 @@ function createReasoningTagParser({
       } else {
         const match = pending.match(closeTag);
         if (!match || match.index === undefined) {
-          pending = emitSafely(pending, (text) => onReasoningDelta?.(text), "close");
+          pending = emitSafely(
+            pending,
+            (text) => onReasoningDelta?.(text),
+            "close",
+          );
           return;
         }
 
@@ -789,13 +866,15 @@ function createReasoningTagParser({
 }
 
 function assertElectronBridge() {
-  if (!window.codeForgeAI) {
+  if (!window.moltenForgeAI) {
     throw new Error("Electron AI bridge is not available.");
   }
-  return window.codeForgeAI;
+  return window.moltenForgeAI;
 }
 
-export async function loadProviderModels(provider: ProviderConfig): Promise<LoadedProviderModel[]> {
+export async function loadProviderModels(
+  provider: ProviderConfig,
+): Promise<LoadedProviderModel[]> {
   if (!provider.baseUrl.trim()) {
     throw new Error("Provider base URL is required.");
   }
@@ -832,7 +911,11 @@ export async function sendProviderChat({
     throw new Error("Model name is required.");
   }
 
-  if (!userMessage?.trim() && !userAttachments?.length && messages.length === 0) {
+  if (
+    !userMessage?.trim() &&
+    !userAttachments?.length &&
+    messages.length === 0
+  ) {
     throw new Error("Message is required.");
   }
 
@@ -840,13 +923,23 @@ export async function sendProviderChat({
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     headers: provider.headers,
-    payload: await buildPayload({ provider, systemPrompt, messages, userMessage, userAttachments, stream: false, settingsOverride }),
+    payload: await buildPayload({
+      provider,
+      systemPrompt,
+      messages,
+      userMessage,
+      userAttachments,
+      stream: false,
+      settingsOverride,
+    }),
   });
 
   const content = data?.choices?.[0]?.message?.content;
 
   if (typeof content !== "string") {
-    throw new Error("Provider response did not include choices[0].message.content.");
+    throw new Error(
+      "Provider response did not include choices[0].message.content.",
+    );
   }
 
   return content;
@@ -894,7 +987,11 @@ export async function streamProviderChat({
     throw new Error("Model name is required.");
   }
 
-  if (!userMessage?.trim() && !userAttachments?.length && messages.length === 0) {
+  if (
+    !userMessage?.trim() &&
+    !userAttachments?.length &&
+    messages.length === 0
+  ) {
     throw new Error("Message is required.");
   }
 
@@ -922,7 +1019,16 @@ export async function streamProviderChat({
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
     headers: provider.headers,
-    payload: await buildPayload({ provider, systemPrompt, messages, userMessage, userAttachments, stream: true, tools, settingsOverride }),
+    payload: await buildPayload({
+      provider,
+      systemPrompt,
+      messages,
+      userMessage,
+      userAttachments,
+      stream: true,
+      tools,
+      settingsOverride,
+    }),
   });
 
   const abortHandler = () => {
@@ -971,8 +1077,10 @@ export async function streamProviderChat({
 
     tagParser.flush();
 
-    const finalRawContent = typeof result.content === "string" ? result.content : "";
-    const finalRawReasoning = typeof result.reasoning === "string" ? result.reasoning : "";
+    const finalRawContent =
+      typeof result.content === "string" ? result.content : "";
+    const finalRawReasoning =
+      typeof result.reasoning === "string" ? result.reasoning : "";
     let finalParsedContent = "";
     let finalParsedReasoning = "";
 

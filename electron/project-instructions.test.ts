@@ -11,7 +11,9 @@ import { readProjectInstructionsForWorkspace } from "./project-instructions";
 const tempDirs: string[] = [];
 
 async function createTempWorkspace() {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "chat-forge-agents-md-"));
+  const directory = await mkdtemp(
+    path.join(os.tmpdir(), "molten-forge-agents-md-"),
+  );
   tempDirs.push(directory);
   const workspaceRoot: ChatWorkspaceRoot = {
     id: "root-1",
@@ -24,7 +26,11 @@ async function createTempWorkspace() {
 
 describe("readProjectInstructionsForWorkspace", () => {
   afterEach(async () => {
-    await Promise.all(tempDirs.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+    await Promise.all(
+      tempDirs
+        .splice(0)
+        .map((directory) => rm(directory, { recursive: true, force: true })),
+    );
   });
 
   it("returns none when AGENTS.md is missing", async () => {
@@ -37,7 +43,11 @@ describe("readProjectInstructionsForWorkspace", () => {
 
   it("loads root AGENTS.md content", async () => {
     const { directory, workspaceRoot } = await createTempWorkspace();
-    await writeFile(path.join(directory, "AGENTS.md"), "# Rules\nRun tests.", "utf8");
+    await writeFile(
+      path.join(directory, "AGENTS.md"),
+      "# Rules\nRun tests.",
+      "utf8",
+    );
 
     const result = await readProjectInstructionsForWorkspace({ workspaceRoot });
 
@@ -52,7 +62,9 @@ describe("readProjectInstructionsForWorkspace", () => {
     const content = "x".repeat(PROJECT_INSTRUCTIONS_SOFT_LIMIT_BYTES + 1);
     await writeFile(path.join(directory, "AGENTS.md"), content, "utf8");
 
-    const pending = await readProjectInstructionsForWorkspace({ workspaceRoot });
+    const pending = await readProjectInstructionsForWorkspace({
+      workspaceRoot,
+    });
     expect(pending.status).toBe("approval_required");
 
     const approved = await readProjectInstructionsForWorkspace({

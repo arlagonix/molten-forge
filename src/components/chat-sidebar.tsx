@@ -466,18 +466,18 @@ export const ChatSidebar = memo(function ChatSidebar({
   ) {
     if (renamingChatId === chat.id) return;
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("application/x-chat-forge-chat-id", chat.id);
+    event.dataTransfer.setData("application/x-molten-forge-chat-id", chat.id);
   }
 
   function isChatDragEvent(event: DragEvent<HTMLElement>) {
     return Array.from(event.dataTransfer.types).includes(
-      "application/x-chat-forge-chat-id",
+      "application/x-molten-forge-chat-id",
     );
   }
 
   function getDraggedChatId(event: DragEvent<HTMLElement>) {
     return event.dataTransfer
-      .getData("application/x-chat-forge-chat-id")
+      .getData("application/x-molten-forge-chat-id")
       .trim();
   }
 

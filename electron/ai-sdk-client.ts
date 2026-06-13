@@ -1,9 +1,9 @@
 /**
- * Chat Forge AI generation adapter.
+ * Molten Forge AI generation adapter.
  *
  * This module is the single execution layer for all model generation in the
  * app. It hides the Vercel AI SDK Core (`ai`) and the
- * `@ai-sdk/openai-compatible` provider behind Chat Forge's own
+ * `@ai-sdk/openai-compatible` provider behind Molten Forge's own
  * provider/generation interface so the rest of the app keeps talking to the
  * existing IPC contract.
  *
@@ -21,9 +21,10 @@
  *   `reasoning_content`, `reasoning`, `thinking`, and `reasoning_details` from
  *   local models keep working and the existing reasoning UI is preserved.
  * - Tools are converted to AI SDK tool definitions WITHOUT an `execute`
- *   function so the SDK never auto-runs them. Chat Forge remains in full
+ *   function so the SDK never auto-runs them. Molten Forge remains in full
  *   control of approval, display, and tool-result continuation.
  */
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
   APICallError,
   generateText,
@@ -32,7 +33,6 @@ import {
   tool,
   type ToolSet,
 } from "ai";
-import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 
 export type ChatTokenUsage = {
   promptTokens?: number;
@@ -145,7 +145,8 @@ export function mergeReasoningMetadata(
 
 function readChoiceDelta(data: unknown): Record<string, unknown> | undefined {
   if (!data || typeof data !== "object") return undefined;
-  const choices = "choices" in data ? (data as { choices: unknown }).choices : undefined;
+  const choices =
+    "choices" in data ? (data as { choices: unknown }).choices : undefined;
   if (!Array.isArray(choices)) return undefined;
   const delta = choices[0]?.delta;
   return isPlainObject(delta) ? delta : undefined;
@@ -158,8 +159,9 @@ function readReasoningMetadataDelta(
   if (!delta) return undefined;
 
   const reasoningContent =
-    getDeltaText("reasoning_content" in delta ? delta.reasoning_content : undefined) ||
-    getDeltaText("reasoning" in delta ? delta.reasoning : undefined);
+    getDeltaText(
+      "reasoning_content" in delta ? delta.reasoning_content : undefined,
+    ) || getDeltaText("reasoning" in delta ? delta.reasoning : undefined);
   const reasoningDetails = getReasoningDetails(
     "reasoning_details" in delta ? delta.reasoning_details : undefined,
   );
@@ -176,22 +178,30 @@ function readReasoningDelta(data: unknown): string {
   const delta = readChoiceDelta(data);
   if (!delta) return "";
   return (
-    getDeltaText("reasoning_content" in delta ? delta.reasoning_content : undefined) ||
+    getDeltaText(
+      "reasoning_content" in delta ? delta.reasoning_content : undefined,
+    ) ||
     getDeltaText("reasoning" in delta ? delta.reasoning : undefined) ||
     getDeltaText("thinking" in delta ? delta.thinking : undefined) ||
-    getDeltaText("reasoning_details" in delta ? delta.reasoning_details : undefined)
+    getDeltaText(
+      "reasoning_details" in delta ? delta.reasoning_details : undefined,
+    )
   );
 }
 
 function readNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
-type AiSdkUsage = {
-  inputTokens?: number;
-  outputTokens?: number;
-  totalTokens?: number;
-} | undefined;
+type AiSdkUsage =
+  | {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    }
+  | undefined;
 
 function mapUsage(usage: AiSdkUsage): ChatTokenUsage | undefined {
   if (!usage) return undefined;
@@ -221,7 +231,7 @@ function mapFinishReason(finishReason: string | undefined): string | undefined {
 /**
  * Convert the OpenAI-style tool list carried in the request payload into AI SDK
  * tool definitions. We intentionally omit `execute` so the SDK surfaces tool
- * calls without running them: Chat Forge keeps full control over approval,
+ * calls without running them: Molten Forge keeps full control over approval,
  * display, and continuation.
  */
 function buildToolSet(payload: Record<string, unknown>): ToolSet | undefined {
@@ -231,7 +241,9 @@ function buildToolSet(payload: Record<string, unknown>): ToolSet | undefined {
   const tools: ToolSet = {};
   for (const candidate of rawTools) {
     if (!isPlainObject(candidate)) continue;
-    const fn = isPlainObject(candidate.function) ? candidate.function : undefined;
+    const fn = isPlainObject(candidate.function)
+      ? candidate.function
+      : undefined;
     const name = typeof fn?.name === "string" ? fn.name.trim() : "";
     if (!name) continue;
 
@@ -257,14 +269,14 @@ function getModelId(payload: Record<string, unknown>): string {
 }
 
 /**
- * Build a provider whose request body is replaced with Chat Forge's fully
+ * Build a provider whose request body is replaced with Molten Forge's fully
  * formed OpenAI-compatible payload. The AI SDK still owns the transport and
  * response parsing; we only guarantee the request body keeps every field the
  * app built (including non-standard local-model fields).
  */
 function createProvider({ baseURL, headers, payload }: ProviderCallInput) {
   return createOpenAICompatible({
-    name: "chat-forge",
+    name: "molten-forge",
     baseURL,
     headers,
     includeUsage: true,
@@ -304,7 +316,11 @@ export function normalizeProviderError(error: unknown): Error {
     const cause = error.cause;
     const code =
       isPlainObject(cause) && typeof cause.code === "string" ? cause.code : "";
-    if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "ENOTFOUND") {
+    if (
+      code === "ECONNREFUSED" ||
+      code === "ECONNRESET" ||
+      code === "ENOTFOUND"
+    ) {
       return new Error(
         "Could not connect to the provider. Make sure the server (e.g. LM Studio) is running and the base URL is correct.",
       );
@@ -317,7 +333,11 @@ export function normalizeProviderError(error: unknown): Error {
     const cause = (error as { cause?: unknown }).cause;
     const code =
       isPlainObject(cause) && typeof cause.code === "string" ? cause.code : "";
-    if (code === "ECONNREFUSED" || code === "ECONNRESET" || code === "ENOTFOUND") {
+    if (
+      code === "ECONNREFUSED" ||
+      code === "ECONNRESET" ||
+      code === "ENOTFOUND"
+    ) {
       return new Error(
         "Could not connect to the provider. Make sure the server (e.g. LM Studio) is running and the base URL is correct.",
       );
@@ -325,7 +345,9 @@ export function normalizeProviderError(error: unknown): Error {
     return error;
   }
 
-  return new Error(typeof error === "string" ? error : "Provider request failed.");
+  return new Error(
+    typeof error === "string" ? error : "Provider request failed.",
+  );
 }
 
 /**

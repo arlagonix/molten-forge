@@ -52,6 +52,7 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { createId, labelForError } from "@/lib/ai-chat/chat-utils";
+import { getEffectiveGlobalToolPermission } from "@/lib/ai-chat/request-builder";
 import {
   deleteTool as deleteStoredTool,
   exportTool,
@@ -61,7 +62,6 @@ import {
   openToolsFolder,
   saveTool,
 } from "@/lib/ai-chat/storage";
-import { getEffectiveGlobalToolPermission } from "@/lib/ai-chat/request-builder";
 import { runQueuedTool } from "@/lib/ai-chat/tool-execution-queue";
 import type {
   FeaturePermission,
@@ -74,7 +74,7 @@ import type {
 } from "@/lib/ai-chat/types";
 import { cn } from "@/lib/utils";
 
-const TOOL_TEST_STATES_STORAGE_KEY = "chat-forge-tool-test-states";
+const TOOL_TEST_STATES_STORAGE_KEY = "molten-forge-tool-test-states";
 const TOOL_TEST_STATE_SAVE_DELAY_MS = 350;
 const BUILTIN_ASK_USER_TOOL_NAME = "ask_user";
 const BUILTIN_ASK_USER_TOOL_ID = "builtin-ask-user";
@@ -238,7 +238,7 @@ const BUILTIN_ASK_USER_TOOL_PARAMETERS = {
           options: {
             type: "array",
             description:
-              "Required for single_choice and multi_select. Use concise labels and strongly prefer one-sentence descriptions. Do not include Other/custom; Chat Forge adds a custom typed answer option automatically for choice questions.",
+              "Required for single_choice and multi_select. Use concise labels and strongly prefer one-sentence descriptions. Do not include Other/custom; Molten Forge adds a custom typed answer option automatically for choice questions.",
             items: {
               type: "object",
               properties: {
@@ -522,11 +522,11 @@ type ToolsDialogProps = {
 };
 
 function getToolsBridge() {
-  if (!window.chatForgeTools) {
+  if (!window.moltenForgeTools) {
     throw new Error("Electron tools bridge is not available.");
   }
 
-  return window.chatForgeTools;
+  return window.moltenForgeTools;
 }
 
 function createBlankToolDraft(): ToolDraft {
@@ -2125,8 +2125,8 @@ export const ToolsDialog = memo(function ToolsDialog({
                           be single-choice, multi-select, or text-only. Choice
                           questions support up to 8 model-provided options, and
                           each option should include a short label plus a gray
-                          helper description when useful. Chat Forge always adds
-                          a custom “Type your answer” option to choice
+                          helper description when useful. Molten Forge always
+                          adds a custom “Type your answer” option to choice
                           questions.
                         </p>
                       </div>
@@ -2401,7 +2401,7 @@ export const ToolsDialog = memo(function ToolsDialog({
                           for unknown pages.
                         </p>
                         <p>
-                          Chat Forge fetches the page safely, blocks local or
+                          Molten Forge fetches the page safely, blocks local or
                           private network addresses, extracts readable text,
                           supports URL fragments like #commands, and truncates
                           long results automatically.

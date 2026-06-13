@@ -1,7 +1,7 @@
-# Chat Forge — Core
+# Molten Forge — Core
 
-Project root: `C:\Prime\GitHub\chat-forge`  
-App name: **Chat Forge** (package name: `code-forge-electron`)  
+Project root: `C:\Prime\GitHub\molten-forge`  
+App name: **Molten Forge** (package name: `code-forge-electron`)  
 Executable entry: `dist-electron/main.js` (Electron main process)
 
 ## Source map
@@ -69,10 +69,10 @@ src/
 
 - **Local-first:** All data (providers, chats, settings) lives in the user's local IndexedDB (migrated from older versions). No cloud sync.
 - **OpenAI-compatible only:** The app works with any provider that exposes an OpenAI-compatible `/v1/chat/completions` or `/v1/models` endpoint.
-- **Electron IPC bridge:** Renderer never accesses Node APIs directly; everything goes through `contextBridge`-exposed objects (`codeForgeAI`, `chatForgeStorage`, `chatForgeWorkspace`, `chatForgeTools`, `chatForgeFind`, `chatForgeMcp`).
+- **Electron IPC bridge:** Renderer never accesses Node APIs directly; everything goes through `contextBridge`-exposed objects (`moltenForgeAI`, `moltenForgeStorage`, `moltenForgeWorkspace`, `moltenForgeTools`, `moltenForgeFind`, `moltenForgeMcp`).
 - **Path alias:** `@/` maps to `src/` (configured in both tsconfig.json and vite.config.ts). All imports from `src/` use this alias.
 - **Font stack:** IBM Plex Sans (UI), IBM Plex Mono / JetBrains Mono (code), loaded via @fontsource packages.
-- **Stacking context:** Radix Themes renders `.radix-themes` with `isolation: isolate`. Toasts (sonner) must be mounted *outside* `<RadixThemeBridge>` to escape the stacking context (see `src/main.tsx` comment).
+- **Stacking context:** Radix Themes renders `.radix-themes` with `isolation: isolate`. Toasts (sonner) must be mounted _outside_ `<RadixThemeBridge>` to escape the stacking context (see `src/main.tsx` comment).
 - **Mode system:** Two built-in modes (`default`, `minimal`). Custom modes can be defined. Each mode can override tool/skill/agent permissions with its own allow/ask/deny rules.
 - **Tool permissions:** Three-tier permission model — global (settings-level), mode-level, and chat-level. Permissions cascade: chat-level overrides mode-level overrides global. Values: `allow`, `ask`, `deny`.
 - **Draft-first chat:** Creating a new chat starts as an unsaved draft (no persistent chat session). The real chat is created + persisted only when the first message is sent.

@@ -1,14 +1,14 @@
-import { defineConfig } from "vite";
-import path from "node:path";
-import { readFileSync } from "node:fs";
-import electron from "vite-plugin-electron/simple";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { defineConfig } from "vite";
+import electron from "vite-plugin-electron/simple";
 
 const packageJson = JSON.parse(
   readFileSync(path.resolve(__dirname, "package.json"), "utf-8"),
 ) as { version?: string };
 const appVersion = packageJson.version ?? "0.0.0";
-const appTitle = `Chat Forge v${appVersion}`;
+const appTitle = `Molten Forge v${appVersion}`;
 
 export default defineConfig({
   define: {
@@ -21,7 +21,7 @@ export default defineConfig({
   },
   plugins: [
     {
-      name: "chat-forge-app-title",
+      name: "molten-forge-app-title",
       transformIndexHtml(html) {
         return html.replace(/<title>.*<\/title>/, `<title>${appTitle}</title>`);
       },
@@ -59,10 +59,7 @@ export default defineConfig({
           },
         },
       },
-      renderer:
-        process.env.NODE_ENV === "test"
-          ? undefined
-          : {},
+      renderer: process.env.NODE_ENV === "test" ? undefined : {},
     }),
   ],
 });

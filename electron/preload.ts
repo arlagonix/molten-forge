@@ -1,11 +1,11 @@
-import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type { IpcRendererEvent } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 function createId() {
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-contextBridge.exposeInMainWorld("codeForgeAI", {
+contextBridge.exposeInMainWorld("moltenForgeAI", {
   loadModels(request: unknown) {
     return ipcRenderer.invoke("ai:load-models", request);
   },
@@ -37,7 +37,6 @@ contextBridge.exposeInMainWorld("codeForgeAI", {
   readAttachmentDataUrl(request: unknown) {
     return ipcRenderer.invoke("attachments:read-data-url", request);
   },
-
 
   exportAttachment(request: unknown) {
     return ipcRenderer.invoke("attachments:export", request);
@@ -83,7 +82,7 @@ contextBridge.exposeInMainWorld("codeForgeAI", {
   },
 });
 
-contextBridge.exposeInMainWorld("chatForgeStorage", {
+contextBridge.exposeInMainWorld("moltenForgeStorage", {
   isInitialized() {
     return ipcRenderer.invoke("storage:is-initialized");
   },
@@ -277,7 +276,7 @@ contextBridge.exposeInMainWorld("chatForgeStorage", {
   },
 });
 
-contextBridge.exposeInMainWorld("chatForgeWorkspace", {
+contextBridge.exposeInMainWorld("moltenForgeWorkspace", {
   selectFolder() {
     return ipcRenderer.invoke("workspace:select-folder");
   },
@@ -289,10 +288,9 @@ contextBridge.exposeInMainWorld("chatForgeWorkspace", {
   loadProjectInstructions(request: unknown) {
     return ipcRenderer.invoke("workspace:load-project-instructions", request);
   },
-
 });
 
-contextBridge.exposeInMainWorld("chatForgeTools", {
+contextBridge.exposeInMainWorld("moltenForgeTools", {
   execute(request: unknown) {
     return ipcRenderer.invoke("tools:execute", request);
   },
@@ -322,7 +320,7 @@ contextBridge.exposeInMainWorld("chatForgeTools", {
   },
 });
 
-contextBridge.exposeInMainWorld("chatForgeFind", {
+contextBridge.exposeInMainWorld("moltenForgeFind", {
   findInPage(request: unknown) {
     return ipcRenderer.invoke("find-in-page:start", request);
   },
@@ -344,7 +342,7 @@ contextBridge.exposeInMainWorld("chatForgeFind", {
   },
 });
 
-contextBridge.exposeInMainWorld("chatForgeMcp", {
+contextBridge.exposeInMainWorld("moltenForgeMcp", {
   refreshTools(request: unknown) {
     return ipcRenderer.invoke("mcp:refresh-tools", request);
   },

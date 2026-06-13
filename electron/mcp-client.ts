@@ -1,6 +1,5 @@
-import { PassThrough } from "node:stream";
-import tls from "node:tls";
 import { app } from "electron";
+import tls from "node:tls";
 import { stringifyToolResult } from "./tool-utils";
 
 export type McpTransportType = "stdio" | "http";
@@ -63,8 +62,17 @@ export type McpLoadedTool = {
 export type McpSdkClient = {
   connect: (transport: unknown, options?: unknown) => Promise<void>;
   close: () => Promise<void>;
-  listTools: (request?: unknown, options?: unknown) => Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: unknown }> }>;
-  callTool: (request: unknown, resultSchema?: unknown, options?: unknown) => Promise<unknown>;
+  listTools: (
+    request?: unknown,
+    options?: unknown,
+  ) => Promise<{
+    tools: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+  }>;
+  callTool: (
+    request: unknown,
+    resultSchema?: unknown,
+    options?: unknown,
+  ) => Promise<unknown>;
 };
 
 type McpTransport = {
@@ -107,11 +115,16 @@ function safeStringArray(value: unknown): string[] {
     : [];
 }
 
-function normalizeStringRecord(value: unknown): Record<string, string> | undefined {
+function normalizeStringRecord(
+  value: unknown,
+): Record<string, string> | undefined {
   if (!isPlainObject(value)) return undefined;
 
   const entries = Object.entries(value)
-    .map(([key, rawValue]) => [key.trim(), typeof rawValue === "string" ? rawValue : ""] as const)
+    .map(
+      ([key, rawValue]) =>
+        [key.trim(), typeof rawValue === "string" ? rawValue : ""] as const,
+    )
     .filter(([key, rawValue]) => key && rawValue.length > 0);
 
   return entries.length ? Object.fromEntries(entries) : undefined;
@@ -159,7 +172,9 @@ function uniqueMcpExposedToolName(
     }
   }
 
-  throw new Error(`Could not create a unique MCP tool name for ${serverName}/${toolName}.`);
+  throw new Error(
+    `Could not create a unique MCP tool name for ${serverName}/${toolName}.`,
+  );
 }
 
 function schemaAsObject(value: unknown): Record<string, unknown> {
@@ -180,64 +195,72 @@ export function normalizeMcpSettings(value: unknown): McpSettings {
 
   return {
     enabled: typeof source.enabled === "boolean" ? source.enabled : true,
-    servers: rawServers
-      .filter(isPlainObject)
-      .map((server) => {
-        const id = safeString(server.id).trim() || `mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-        const name = safeString(server.name).trim() || id;
-        const rawTools = isPlainObject(server.tools) ? server.tools : {};
-        const tools = Object.fromEntries(
-          Object.entries(rawTools)
-            .filter(([, tool]) => isPlainObject(tool))
-            .map(([fallbackName, rawTool]) => {
-              const tool = rawTool as Record<string, unknown>;
-              const originalName = safeString(tool.originalName).trim() || fallbackName;
-              const inputSchema = schemaAsObject(tool.inputSchema);
-              const description = safeString(tool.description).trim();
+    servers: rawServers.filter(isPlainObject).map((server) => {
+      const id =
+        safeString(server.id).trim() ||
+        `mcp-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const name = safeString(server.name).trim() || id;
+      const rawTools = isPlainObject(server.tools) ? server.tools : {};
+      const tools = Object.fromEntries(
+        Object.entries(rawTools)
+          .filter(([, tool]) => isPlainObject(tool))
+          .map(([fallbackName, rawTool]) => {
+            const tool = rawTool as Record<string, unknown>;
+            const originalName =
+              safeString(tool.originalName).trim() || fallbackName;
+            const inputSchema = schemaAsObject(tool.inputSchema);
+            const description = safeString(tool.description).trim();
 
-              return [
+            return [
+              originalName,
+              {
                 originalName,
-                {
-                  originalName,
-                  exposedName: safeString(tool.exposedName).trim(),
-                  enabled: typeof tool.enabled === "boolean" ? tool.enabled : false,
-                  ...(description ? { description } : {}),
-                  inputSchema,
-                  ...(typeof tool.requireApproval === "boolean" ? { requireApproval: tool.requireApproval } : {}),
-                  ...(typeof tool.lastSeenAt === "string" ? { lastSeenAt: tool.lastSeenAt } : {}),
-                } satisfies McpToolConfig,
-              ];
-            }),
-        );
+                exposedName: safeString(tool.exposedName).trim(),
+                enabled:
+                  typeof tool.enabled === "boolean" ? tool.enabled : false,
+                ...(description ? { description } : {}),
+                inputSchema,
+                ...(typeof tool.requireApproval === "boolean"
+                  ? { requireApproval: tool.requireApproval }
+                  : {}),
+                ...(typeof tool.lastSeenAt === "string"
+                  ? { lastSeenAt: tool.lastSeenAt }
+                  : {}),
+              } satisfies McpToolConfig,
+            ];
+          }),
+      );
 
-        return {
-          id,
-          name,
-          enabled: typeof server.enabled === "boolean" ? server.enabled : true,
-          transport: server.transport === "http" ? "http" : "stdio",
-          command: safeString(server.command).trim() || undefined,
-          args: safeStringArray(server.args),
-          cwd: safeString(server.cwd).trim() || undefined,
-          env: normalizeStringRecord(server.env),
-          url: safeString(server.url).trim() || undefined,
-          headers: normalizeStringRecord(server.headers),
-          insecureSkipTlsVerify:
-            typeof server.insecureSkipTlsVerify === "boolean"
-              ? server.insecureSkipTlsVerify
-              : false,
-          timeoutMs:
-            typeof server.timeoutMs === "number" &&
-            Number.isFinite(server.timeoutMs) &&
-            server.timeoutMs > 0
-              ? Math.min(Math.round(server.timeoutMs), 10 * 60_000)
-              : DEFAULT_MCP_TIMEOUT_MS,
-          requireApproval:
-            typeof server.requireApproval === "boolean" ? server.requireApproval : true,
-          tools,
-          lastError: safeString(server.lastError).trim() || undefined,
-          lastConnectedAt: safeString(server.lastConnectedAt).trim() || undefined,
-        } satisfies McpServerConfig;
-      }),
+      return {
+        id,
+        name,
+        enabled: typeof server.enabled === "boolean" ? server.enabled : true,
+        transport: server.transport === "http" ? "http" : "stdio",
+        command: safeString(server.command).trim() || undefined,
+        args: safeStringArray(server.args),
+        cwd: safeString(server.cwd).trim() || undefined,
+        env: normalizeStringRecord(server.env),
+        url: safeString(server.url).trim() || undefined,
+        headers: normalizeStringRecord(server.headers),
+        insecureSkipTlsVerify:
+          typeof server.insecureSkipTlsVerify === "boolean"
+            ? server.insecureSkipTlsVerify
+            : false,
+        timeoutMs:
+          typeof server.timeoutMs === "number" &&
+          Number.isFinite(server.timeoutMs) &&
+          server.timeoutMs > 0
+            ? Math.min(Math.round(server.timeoutMs), 10 * 60_000)
+            : DEFAULT_MCP_TIMEOUT_MS,
+        requireApproval:
+          typeof server.requireApproval === "boolean"
+            ? server.requireApproval
+            : true,
+        tools,
+        lastError: safeString(server.lastError).trim() || undefined,
+        lastConnectedAt: safeString(server.lastConnectedAt).trim() || undefined,
+      } satisfies McpServerConfig;
+    }),
   };
 }
 
@@ -260,7 +283,9 @@ export function buildLoadedMcpTools(settings: McpSettings): McpLoadedTool[] {
         tool.originalName,
         usedNames,
       );
-      const description = tool.description?.trim() || `MCP tool ${tool.originalName} from ${server.name}.`;
+      const description =
+        tool.description?.trim() ||
+        `MCP tool ${tool.originalName} from ${server.name}.`;
 
       tools.push({
         id: `mcp:${server.id}:${tool.originalName}`,
@@ -384,9 +409,8 @@ async function createHttpFetchForServer(server: McpServerConfig): Promise<{
     trustsSystemCa = true;
   }
 
-  const { fetch: undiciFetch, Agent } = await dynamicImport<UndiciModule>(
-    "undici",
-  );
+  const { fetch: undiciFetch, Agent } =
+    await dynamicImport<UndiciModule>("undici");
   const dispatcher = new Agent({ connect });
 
   return {
@@ -452,32 +476,33 @@ function getHttpRequestInit(server: McpServerConfig): RequestInit | undefined {
   return headers ? { headers } : undefined;
 }
 
-
-const dynamicImport = new Function(
-  "specifier",
-  "return import(specifier)",
-) as <T = unknown>(specifier: string) => Promise<T>;
+const dynamicImport = new Function("specifier", "return import(specifier)") as <
+  T = unknown,
+>(
+  specifier: string,
+) => Promise<T>;
 
 let sdkModulePromise: Promise<McpSdkModule> | undefined;
 
 async function loadMcpSdk(): Promise<McpSdkModule> {
   sdkModulePromise ??= (async () => {
     try {
-      const [clientModule, stdioModule, httpModule, sseModule] = await Promise.all([
-        dynamicImport<{ Client: McpSdkModule["Client"] }>(
-          "@modelcontextprotocol/sdk/client/index.js",
-        ),
-        dynamicImport<{
-          StdioClientTransport: McpSdkModule["StdioClientTransport"];
-          getDefaultEnvironment: McpSdkModule["getDefaultEnvironment"];
-        }>("@modelcontextprotocol/sdk/client/stdio.js"),
-        dynamicImport<{
-          StreamableHTTPClientTransport: McpSdkModule["StreamableHTTPClientTransport"];
-        }>("@modelcontextprotocol/sdk/client/streamableHttp.js"),
-        dynamicImport<{ SSEClientTransport: McpSdkModule["SSEClientTransport"] }>(
-          "@modelcontextprotocol/sdk/client/sse.js",
-        ),
-      ]);
+      const [clientModule, stdioModule, httpModule, sseModule] =
+        await Promise.all([
+          dynamicImport<{ Client: McpSdkModule["Client"] }>(
+            "@modelcontextprotocol/sdk/client/index.js",
+          ),
+          dynamicImport<{
+            StdioClientTransport: McpSdkModule["StdioClientTransport"];
+            getDefaultEnvironment: McpSdkModule["getDefaultEnvironment"];
+          }>("@modelcontextprotocol/sdk/client/stdio.js"),
+          dynamicImport<{
+            StreamableHTTPClientTransport: McpSdkModule["StreamableHTTPClientTransport"];
+          }>("@modelcontextprotocol/sdk/client/streamableHttp.js"),
+          dynamicImport<{
+            SSEClientTransport: McpSdkModule["SSEClientTransport"];
+          }>("@modelcontextprotocol/sdk/client/sse.js"),
+        ]);
 
       return {
         Client: clientModule.Client,
@@ -489,7 +514,7 @@ async function loadMcpSdk(): Promise<McpSdkModule> {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(
-        `MCP SDK could not be loaded. Run npm install and restart Chat Forge. Details: ${message}`,
+        `MCP SDK could not be loaded. Run npm install and restart Molten Forge. Details: ${message}`,
       );
     }
   })();
@@ -510,7 +535,7 @@ async function connectMcpClient(
   } = await loadMcpSdk();
 
   const client = new Client(
-    { name: "chat-forge", version: app.getVersion() },
+    { name: "molten-forge", version: app.getVersion() },
     { capabilities: {} },
   );
 
@@ -551,7 +576,9 @@ async function connectMcpClient(
     } catch (error) {
       await transport.close?.().catch(() => undefined);
       const message = error instanceof Error ? error.message : String(error);
-      const stderrSuffix = stderrText.trim() ? `\n\nStderr:\n${stderrText.trim()}` : "";
+      const stderrSuffix = stderrText.trim()
+        ? `\n\nStderr:\n${stderrText.trim()}`
+        : "";
       throw new Error(`${message}${stderrSuffix}`);
     }
   }
@@ -575,7 +602,10 @@ async function connectMcpClient(
   });
 
   try {
-    await client.connect(streamableTransport, getRequestOptions(server, signal));
+    await client.connect(
+      streamableTransport,
+      getRequestOptions(server, signal),
+    );
     return {
       client,
       close: async () => {
@@ -587,7 +617,7 @@ async function connectMcpClient(
   } catch (streamableError) {
     await streamableTransport.close?.().catch(() => undefined);
     const sseClient = new Client(
-      { name: "chat-forge", version: app.getVersion() },
+      { name: "molten-forge", version: app.getVersion() },
       { capabilities: {} },
     );
     const sseFetch = httpFetch.fetch ?? fetch;
@@ -610,11 +640,17 @@ async function connectMcpClient(
     } catch (sseError) {
       await sseTransport.close?.().catch(() => undefined);
       await httpFetch.close();
-      const streamableMessage = streamableError instanceof Error ? streamableError.message : String(streamableError);
-      const sseMessage = sseError instanceof Error ? sseError.message : String(sseError);
+      const streamableMessage =
+        streamableError instanceof Error
+          ? streamableError.message
+          : String(streamableError);
+      const sseMessage =
+        sseError instanceof Error ? sseError.message : String(sseError);
       const tlsHint =
         server.insecureSkipTlsVerify ||
-        !`${streamableMessage} ${sseMessage}`.toLowerCase().includes("certificate")
+        !`${streamableMessage} ${sseMessage}`
+          .toLowerCase()
+          .includes("certificate")
           ? ""
           : "\n\nTLS hint: this looks like a certificate trust issue. For self-signed or corporate-proxy certificates, enable 'Skip TLS certificate verification' for this MCP server, or start Node/Electron with a trusted system CA configuration.";
       throw new Error(
@@ -623,7 +659,6 @@ async function connectMcpClient(
     }
   }
 }
-
 
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
@@ -721,17 +756,19 @@ async function runWithMcpSession<T>(
     mcpSessions.set(server.id, session);
   }
 
-  const run = session.queue.catch(() => undefined).then(async () => {
-    if (signal?.aborted) throw createAbortError();
-    const connection = await getMcpSessionConnection(server, signal);
+  const run = session.queue
+    .catch(() => undefined)
+    .then(async () => {
+      if (signal?.aborted) throw createAbortError();
+      const connection = await getMcpSessionConnection(server, signal);
 
-    try {
-      return await task(connection);
-    } catch (error) {
-      await closeMcpSession(server.id);
-      throw error;
-    }
-  });
+      try {
+        return await task(connection);
+      } catch (error) {
+        await closeMcpSession(server.id);
+        throw error;
+      }
+    });
 
   session.queue = run.then(
     () => undefined,
@@ -800,7 +837,9 @@ export async function refreshMcpTools(
 
     try {
       const discoveredTools = await listMcpTools(server);
-      const nextTools: Record<string, McpToolConfig> = { ...(server.tools ?? {}) };
+      const nextTools: Record<string, McpToolConfig> = {
+        ...(server.tools ?? {}),
+      };
 
       for (const discoveredTool of discoveredTools) {
         const existing = nextTools[discoveredTool.name];
@@ -858,9 +897,13 @@ function normalizeMcpContent(result: unknown) {
     if (item.type === "resource" && isPlainObject(item.resource)) {
       const uri = safeString(item.resource.uri).trim();
       if (typeof item.resource.text === "string") {
-        parts.push(uri ? `Resource ${uri}:\n${item.resource.text}` : item.resource.text);
+        parts.push(
+          uri ? `Resource ${uri}:\n${item.resource.text}` : item.resource.text,
+        );
       } else {
-        parts.push(`[Unsupported MCP resource content${uri ? `: ${uri}` : ""}]`);
+        parts.push(
+          `[Unsupported MCP resource content${uri ? `: ${uri}` : ""}]`,
+        );
       }
       continue;
     }
@@ -868,17 +911,23 @@ function normalizeMcpContent(result: unknown) {
     if (item.type === "resource_link") {
       const uri = safeString(item.uri).trim();
       const name = safeString(item.name).trim();
-      parts.push(`[MCP resource link${name ? ` ${name}` : ""}${uri ? `: ${uri}` : ""}]`);
+      parts.push(
+        `[MCP resource link${name ? ` ${name}` : ""}${uri ? `: ${uri}` : ""}]`,
+      );
       continue;
     }
 
     if (item.type === "image") {
-      parts.push(`[MCP result included an image (${safeString(item.mimeType, "unknown type")}) that Chat Forge does not yet pass back to the model.]`);
+      parts.push(
+        `[MCP result included an image (${safeString(item.mimeType, "unknown type")}) that Molten Forge does not yet pass back to the model.]`,
+      );
       continue;
     }
 
     if (item.type === "audio") {
-      parts.push(`[MCP result included audio (${safeString(item.mimeType, "unknown type")}) that Chat Forge does not yet pass back to the model.]`);
+      parts.push(
+        `[MCP result included audio (${safeString(item.mimeType, "unknown type")}) that Molten Forge does not yet pass back to the model.]`,
+      );
       continue;
     }
 
@@ -886,7 +935,9 @@ function normalizeMcpContent(result: unknown) {
   }
 
   if (isPlainObject(result.structuredContent)) {
-    parts.push(`Structured content:\n${stringifyToolResult(result.structuredContent)}`);
+    parts.push(
+      `Structured content:\n${stringifyToolResult(result.structuredContent)}`,
+    );
   }
 
   if ("toolResult" in result) {
@@ -908,11 +959,16 @@ export async function executeMcpTool({
   signal?: AbortSignal;
 }): Promise<McpToolCommandResult> {
   const normalized = normalizeMcpSettings(settings);
-  const loadedTool = buildLoadedMcpTools(normalized).find((tool) => tool.name === toolName);
+  const loadedTool = buildLoadedMcpTools(normalized).find(
+    (tool) => tool.name === toolName,
+  );
   if (!loadedTool?.mcp) throw new Error(`MCP tool not found: ${toolName}`);
 
-  const server = normalized.servers.find((item) => item.id === loadedTool.mcp.serverId);
-  if (!server) throw new Error(`MCP server not found: ${loadedTool.mcp.serverName}`);
+  const server = normalized.servers.find(
+    (item) => item.id === loadedTool.mcp.serverId,
+  );
+  if (!server)
+    throw new Error(`MCP server not found: ${loadedTool.mcp.serverName}`);
 
   return runWithOptionalInsecureTls(server, () =>
     runWithMcpSession(server, signal, async (connection) => {

@@ -118,7 +118,9 @@ export function useMcpSettingsForm({
   showSuccess,
   showError,
 }: UseMcpSettingsFormOptions) {
-  const [selectedServerId, setSelectedServerId] = useState<string | undefined>();
+  const [selectedServerId, setSelectedServerId] = useState<
+    string | undefined
+  >();
   const [activeServerDraft, setActiveServerDraft] =
     useState<McpServerConfig | null>(null);
   const [activeServerBase, setActiveServerBase] =
@@ -153,7 +155,10 @@ export function useMcpSettingsForm({
 
   useEffect(() => {
     if (!open || isNewServer) return;
-    if (activeServerDraft && hasServerFormChanges(activeServerDraft, activeServerBase)) {
+    if (
+      activeServerDraft &&
+      hasServerFormChanges(activeServerDraft, activeServerBase)
+    ) {
       return;
     }
 
@@ -234,7 +239,9 @@ export function useMcpSettingsForm({
         setActiveServerDraft((current) =>
           current ? { ...current, enabled } : current,
         );
-        setActiveServerBase((current) => (current ? { ...current, enabled } : current));
+        setActiveServerBase((current) =>
+          current ? { ...current, enabled } : current,
+        );
       }
     },
     [activeServerDraft?.id, isNewServer, mcpSettings, onMcpSettingsChange],
@@ -245,7 +252,13 @@ export function useMcpSettingsForm({
       if (!isNewServer && selectedServerId === serverId) return;
       requestNavigation(() => selectSavedServer(serverId, mcpSettings));
     },
-    [isNewServer, mcpSettings, requestNavigation, selectSavedServer, selectedServerId],
+    [
+      isNewServer,
+      mcpSettings,
+      requestNavigation,
+      selectSavedServer,
+      selectedServerId,
+    ],
   );
 
   const requestAddServer = useCallback(() => {
@@ -263,7 +276,9 @@ export function useMcpSettingsForm({
   }, [mcpSettings.servers, requestNavigation]);
 
   const updateActiveServer = useCallback((patch: Partial<McpServerConfig>) => {
-    setActiveServerDraft((current) => (current ? { ...current, ...patch } : current));
+    setActiveServerDraft((current) =>
+      current ? { ...current, ...patch } : current,
+    );
   }, []);
 
   const updateActiveServerToolEnabled = useCallback(
@@ -289,7 +304,9 @@ export function useMcpSettingsForm({
   );
 
   const discardNewServer = useCallback(() => {
-    requestNavigation(() => selectSavedServer(mcpSettings.servers[0]?.id, mcpSettings));
+    requestNavigation(() =>
+      selectSavedServer(mcpSettings.servers[0]?.id, mcpSettings),
+    );
   }, [mcpSettings, requestNavigation, selectSavedServer]);
 
   const deleteActiveServer = useCallback(() => {
@@ -298,12 +315,22 @@ export function useMcpSettingsForm({
     const nextServers = mcpSettings.servers.filter(
       (server) => server.id !== activeServerDraft.id,
     );
-    const nextSettings = cloneSettings({ ...mcpSettings, servers: nextServers });
+    const nextSettings = cloneSettings({
+      ...mcpSettings,
+      servers: nextServers,
+    });
 
     onMcpSettingsChange(nextSettings);
     selectSavedServer(nextServers[0]?.id, nextSettings);
     showSuccess("MCP server deleted");
-  }, [activeServerDraft, isNewServer, mcpSettings, onMcpSettingsChange, selectSavedServer, showSuccess]);
+  }, [
+    activeServerDraft,
+    isNewServer,
+    mcpSettings,
+    onMcpSettingsChange,
+    selectSavedServer,
+    showSuccess,
+  ]);
 
   const saveCurrentDraft = useCallback(async () => {
     if (!activeServerDraft) return;
@@ -338,7 +365,15 @@ export function useMcpSettingsForm({
     } finally {
       setIsSaving(false);
     }
-  }, [activeServerDraft, isNewServer, mcpSettings, onMcpSettingsChange, selectSavedServer, showError, showSuccess]);
+  }, [
+    activeServerDraft,
+    isNewServer,
+    mcpSettings,
+    onMcpSettingsChange,
+    selectSavedServer,
+    showError,
+    showSuccess,
+  ]);
 
   const resetCurrentDraft = useCallback(() => {
     if (isNewServer) {
@@ -351,7 +386,7 @@ export function useMcpSettingsForm({
 
   const testServer = useCallback(
     async (server: McpServerConfig) => {
-      const bridge = window.chatForgeMcp;
+      const bridge = window.moltenForgeMcp;
       if (!bridge) {
         showError("MCP bridge is unavailable.");
         return;
@@ -396,7 +431,7 @@ export function useMcpSettingsForm({
 
   const refreshServer = useCallback(
     async (server: McpServerConfig) => {
-      const bridge = window.chatForgeMcp;
+      const bridge = window.moltenForgeMcp;
       if (!bridge) {
         showError("MCP bridge is unavailable.");
         return;
@@ -420,7 +455,10 @@ export function useMcpSettingsForm({
         const toolCount = Object.keys(updatedServer?.tools ?? {}).length;
 
         if (updatedServer) {
-          const nextServer = hasServerFormChanges(updatedServer, activeServerBase)
+          const nextServer = hasServerFormChanges(
+            updatedServer,
+            activeServerBase,
+          )
             ? regenerateMcpServerToolExposedNames(updatedServer)
             : updatedServer;
           setActiveServerDraft(nextServer);
@@ -446,7 +484,10 @@ export function useMcpSettingsForm({
     [activeServerBase, isNewServer, mcpSettings, showError, showSuccess],
   );
 
-  const sortedServers = useMemo(() => mcpSettings.servers, [mcpSettings.servers]);
+  const sortedServers = useMemo(
+    () => mcpSettings.servers,
+    [mcpSettings.servers],
+  );
 
   return {
     activeServer,

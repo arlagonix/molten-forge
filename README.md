@@ -1,4 +1,4 @@
-# Chat Forge
+# Molten Forge
 
 Local-first Electron chat client for OpenAI-compatible providers.
 
@@ -39,7 +39,6 @@ npm run build:win
 ## Refactor notes
 
 The project intentionally keeps only UI components and dependencies that are imported by the current app. Before adding a new shadcn component, add only that component and its direct dependencies instead of copying the whole generated component catalog.
-
 
 ## Documentation
 

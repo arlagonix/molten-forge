@@ -1,19 +1,19 @@
 # Attachments and model context
 
-Chat Forge treats attachments as model context and as files that tools can inspect.
+Molten Forge treats attachments as model context and as files that tools can inspect.
 
 ## Core behavior
 
-When a user attaches a file, Chat Forge gives the model a real filesystem path whenever possible.
+When a user attaches a file, Molten Forge gives the model a real filesystem path whenever possible.
 
-- If the file already has a local path, Chat Forge keeps that original path and does not copy the file.
-- If the file has no stable path, for example a pasted image/blob, Chat Forge stages it under the OS temp directory:
+- If the file already has a local path, Molten Forge keeps that original path and does not copy the file.
+- If the file has no stable path, for example a pasted image/blob, Molten Forge stages it under the OS temp directory:
 
 ```text
-<os-temp>/chat-forge/attachments/...
+<os-temp>/molten-forge/attachments/...
 ```
 
-The temp directory is intentionally temporary. Old chats can keep attachment metadata even if the underlying temp file has been removed by the OS or by Chat Forge cleanup.
+The temp directory is intentionally temporary. Old chats can keep attachment metadata even if the underlying temp file has been removed by the OS or by Molten Forge cleanup.
 
 ## Model-facing manifest
 
@@ -34,9 +34,9 @@ Text extracted from supported files is inserted into the prompt under configured
 
 Images are sent as multimodal `image_url` parts when attached. The model also receives their path.
 
-The `read` tool is multimodal: reading a supported image path returns an image data URL payload instead of raw binary text. On the next model request, Chat Forge converts that tool result into an attached image message so vision-capable models can inspect workspace images.
+The `read` tool is multimodal: reading a supported image path returns an image data URL payload instead of raw binary text. On the next model request, Molten Forge converts that tool result into an attached image message so vision-capable models can inspect workspace images.
 
-If the selected model is not marked as vision-capable, Chat Forge shows a warning. The request is still allowed, but the model/provider may ignore or reject the image.
+If the selected model is not marked as vision-capable, Molten Forge shows a warning. The request is still allowed, but the model/provider may ignore or reject the image.
 
 ### Text-like files
 
@@ -44,7 +44,7 @@ Text-like files, including common source-code and data formats, are read as UTF-
 
 ### PDFs
 
-PDF text is extracted with `pdf-parse`. If no text is found, Chat Forge marks the attachment as likely scanned/image-only and keeps the path available.
+PDF text is extracted with `pdf-parse`. If no text is found, Molten Forge marks the attachment as likely scanned/image-only and keeps the path available.
 
 ### Office documents
 
@@ -52,7 +52,7 @@ DOCX, XLSX, and PPTX files are parsed with `officeparser`. Extracted text is ins
 
 ### Archives
 
-Archives keep their original path when one exists. Pathless archives are staged in the Chat Forge temp attachment directory only if they are below the hard staging limit.
+Archives keep their original path when one exists. Pathless archives are staged in the Molten Forge temp attachment directory only if they are below the hard staging limit.
 
 Archive extraction is strict:
 
@@ -62,11 +62,11 @@ Archive extraction is strict:
 - total extracted bytes are limited,
 - child files are processed with the same rules as normal attachments.
 
-Extracted children are staged under the Chat Forge temp attachment directory. Binary/image children are not blindly injected; image children can be inspected with `read(path)` when a vision-capable model is selected.
+Extracted children are staged under the Molten Forge temp attachment directory. Binary/image children are not blindly injected; image children can be inspected with `read(path)` when a vision-capable model is selected.
 
 ### Unsupported binaries
 
-Unsupported binary files are metadata/path-only. Chat Forge does not inject raw bytes into the prompt.
+Unsupported binary files are metadata/path-only. Molten Forge does not inject raw bytes into the prompt.
 
 ## Tool access
 
@@ -86,11 +86,11 @@ allows tools to read that exact file, but it does not automatically expose the e
 
 ## Cleanup
 
-When a message is deleted, Chat Forge deletes temporary files and extracted children owned by that message where possible. Original user files are never deleted.
+When a message is deleted, Molten Forge deletes temporary files and extracted children owned by that message where possible. Original user files are never deleted.
 
-When a chat is deleted, Chat Forge deletes temporary/staged attachment files for that chat where possible. Original user files are never deleted.
+When a chat is deleted, Molten Forge deletes temporary/staged attachment files for that chat where possible. Original user files are never deleted.
 
-When a user edits a message and removes an attachment, Chat Forge removes the attachment reference and deletes Chat Forge-created temporary files for that removed attachment.
+When a user edits a message and removes an attachment, Molten Forge removes the attachment reference and deletes Molten Forge-created temporary files for that removed attachment.
 
 ## Old chats
 

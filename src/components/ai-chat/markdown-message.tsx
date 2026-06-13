@@ -1,5 +1,6 @@
 "use client";
 
+import { Spinner } from "@/components/ui/spinner";
 import {
   Check,
   Clipboard,
@@ -11,9 +12,8 @@ import {
   WrapText,
 } from "lucide-react";
 import React, { isValidElement, ReactNode } from "react";
-import { Spinner } from "@/components/ui/spinner";
-import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
+import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
@@ -274,7 +274,10 @@ function languageFromNode(node: ReactNode): string | undefined {
   return languageFromNode(props.children);
 }
 
-function classNameWithLanguage(className: string | undefined, language?: string) {
+function classNameWithLanguage(
+  className: string | undefined,
+  language?: string,
+) {
   if (!language) return className;
 
   const languageClass = `language-${language}`;
@@ -567,7 +570,8 @@ function CodeBlock({
 }) {
   const [copied, setCopied] = React.useState(false);
   const [wrapped, setWrapped] = React.useState(true);
-  const [displayMode, setDisplayMode] = React.useState<CodeBlockDisplayMode>("code");
+  const [displayMode, setDisplayMode] =
+    React.useState<CodeBlockDisplayMode>("code");
   const [fullscreenDisplayMode, setFullscreenDisplayMode] =
     React.useState<CodeBlockDisplayMode>("code");
   const [fullscreenWrapped, setFullscreenWrapped] = React.useState(true);
@@ -718,7 +722,7 @@ const VIRTUAL_MARKDOWN_CODE_BLOCK_MAX_CHARS = 12_000;
 const VIRTUAL_MARKDOWN_BUILD_BUDGET_MS = 6;
 const VIRTUAL_MARKDOWN_OVERSCAN_PX = 900;
 const VIRTUAL_MARKDOWN_BLOCK_CACHE_PREFIX =
-  "chat-forge-virtual-markdown-blocks-v1";
+  "molten-forge-virtual-markdown-blocks-v1";
 const VIRTUAL_MARKDOWN_BLOCK_CACHE_MAX_ENTRIES = 48;
 
 const VIRTUAL_MARKDOWN_FENCE_PATTERN = /^ {0,3}(```+|~~~+)\s*([^`~\s]*)?/;
@@ -789,18 +793,20 @@ function readPersistedVirtualMarkdownBlocks(messageId: string) {
       return null;
     }
 
-    const blocks = value.blocks.filter((block): block is VirtualMarkdownBlock => {
-      if (!block || typeof block !== "object") return false;
-      const candidate = block as Partial<VirtualMarkdownBlock>;
-      return (
-        typeof candidate.id === "string" &&
-        typeof candidate.index === "number" &&
-        typeof candidate.start === "number" &&
-        typeof candidate.end === "number" &&
-        (candidate.kind === "markdown" || candidate.kind === "code") &&
-        typeof candidate.estimatedHeight === "number"
-      );
-    });
+    const blocks = value.blocks.filter(
+      (block): block is VirtualMarkdownBlock => {
+        if (!block || typeof block !== "object") return false;
+        const candidate = block as Partial<VirtualMarkdownBlock>;
+        return (
+          typeof candidate.id === "string" &&
+          typeof candidate.index === "number" &&
+          typeof candidate.start === "number" &&
+          typeof candidate.end === "number" &&
+          (candidate.kind === "markdown" || candidate.kind === "code") &&
+          typeof candidate.estimatedHeight === "number"
+        );
+      },
+    );
 
     return { contentKey: value.contentKey, blocks };
   } catch (error) {
@@ -945,7 +951,8 @@ function findBlockIndexForOffset(offsets: number[], offset: number) {
 
 function parseFencedCodeBlock(content: string, fallbackLanguage?: string) {
   const firstLineEnd = content.indexOf("\n");
-  const firstLine = firstLineEnd >= 0 ? content.slice(0, firstLineEnd) : content;
+  const firstLine =
+    firstLineEnd >= 0 ? content.slice(0, firstLineEnd) : content;
   const openMatch = firstLine.match(VIRTUAL_MARKDOWN_FENCE_PATTERN);
 
   if (!openMatch) {
@@ -1089,7 +1096,8 @@ function createVirtualMarkdownBlocksBuilder({
       kind,
       language,
       estimatedHeight:
-        cached?.estimatedHeight ?? estimateVirtualMarkdownBlockHeight(end - start, kind),
+        cached?.estimatedHeight ??
+        estimateVirtualMarkdownBlockHeight(end - start, kind),
     };
 
     blocks.push(block);
@@ -1135,7 +1143,8 @@ function createVirtualMarkdownBlocksBuilder({
       if (inFence) {
         const codeBlockIsTooLarge =
           offset - blockStart >= VIRTUAL_MARKDOWN_CODE_BLOCK_MAX_CHARS;
-        const closesFence = shouldCloseFence(line) && offset > blockStart + line.length;
+        const closesFence =
+          shouldCloseFence(line) && offset > blockStart + line.length;
 
         if (closesFence || codeBlockIsTooLarge) {
           createBlock(blockStart, offset, "code", fenceLanguage);
@@ -1160,7 +1169,12 @@ function createVirtualMarkdownBlocksBuilder({
     }
 
     if (blockStart < content.length) {
-      createBlock(blockStart, content.length, inFence ? "code" : "markdown", fenceLanguage);
+      createBlock(
+        blockStart,
+        content.length,
+        inFence ? "code" : "markdown",
+        fenceLanguage,
+      );
     }
 
     onBatch([...blocks]);
@@ -1183,7 +1197,10 @@ function VirtualizedMarkdownMessage({
   onCopy: (event: React.ClipboardEvent<HTMLDivElement>) => void;
 }) {
   const rootRef = React.useRef<HTMLDivElement | null>(null);
-  const contentKey = React.useMemo(() => getCheapContentKey(content), [content]);
+  const contentKey = React.useMemo(
+    () => getCheapContentKey(content),
+    [content],
+  );
   const cachedBlocks = React.useMemo(() => {
     const cached = readPersistedVirtualMarkdownBlocks(messageId);
     return cached?.contentKey === contentKey ? cached.blocks : null;
@@ -1297,7 +1314,9 @@ function VirtualizedMarkdownMessage({
     resizeObserver.observe(root);
     if (!(scrollParent instanceof Window)) {
       resizeObserver.observe(scrollParent);
-      scrollParent.addEventListener("scroll", scheduleUpdate, { passive: true });
+      scrollParent.addEventListener("scroll", scheduleUpdate, {
+        passive: true,
+      });
     } else {
       window.addEventListener("scroll", scheduleUpdate, { passive: true });
       window.addEventListener("resize", scheduleUpdate);
@@ -1317,7 +1336,10 @@ function VirtualizedMarkdownMessage({
     };
   }, [updateViewport]);
 
-  const startIndex = Math.max(0, findBlockIndexForOffset(offsets, viewport.top));
+  const startIndex = Math.max(
+    0,
+    findBlockIndexForOffset(offsets, viewport.top),
+  );
   const endIndex = Math.min(
     blocks.length - 1,
     findBlockIndexForOffset(offsets, viewport.bottom),
@@ -1357,7 +1379,10 @@ function VirtualizedMarkdownMessage({
           <Spinner className="size-10" />
         </div>
       ) : (
-        <div className="relative w-full" style={{ height: Math.max(1, totalHeight) }}>
+        <div
+          className="relative w-full"
+          style={{ height: Math.max(1, totalHeight) }}
+        >
           {visibleBlocks.map((block) => (
             <div
               key={block.id}
@@ -1370,7 +1395,9 @@ function VirtualizedMarkdownMessage({
               <VirtualMarkdownBlockView
                 block={block}
                 content={content}
-                skipSyntaxHighlight={skipSyntaxHighlight || block.kind === "code"}
+                skipSyntaxHighlight={
+                  skipSyntaxHighlight || block.kind === "code"
+                }
               />
             </div>
           ))}

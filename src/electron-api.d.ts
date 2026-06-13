@@ -1,32 +1,35 @@
+import type { ProjectInstructionsReadResult } from "@/lib/ai-chat/project-instructions";
 import type {
-  AgentsSettings,
   AgentExportResult,
   AgentImportResult,
+  AgentsSettings,
   AppSettings,
+  ChatAttachment,
   ChatReasoningMetadata,
   ChatTokenUsage,
+  ChatWorkspaceRoot,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
   McpSettings,
   ModesState,
-  ChatWorkspaceRoot,
-  ChatAttachment,
-  ToolCommandResult,
-  TerminalStreamEvent,
   SkillExportResult,
   SkillImportResult,
+  SkillsSettings,
+  TerminalStreamEvent,
+  ToolCommandResult,
   ToolExportResult,
   ToolImportResult,
-  SkillsSettings,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
-import type { ProjectInstructionsReadResult } from "@/lib/ai-chat/project-instructions";
-
 
 type AttachmentInput =
   | { name: string; path: string; mimeType?: string }
-  | { name: string; bytes: Uint8Array | number[] | ArrayBuffer; mimeType?: string };
+  | {
+      name: string;
+      bytes: Uint8Array | number[] | ArrayBuffer;
+      mimeType?: string;
+    };
 
 type AttachmentProcessResult = {
   attachments: ChatAttachment[];
@@ -84,18 +87,47 @@ type AiStreamHandle = {
 
 declare global {
   interface Window {
-    codeForgeAI?: {
+    moltenForgeAI?: {
       loadModels: (request: AiProviderRequest) => Promise<unknown>;
       sendChat: (request: AiProviderRequest) => Promise<any>;
       pickAttachments: () => Promise<AttachmentInput[]>;
       readClipboardFilePaths: () => Promise<string[]>;
       readClipboardFilePathsSync: () => string[];
-      cleanupChatMessageWorkspace: (request: { chatId: string; messageId: string; generatedFileStoragePaths?: string[]; attachments?: ChatAttachment[] }) => Promise<{ deleted: number }>;
-      processAttachments: (request: AttachmentInput[] | { inputs: AttachmentInput[] }) => Promise<AttachmentProcessResult>;
-      readAttachmentDataUrl: (request: { storagePath: string; mimeType?: string }) => Promise<string>;
-      exportAttachment: (request: { storagePath: string; name?: string }) => Promise<{ cancelled: boolean; path?: string }>;
-      deleteUnusedAttachments: (request: ChatAttachment[] | { attachments?: ChatAttachment[]; storagePaths?: string[]; storagePath?: string }) => Promise<{ deleted: number }>;
-      deleteTemporaryAttachments: (request: ChatAttachment[] | { attachments?: ChatAttachment[]; storagePaths?: string[]; storagePath?: string }) => Promise<{ deleted: number }>;
+      cleanupChatMessageWorkspace: (request: {
+        chatId: string;
+        messageId: string;
+        generatedFileStoragePaths?: string[];
+        attachments?: ChatAttachment[];
+      }) => Promise<{ deleted: number }>;
+      processAttachments: (
+        request: AttachmentInput[] | { inputs: AttachmentInput[] },
+      ) => Promise<AttachmentProcessResult>;
+      readAttachmentDataUrl: (request: {
+        storagePath: string;
+        mimeType?: string;
+      }) => Promise<string>;
+      exportAttachment: (request: {
+        storagePath: string;
+        name?: string;
+      }) => Promise<{ cancelled: boolean; path?: string }>;
+      deleteUnusedAttachments: (
+        request:
+          | ChatAttachment[]
+          | {
+              attachments?: ChatAttachment[];
+              storagePaths?: string[];
+              storagePath?: string;
+            },
+      ) => Promise<{ deleted: number }>;
+      deleteTemporaryAttachments: (
+        request:
+          | ChatAttachment[]
+          | {
+              attachments?: ChatAttachment[];
+              storagePaths?: string[];
+              storagePath?: string;
+            },
+      ) => Promise<{ deleted: number }>;
       getPathForFile: (file: File) => string;
       streamChat: (request: AiProviderRequest) => AiStreamHandle;
     };
@@ -115,7 +147,7 @@ type ChatForgeIndexedDbSnapshot = {
 
 declare global {
   interface Window {
-    chatForgeStorage?: {
+    moltenForgeStorage?: {
       isInitialized: () => Promise<boolean>;
       migrateFromIndexedDb: (
         snapshot: ChatForgeIndexedDbSnapshot,
@@ -154,8 +186,13 @@ declare global {
       exportTool: (tool: LoadedToolInfo) => Promise<ToolExportResult>;
       exportTools: (tools: LoadedToolInfo[]) => Promise<ToolExportResult>;
       openToolsFolder: () => Promise<void>;
-      loadSkills: (request?: { workspaceRoots?: ChatWorkspaceRoot[] }) => Promise<LoadedSkillInfo[]>;
-      saveSkill: (skill: LoadedSkillInfo, previousName?: string) => Promise<LoadedSkillInfo>;
+      loadSkills: (request?: {
+        workspaceRoots?: ChatWorkspaceRoot[];
+      }) => Promise<LoadedSkillInfo[]>;
+      saveSkill: (
+        skill: LoadedSkillInfo,
+        previousName?: string,
+      ) => Promise<LoadedSkillInfo>;
       deleteSkill: (skill: LoadedSkillInfo) => Promise<void>;
       importSkills: () => Promise<SkillImportResult>;
       exportSkill: (skill: LoadedSkillInfo) => Promise<SkillExportResult>;
@@ -174,10 +211,9 @@ declare global {
 
 declare global {
   interface Window {
-    chatForgeWorkspace?: {
+    moltenForgeWorkspace?: {
       selectFolder: () => Promise<
-        | { cancelled: true }
-        | { cancelled: false; path: string; name: string }
+        { cancelled: true } | { cancelled: false; path: string; name: string }
       >;
       openFolder: (folderPath: string) => Promise<void>;
       loadProjectInstructions: (request: {
@@ -190,7 +226,7 @@ declare global {
 
 declare global {
   interface Window {
-    chatForgeTools?: {
+    moltenForgeTools?: {
       execute: (request: {
         executionId?: string;
         name: string;
@@ -223,10 +259,19 @@ declare global {
 
 declare global {
   interface Window {
-    chatForgeMcp?: {
-      refreshTools: (request: { settings: McpSettings; serverId?: string }) => Promise<{ settings: McpSettings; tools: LoadedToolInfo[] }>;
-      testServer: (request: { server: McpSettings["servers"][number] }) => Promise<{ ok: boolean; message: string; toolCount?: number }>;
-      executeTool: (request: { executionId?: string; tool: LoadedToolInfo; args: unknown }) => Promise<ToolCommandResult>;
+    moltenForgeMcp?: {
+      refreshTools: (request: {
+        settings: McpSettings;
+        serverId?: string;
+      }) => Promise<{ settings: McpSettings; tools: LoadedToolInfo[] }>;
+      testServer: (request: {
+        server: McpSettings["servers"][number];
+      }) => Promise<{ ok: boolean; message: string; toolCount?: number }>;
+      executeTool: (request: {
+        executionId?: string;
+        tool: LoadedToolInfo;
+        args: unknown;
+      }) => Promise<ToolCommandResult>;
       cancel: (executionId: string) => Promise<{ cancelled: boolean }>;
     };
   }
@@ -253,7 +298,7 @@ type FindInPageResult = {
 
 declare global {
   interface Window {
-    chatForgeFind?: {
+    moltenForgeFind?: {
       findInPage: (
         request: FindInPageRequest,
       ) => Promise<{ requestId: number }>;

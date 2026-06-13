@@ -1,30 +1,30 @@
 import {
-  READ_TOOL_NAME,
   BASH_TOOL_NAME,
   EDIT_TOOL_NAME,
-  WRITE_TOOL_NAME,
   FILE_TOOL_NAMES,
   isFileToolName,
   isLegacyFileToolName,
+  READ_TOOL_NAME,
   requiresFileToolApproval,
+  WRITE_TOOL_NAME,
 } from "@/lib/ai-chat/file-tool-names";
 import { TERMINAL_EXEC_TOOL_NAME } from "@/lib/ai-chat/terminal-tool";
 import type {
+  AgentsSettings,
+  AgentTask,
   AskUserQuestion,
   AskUserQuestionType,
   AskUserRequest,
   AskUserResponse,
-  FileToolApprovalRequest,
-  FileToolApprovalResponse,
   ChatFileToolAutoApproval,
   ChatToolCall,
   ChatToolResult,
   ChatWorkspaceRoot,
-  AgentTask,
+  FileToolApprovalRequest,
+  FileToolApprovalResponse,
   LoadedAgentInfo,
   LoadedSkillInfo,
   LoadedToolInfo,
-  AgentsSettings,
   SkillsSettings,
   ToolsSettings,
 } from "@/lib/ai-chat/types";
@@ -112,7 +112,10 @@ export const BUILT_IN_TOOL_TIMEOUTS_MS: Record<string, number> = {
 };
 
 export function supportsBuiltInToolTimeout(toolName: string) {
-  return Object.prototype.hasOwnProperty.call(BUILT_IN_TOOL_TIMEOUTS_MS, toolName);
+  return Object.prototype.hasOwnProperty.call(
+    BUILT_IN_TOOL_TIMEOUTS_MS,
+    toolName,
+  );
 }
 
 export function getDefaultBuiltInToolTimeoutMs(toolName: string) {
@@ -195,15 +198,14 @@ export const CALL_AGENT_TOOL: LoadedToolInfo = {
 };
 
 export {
-  READ_TOOL_NAME,
   BASH_TOOL_NAME,
   EDIT_TOOL_NAME,
-  WRITE_TOOL_NAME,
   FILE_TOOL_NAMES,
   isFileToolName,
+  READ_TOOL_NAME,
   requiresFileToolApproval,
+  WRITE_TOOL_NAME,
 };
-
 
 const TOOL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 const TOOL_MENTION_PATTERN = /a^/g;
@@ -261,7 +263,7 @@ export const ASK_USER_TOOL: LoadedToolInfo = {
             options: {
               type: "array",
               description:
-                "Required for single_choice and multi_select. Use concise labels and strongly prefer one-sentence gray-helper descriptions. Do not include Other/custom; Chat Forge adds a custom typed answer option automatically for choice questions.",
+                "Required for single_choice and multi_select. Use concise labels and strongly prefer one-sentence gray-helper descriptions. Do not include Other/custom; Molten Forge adds a custom typed answer option automatically for choice questions.",
               minItems: 2,
               maxItems: MAX_ASK_USER_OPTIONS,
               items: {
@@ -371,7 +373,8 @@ export const READ_TOOL: LoadedToolInfo = {
     properties: {
       path: {
         type: "string",
-        description: "Path to the file to read (relative to the selected workspace or absolute).",
+        description:
+          "Path to the file to read (relative to the selected workspace or absolute).",
       },
       offset: {
         type: "number",
@@ -429,7 +432,8 @@ export const EDIT_TOOL: LoadedToolInfo = {
     properties: {
       path: {
         type: "string",
-        description: "Path to the file to edit (relative to the selected workspace or absolute).",
+        description:
+          "Path to the file to edit (relative to the selected workspace or absolute).",
       },
       edits: {
         type: "array",
@@ -474,7 +478,8 @@ export const WRITE_TOOL: LoadedToolInfo = {
     properties: {
       path: {
         type: "string",
-        description: "Path to the file to write (relative to the selected workspace or absolute).",
+        description:
+          "Path to the file to write (relative to the selected workspace or absolute).",
       },
       content: {
         type: "string",
@@ -490,7 +495,9 @@ export const WRITE_TOOL: LoadedToolInfo = {
   requiresApproval: true,
 };
 
-export function createCallAgentTool(agents: LoadedAgentInfo[]): LoadedToolInfo | null {
+export function createCallAgentTool(
+  agents: LoadedAgentInfo[],
+): LoadedToolInfo | null {
   const enabledAgentList = agents
     .filter((agent) => agent.enabled && agent.name.trim())
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -499,7 +506,9 @@ export function createCallAgentTool(agents: LoadedAgentInfo[]): LoadedToolInfo |
   if (enabledAgents.length === 0) return null;
 
   const agentDescriptions = enabledAgentList
-    .map((agent) => `- ${agent.name}: ${agent.description || "No description."}`)
+    .map(
+      (agent) => `- ${agent.name}: ${agent.description || "No description."}`,
+    )
     .join("\n");
 
   return {
@@ -539,11 +548,7 @@ export function createLoadSkillTool(
   availableSkills: LoadedSkillInfo[],
 ): LoadedToolInfo | null {
   const selectableSkills = availableSkills
-    .filter(
-      (skill) =>
-        skill.name.trim() &&
-        skill.description.trim(),
-    )
+    .filter((skill) => skill.name.trim() && skill.description.trim())
     .sort((left, right) => left.name.localeCompare(right.name));
 
   if (selectableSkills.length === 0) return null;
@@ -597,7 +602,6 @@ export function isBuiltInToolName(toolName: string) {
     toolName === CALL_AGENT_TOOL_NAME
   );
 }
-
 
 export function isTaskToolName(toolName: string) {
   return (
@@ -658,7 +662,9 @@ function buildCustomToolApprovalCommand(
   if (!command) return undefined;
 
   try {
-    const modelArgs = parseToolArgumentsText(toolCall.function.arguments || "{}");
+    const modelArgs = parseToolArgumentsText(
+      toolCall.function.arguments || "{}",
+    );
     return formatCommandPreview(
       command,
       materializeCommandArgs(tool?.args ?? [], modelArgs),
@@ -670,7 +676,16 @@ function buildCustomToolApprovalCommand(
 
 export function createToolApprovalRequest(
   toolCall: ChatToolCall,
-  tool?: Pick<LoadedToolInfo, "name" | "description" | "command" | "args" | "source" | "displayName" | "mcp">,
+  tool?: Pick<
+    LoadedToolInfo,
+    | "name"
+    | "description"
+    | "command"
+    | "args"
+    | "source"
+    | "displayName"
+    | "mcp"
+  >,
 ): FileToolApprovalRequest {
   const description = tool?.description?.trim();
   const command = buildCustomToolApprovalCommand(toolCall, tool);
@@ -686,15 +701,18 @@ export function createToolApprovalRequest(
     toolName: toolCall.function.name,
     action: "operation",
     details: [
-      ...(tool?.displayName ? [{ label: "Tool", value: tool.displayName }] : []),
-      ...(tool?.mcp?.serverName ? [{ label: "MCP server", value: tool.mcp.serverName }] : []),
+      ...(tool?.displayName
+        ? [{ label: "Tool", value: tool.displayName }]
+        : []),
+      ...(tool?.mcp?.serverName
+        ? [{ label: "MCP server", value: tool.mcp.serverName }]
+        : []),
       ...(description ? [{ label: "Description", value: description }] : []),
       ...(command ? [{ label: "Command", value: command }] : []),
       { label: "Approval mode", value: "Manual user approval required" },
     ],
   };
 }
-
 
 export function requiresToolApproval(
   toolName: string,
@@ -716,14 +734,15 @@ export function getFileToolApprovalAction(toolName: string) {
   return "operation";
 }
 
-
 function readFileToolPath(args: unknown) {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
     return "unknown file";
   }
 
   const value = (args as Record<string, unknown>).path;
-  return typeof value === "string" && value.trim() ? value.trim() : "unknown file";
+  return typeof value === "string" && value.trim()
+    ? value.trim()
+    : "unknown file";
 }
 
 function readFileToolRootId(args: unknown) {
@@ -774,25 +793,36 @@ export function createFileToolApprovalRequest(
   workspaceRoots?: ChatWorkspaceRoot[],
 ): FileToolApprovalRequest {
   const requestedPath = readFileToolPath(args);
-  const filePath = resolveFileToolDisplayPath(requestedPath, undefined, workspaceRoots);
-  const source = args && typeof args === "object" && !Array.isArray(args)
-    ? (args as Record<string, unknown>)
-    : {};
+  const filePath = resolveFileToolDisplayPath(
+    requestedPath,
+    undefined,
+    workspaceRoots,
+  );
+  const source =
+    args && typeof args === "object" && !Array.isArray(args)
+      ? (args as Record<string, unknown>)
+      : {};
 
   if (toolName === BASH_TOOL_NAME) {
-    const commandValue = typeof source.command === "string" ? source.command.trim() : "";
-    const timeoutValue = typeof source.timeout === "number" && Number.isFinite(source.timeout)
-      ? `${Math.round(source.timeout)} s`
-      : "No timeout";
+    const commandValue =
+      typeof source.command === "string" ? source.command.trim() : "";
+    const timeoutValue =
+      typeof source.timeout === "number" && Number.isFinite(source.timeout)
+        ? `${Math.round(source.timeout)} s`
+        : "No timeout";
 
     return {
       title: "Approve bash command",
-      description: "The model wants to run a bash command inside the selected workspace.",
+      description:
+        "The model wants to run a bash command inside the selected workspace.",
       toolName,
       action: "operation",
       details: [
         { label: "Command", value: commandValue || "Missing command" },
-        { label: "Workspace", value: workspaceRoots?.[0]?.path ?? "No workspace selected" },
+        {
+          label: "Workspace",
+          value: workspaceRoots?.[0]?.path ?? "No workspace selected",
+        },
         { label: "Timeout", value: timeoutValue },
         { label: "Approval mode", value: "Manual user approval required" },
       ],
@@ -818,7 +848,8 @@ export function createFileToolApprovalRequest(
     const content = typeof source.content === "string" ? source.content : "";
     return {
       title: "Approve file write",
-      description: "The model wants to create or overwrite a file in the selected workspace.",
+      description:
+        "The model wants to create or overwrite a file in the selected workspace.",
       toolName,
       action: "creation",
       path: filePath,
@@ -839,7 +870,6 @@ export function createFileToolApprovalRequest(
     details: [{ label: "Scope", value: "Selected workspace" }],
   };
 }
-
 
 export function parseFileToolApprovalRequestFromToolCall(
   toolCall: ChatToolCall,
@@ -924,7 +954,8 @@ export function parseCallAgentRequestFromToolCall(toolCall: ChatToolCall) {
   }
 
   const source = args as Record<string, unknown>;
-  const agentName = typeof source.agentName === "string" ? source.agentName.trim() : "";
+  const agentName =
+    typeof source.agentName === "string" ? source.agentName.trim() : "";
   const task = typeof source.task === "string" ? source.task.trim() : "";
 
   if (!agentName) throw new Error("call_agent requires agentName.");
@@ -1178,7 +1209,9 @@ export function parseAskUserRequestFromToolCall(toolCall: ChatToolCall) {
 
 export function parseTaskUpdateRequest(args: unknown): { tasks: AgentTask[] } {
   if (!args || typeof args !== "object" || Array.isArray(args)) {
-    throw new Error(`${TASK_UPDATE_TOOL_NAME} arguments must be a JSON object.`);
+    throw new Error(
+      `${TASK_UPDATE_TOOL_NAME} arguments must be a JSON object.`,
+    );
   }
 
   const source = args as Record<string, unknown>;
@@ -1187,7 +1220,9 @@ export function parseTaskUpdateRequest(args: unknown): { tasks: AgentTask[] } {
   }
 
   if (source.tasks.length > MAX_TASKS) {
-    throw new Error(`${TASK_UPDATE_TOOL_NAME} supports at most ${MAX_TASKS} tasks.`);
+    throw new Error(
+      `${TASK_UPDATE_TOOL_NAME} supports at most ${MAX_TASKS} tasks.`,
+    );
   }
 
   const seen = new Set<string>();

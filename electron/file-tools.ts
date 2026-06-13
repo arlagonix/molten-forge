@@ -17,16 +17,16 @@ import path from "node:path";
 import pdfParse from "pdf-parse";
 
 import {
-  FILE_READ_TOOL_NAME,
-  FILE_FIND_TOOL_NAME,
-  FILE_SEARCH_TEXT_TOOL_NAME,
-  FILE_REPLACE_TEXT_TOOL_NAME,
+  ARCHIVE_CREATE_TOOL_NAME,
+  ARCHIVE_EXTRACT_TOOL_NAME,
+  CHAT_FILE_CREATE_TOOL_NAME,
+  DOCUMENT_CONVERT_TOOL_NAME,
   FILE_CREATE_TOOL_NAME,
   FILE_DELETE_TOOL_NAME,
-  ARCHIVE_EXTRACT_TOOL_NAME,
-  ARCHIVE_CREATE_TOOL_NAME,
-  DOCUMENT_CONVERT_TOOL_NAME,
-  CHAT_FILE_CREATE_TOOL_NAME,
+  FILE_FIND_TOOL_NAME,
+  FILE_READ_TOOL_NAME,
+  FILE_REPLACE_TEXT_TOOL_NAME,
+  FILE_SEARCH_TEXT_TOOL_NAME,
 } from "../src/lib/ai-chat/file-tool-names";
 import {
   getErrorMessage,
@@ -545,8 +545,11 @@ function isLikelyTextFile(filePath: string) {
   return !isKnownBinaryFilePath(filePath);
 }
 
-
-function readOptionalPositiveIntegerArg(args: unknown, key: string, max: number) {
+function readOptionalPositiveIntegerArg(
+  args: unknown,
+  key: string,
+  max: number,
+) {
   if (!isPlainObject(args) || !(key in args)) return undefined;
   const value = args[key];
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
@@ -567,11 +570,7 @@ function normalizeOptionalLineRange(args: unknown) {
     FILE_TOOL_MAX_READ_OFFSET,
   );
 
-  if (
-    startLine !== undefined &&
-    endLine !== undefined &&
-    endLine < startLine
-  ) {
+  if (startLine !== undefined && endLine !== undefined && endLine < startLine) {
     throw new Error("endLine must be greater than or equal to startLine.");
   }
 
@@ -626,7 +625,10 @@ function createChangePreview({
   };
 }
 
-function createAddedRows(text: string, startLine = 1): FileToolChangePreviewRow[] {
+function createAddedRows(
+  text: string,
+  startLine = 1,
+): FileToolChangePreviewRow[] {
   return splitLinesForPreview(text).map((line, index) => ({
     type: "add",
     text: truncatePreviewLine(line),
@@ -634,7 +636,10 @@ function createAddedRows(text: string, startLine = 1): FileToolChangePreviewRow[
   }));
 }
 
-function createDeletedRows(text: string, startLine = 1): FileToolChangePreviewRow[] {
+function createDeletedRows(
+  text: string,
+  startLine = 1,
+): FileToolChangePreviewRow[] {
   return splitLinesForPreview(text).map((line, index) => ({
     type: "delete",
     text: truncatePreviewLine(line),
@@ -687,7 +692,9 @@ function getLineRangeOffsets(
   const clampedStartLine = Math.min(startLine, totalLines + 1);
   const clampedEndLine = Math.min(endLine, totalLines);
   const startOffset =
-    clampedStartLine <= totalLines ? lineStarts[clampedStartLine - 1] : text.length;
+    clampedStartLine <= totalLines
+      ? lineStarts[clampedStartLine - 1]
+      : text.length;
   const endOffset =
     clampedEndLine >= totalLines
       ? text.length
@@ -734,11 +741,7 @@ async function tryReadTextFileForChangePreview(filePath: string, size: number) {
   }
 }
 
-function readTextFileSelection(
-  text: string,
-  offset: number,
-  limit?: number,
-) {
+function readTextFileSelection(text: string, offset: number, limit?: number) {
   const lineRange = getLineRangeOffsets(
     text,
     offset,
@@ -1032,11 +1035,11 @@ async function searchTextInCandidate({
   const totalLines = text.length === 0 ? 0 : lines.length;
   const rangeStartLine = startLine ?? 1;
   const rangeEndLine = endLine ?? totalLines;
-  const clampedStartLine = Math.max(1, Math.min(rangeStartLine, totalLines + 1));
-  const clampedEndLine = Math.max(
-    0,
-    Math.min(rangeEndLine, totalLines),
+  const clampedStartLine = Math.max(
+    1,
+    Math.min(rangeStartLine, totalLines + 1),
   );
+  const clampedEndLine = Math.max(0, Math.min(rangeEndLine, totalLines));
   const needle = caseSensitive ? query : query.toLowerCase();
   const results: Array<{
     rootId: string;
@@ -1094,7 +1097,9 @@ async function executeFileSearchTextTool(
   );
 
   if ((startLine !== undefined || endLine !== undefined) && !requestedPath) {
-    throw new Error("startLine and endLine can only be used when path is provided.");
+    throw new Error(
+      "startLine and endLine can only be used when path is provided.",
+    );
   }
 
   if (requestedPath) {
@@ -1192,7 +1197,10 @@ async function executeFileReplaceTextTool(
   );
   const current = await fs.readFile(target.realPath, "utf8");
   const lineRange = getLineRangeOffsets(current, startLine, endLine);
-  const scopedCurrent = current.slice(lineRange.startOffset, lineRange.endOffset);
+  const scopedCurrent = current.slice(
+    lineRange.startOffset,
+    lineRange.endOffset,
+  );
   const matchPositions = findAllOccurrences(scopedCurrent, oldText);
   const replacementCount = matchPositions.length;
 
@@ -1217,7 +1225,7 @@ async function executeFileReplaceTextTool(
 
   const nextScoped = scopedCurrent.split(oldText).join(newText);
   const next = `${current.slice(0, lineRange.startOffset)}${nextScoped}${current.slice(lineRange.endOffset)}`;
-  const tempPath = `${target.realPath}.chatforge-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`;
+  const tempPath = `${target.realPath}.moltenForge-${Date.now()}-${Math.random().toString(16).slice(2)}.tmp`;
   await fs.writeFile(tempPath, next, "utf8");
   await fs.rename(tempPath, target.realPath);
 
@@ -1320,7 +1328,9 @@ function getPathTo7za() {
   const candidatePaths = [
     require("7zip-bin").path7za,
     process.platform === "win32" ? "7z.exe" : "7z",
-  ].filter((item): item is string => typeof item === "string" && item.length > 0);
+  ].filter(
+    (item): item is string => typeof item === "string" && item.length > 0,
+  );
   return candidatePaths[0] ?? "7z";
 }
 
@@ -1333,7 +1343,10 @@ function sanitizeFileNamePart(value: string) {
   return sanitized || "file";
 }
 
-function inferMimeType(fileName: string, fallback = "application/octet-stream") {
+function inferMimeType(
+  fileName: string,
+  fallback = "application/octet-stream",
+) {
   const ext = path.extname(fileName).toLowerCase();
   const mapping: Record<string, string> = {
     ".txt": "text/plain",
@@ -1358,7 +1371,8 @@ async function safeUniquePath(directory: string, fileName: string) {
   const ext = parsed.ext;
 
   for (let index = 0; index < 1000; index += 1) {
-    const candidateName = index === 0 ? `${base}${ext}` : `${base}-${index + 1}${ext}`;
+    const candidateName =
+      index === 0 ? `${base}${ext}` : `${base}-${index + 1}${ext}`;
     const candidatePath = path.join(directory, candidateName);
     try {
       await fs.lstat(candidatePath);
@@ -1399,7 +1413,9 @@ async function ensureWorkspaceDirectoryTarget({
     : path.resolve(root.realPath, effectivePath);
 
   if (!pathIsInside(root.realPath, targetPath)) {
-    throw new Error("The requested output folder is outside the approved workspace root.");
+    throw new Error(
+      "The requested output folder is outside the approved workspace root.",
+    );
   }
 
   if (requestedPath?.trim()) {
@@ -1418,7 +1434,9 @@ async function ensureWorkspaceDirectoryTarget({
   await fs.mkdir(targetPath, { recursive: true });
   const realTargetPath = await fs.realpath(targetPath);
   if (!pathIsInside(root.realPath, realTargetPath)) {
-    throw new Error("The requested output folder resolves outside the approved workspace root.");
+    throw new Error(
+      "The requested output folder resolves outside the approved workspace root.",
+    );
   }
 
   return {
@@ -1470,7 +1488,14 @@ async function executeArchiveExtractTool(
     outputPath: output.relativePath.split(path.sep).join("/"),
     count: extractedFiles.length,
     truncated: extractedFiles.length >= ARCHIVE_TOOL_MAX_LISTED_FILES,
-    files: extractedFiles.slice(0, 100).map((file) => path.posix.join(output.relativePath.split(path.sep).join("/"), file.relativePath.split(path.sep).join("/"))),
+    files: extractedFiles
+      .slice(0, 100)
+      .map((file) =>
+        path.posix.join(
+          output.relativePath.split(path.sep).join("/"),
+          file.relativePath.split(path.sep).join("/"),
+        ),
+      ),
   });
 }
 
@@ -1484,10 +1509,14 @@ async function run7ZipAdd({
   relativePaths: string[];
 }) {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(getPathTo7za(), ["a", "-tzip", archivePath, ...relativePaths], {
-      cwd,
-      windowsHide: true,
-    });
+    const child = spawn(
+      getPathTo7za(),
+      ["a", "-tzip", archivePath, ...relativePaths],
+      {
+        cwd,
+        windowsHide: true,
+      },
+    );
     let stderr = "";
     child.stderr.on("data", (chunk) => {
       stderr += String(chunk);
@@ -1504,7 +1533,7 @@ async function stageArchiveTargets(
   targets: Awaited<ReturnType<typeof resolveWorkspaceTarget>>[],
 ) {
   const stagingDirectory = await fs.mkdtemp(
-    path.join(os.tmpdir(), "chat-forge-archive-"),
+    path.join(os.tmpdir(), "molten-forge-archive-"),
   );
   const stagedNames: string[] = [];
   const usedNames = new Set<string>();
@@ -1512,7 +1541,11 @@ async function stageArchiveTargets(
   try {
     for (const target of targets) {
       const baseName = sanitizeFileNamePart(path.basename(target.relativePath));
-      const uniqueName = await uniqueStagingName(stagingDirectory, baseName, usedNames);
+      const uniqueName = await uniqueStagingName(
+        stagingDirectory,
+        baseName,
+        usedNames,
+      );
       usedNames.add(uniqueName.toLowerCase());
       const destination = path.join(stagingDirectory, uniqueName);
       const stats = await fs.stat(target.realPath);
@@ -1576,7 +1609,8 @@ async function executeArchiveCreateTool(
   const sourcePaths = readOptionalStringArray(args, "paths");
   if (!sourcePaths.length) throw new Error("archive_create requires paths.");
   const rootId = readOptionalString(args, "rootId");
-  const filename = readOptionalString(args, "filename") ?? "generated-files.zip";
+  const filename =
+    readOptionalString(args, "filename") ?? "generated-files.zip";
   const safeFilename = sanitizeFileNamePart(
     filename.toLowerCase().endsWith(".zip") ? filename : `${filename}.zip`,
   );
@@ -1604,7 +1638,10 @@ async function executeArchiveCreateTool(
   }
 
   const outputStats = await fs.stat(outputPath);
-  const workspacePath = path.relative(chatRoot.realPath, outputPath).split(path.sep).join("/");
+  const workspacePath = path
+    .relative(chatRoot.realPath, outputPath)
+    .split(path.sep)
+    .join("/");
   const generatedFile: GeneratedFile = {
     id: artifactId,
     name: path.basename(outputPath),
@@ -1621,7 +1658,10 @@ async function executeArchiveCreateTool(
     {
       ok: true,
       artifact: generatedFile,
-      sourcePaths: targets.map((target) => ({ rootId: target.root.id, path: target.relativePath })),
+      sourcePaths: targets.map((target) => ({
+        rootId: target.root.id,
+        path: target.relativePath,
+      })),
       archivedNames: staged.stagedNames,
       note: "The ZIP contains only the selected files/folders at the archive root, not their full workspace parent paths.",
     },
@@ -1634,11 +1674,29 @@ async function executeArchiveCreateTool(
 async function convertOfficeDocument(filePath: string) {
   const officeParser = await import("officeparser");
   const parseOfficeAsync =
-    (officeParser as { parseOfficeAsync?: (filePath: string, config?: unknown) => Promise<unknown> }).parseOfficeAsync ??
-    ((officeParser as { default?: { parseOfficeAsync?: (filePath: string, config?: unknown) => Promise<unknown> } }).default?.parseOfficeAsync);
+    (
+      officeParser as {
+        parseOfficeAsync?: (
+          filePath: string,
+          config?: unknown,
+        ) => Promise<unknown>;
+      }
+    ).parseOfficeAsync ??
+    (
+      officeParser as {
+        default?: {
+          parseOfficeAsync?: (
+            filePath: string,
+            config?: unknown,
+          ) => Promise<unknown>;
+        };
+      }
+    ).default?.parseOfficeAsync;
 
   if (!parseOfficeAsync) {
-    throw new Error("officeparser is installed but does not expose parseOfficeAsync.");
+    throw new Error(
+      "officeparser is installed but does not expose parseOfficeAsync.",
+    );
   }
 
   const parsed = await parseOfficeAsync(filePath);
@@ -1654,7 +1712,8 @@ async function executeDocumentConvertTool(
   const requestedOutputPath = readOptionalString(args, "outputPath");
   const target = await resolveWorkspaceTarget(context, requestedPath, rootId);
   const stats = await fs.stat(target.realPath);
-  if (!stats.isFile()) throw new Error("document_convert requires a file path.");
+  if (!stats.isFile())
+    throw new Error("document_convert requires a file path.");
 
   const extension = path.extname(target.realPath).toLowerCase();
   let content = "";
@@ -1665,7 +1724,9 @@ async function executeDocumentConvertTool(
     content = parsed.text ?? "";
     outputExtension = ".txt";
   } else if (
-    [".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf"].includes(extension)
+    [".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".rtf"].includes(
+      extension,
+    )
   ) {
     content = await convertOfficeDocument(target.realPath);
     outputExtension = ".md";
@@ -1701,7 +1762,10 @@ async function executeDocumentConvertTool(
       outputDirectory,
       `${target.relativePath.split(path.sep).join("__")}${outputExtension}`,
     );
-    outputRelativePath = path.relative(target.root.realPath, outputAbsolutePath);
+    outputRelativePath = path.relative(
+      target.root.realPath,
+      outputAbsolutePath,
+    );
   }
 
   await fs.writeFile(outputAbsolutePath, content, "utf8");
@@ -1724,16 +1788,22 @@ async function executeChatFileCreateTool(
 ) {
   const filename = readRequiredString(args, "filename");
   const content = readOptionalString(args, "content") ?? "";
-  const mimeType = readOptionalString(args, "mimeType") ?? inferMimeType(filename, "text/plain");
+  const mimeType =
+    readOptionalString(args, "mimeType") ??
+    inferMimeType(filename, "text/plain");
   const description = readOptionalString(args, "description");
 
   if (Buffer.byteLength(content, "utf8") > CHAT_FILE_MAX_TEXT_BYTES) {
-    throw new Error(`Content is too large. Maximum is ${CHAT_FILE_MAX_TEXT_BYTES} bytes.`);
+    throw new Error(
+      `Content is too large. Maximum is ${CHAT_FILE_MAX_TEXT_BYTES} bytes.`,
+    );
   }
 
   const safeFilename = sanitizeFileNamePart(filename);
   if (!isLikelyTextFile(safeFilename)) {
-    throw new Error("chat_file_create currently supports text-like filenames only.");
+    throw new Error(
+      "chat_file_create currently supports text-like filenames only.",
+    );
   }
 
   const chatRoot = await findChatWorkspaceRoot(context);
@@ -1743,7 +1813,10 @@ async function executeChatFileCreateTool(
   const outputPath = await safeUniquePath(outputDirectory, safeFilename);
   await fs.writeFile(outputPath, content, "utf8");
   const outputStats = await fs.stat(outputPath);
-  const workspacePath = path.relative(chatRoot.realPath, outputPath).split(path.sep).join("/");
+  const workspacePath = path
+    .relative(chatRoot.realPath, outputPath)
+    .split(path.sep)
+    .join("/");
   const generatedFile: GeneratedFile = {
     id: artifactId,
     name: path.basename(outputPath),

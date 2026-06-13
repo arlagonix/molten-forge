@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { buildApiMessages, buildUserApiContent } from "./direct-provider-client";
-import type { ChatAttachment, ChatMessage, ChatToolResult, ProviderConfig } from "./types";
+import {
+  buildApiMessages,
+  buildUserApiContent,
+} from "./direct-provider-client";
+import type {
+  ChatAttachment,
+  ChatMessage,
+  ChatToolResult,
+  ProviderConfig,
+} from "./types";
 
 const provider: ProviderConfig = {
   id: "local",
@@ -19,7 +27,7 @@ describe("attachment model context", () => {
       kind: "text",
       mimeType: "text/markdown",
       sizeBytes: 42,
-      storagePath: "/tmp/chat-forge/attachments/pending/att-1/notes.md",
+      storagePath: "/tmp/molten-forge/attachments/pending/att-1/notes.md",
       storageMode: "temporary",
       temporary: true,
       extractedText: "Important attachment content.",
@@ -28,13 +36,17 @@ describe("attachment model context", () => {
 
     const content = await buildUserApiContent("Please read it", [attachment]);
     expect(Array.isArray(content)).toBe(true);
-    const text = Array.isArray(content) && content[0].type === "text" ? content[0].text : "";
+    const text =
+      Array.isArray(content) && content[0].type === "text"
+        ? content[0].text
+        : "";
     expect(text).toContain("Attached files available to tools");
-    expect(text).toContain("path: /tmp/chat-forge/attachments/pending/att-1/notes.md");
+    expect(text).toContain(
+      "path: /tmp/molten-forge/attachments/pending/att-1/notes.md",
+    );
     expect(text).toContain("temporary: true");
     expect(text).toContain("Important attachment content.");
   });
-
 
   it("does not inline oversized images visually", async () => {
     const attachment: ChatAttachment = {
@@ -51,7 +63,10 @@ describe("attachment model context", () => {
     const content = await buildUserApiContent("Look at this", [attachment]);
     expect(Array.isArray(content)).toBe(true);
     expect(Array.isArray(content) ? content.length : 0).toBe(1);
-    const text = Array.isArray(content) && content[0].type === "text" ? content[0].text : "";
+    const text =
+      Array.isArray(content) && content[0].type === "text"
+        ? content[0].text
+        : "";
     expect(text).toContain("image not attached visually");
     expect(text).toContain("path: /tmp/huge.png");
   });
@@ -105,7 +120,8 @@ describe("attachment model context", () => {
     expect(apiMessages[1].role).toBe("tool");
     expect(apiMessages[1].content).not.toContain("data:image/png;base64,AAAA");
     expect(apiMessages[2]).toMatchObject({ role: "user" });
-    const userContent = apiMessages[2].role === "user" ? apiMessages[2].content : "";
+    const userContent =
+      apiMessages[2].role === "user" ? apiMessages[2].content : "";
     expect(Array.isArray(userContent)).toBe(true);
     expect(Array.isArray(userContent) && userContent[1]).toMatchObject({
       type: "image_url",

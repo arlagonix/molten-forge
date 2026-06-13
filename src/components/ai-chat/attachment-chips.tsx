@@ -247,7 +247,7 @@ export function AttachmentChips({
     }
 
     try {
-      const result = await window.codeForgeAI?.exportAttachment?.({
+      const result = await window.moltenForgeAI?.exportAttachment?.({
         storagePath: attachment.storagePath,
         name: attachment.name,
       });
@@ -284,7 +284,7 @@ export function AttachmentChips({
     }
 
     try {
-      const dataUrl = await window.codeForgeAI?.readAttachmentDataUrl({
+      const dataUrl = await window.moltenForgeAI?.readAttachmentDataUrl({
         storagePath: attachment.storagePath,
         mimeType: attachment.mimeType,
       });

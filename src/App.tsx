@@ -56,6 +56,12 @@ import {
   WRITE_TOOL,
 } from "@/lib/ai-chat/builtin-tools";
 import {
+  applyNewChatDraftSettings,
+  buildNewChatDraftSettings,
+  getFolderDefaultWorkspaceRoots,
+  type NewChatDraftSettings,
+} from "@/lib/ai-chat/chat-session-actions";
+import {
   createId,
   createNewProvider,
   createProviderId,
@@ -82,11 +88,11 @@ import {
   resolveModeForChat,
 } from "@/lib/ai-chat/modes";
 import {
-  applyNewChatDraftSettings,
-  buildNewChatDraftSettings,
-  getFolderDefaultWorkspaceRoots,
-  type NewChatDraftSettings,
-} from "@/lib/ai-chat/chat-session-actions";
+  getProjectInstructionsSnapshot,
+  shouldRefreshProjectInstructions,
+  type ProjectInstructionsSnapshot,
+  type ProjectInstructionsState,
+} from "@/lib/ai-chat/project-instructions";
 import { defaultProvider } from "@/lib/ai-chat/provider-presets";
 import {
   getEffectiveAgentPermission,
@@ -127,12 +133,6 @@ import {
   saveToolsSettings,
 } from "@/lib/ai-chat/storage";
 import { generateTitleFromChatContext } from "@/lib/ai-chat/title-generation";
-import {
-  getProjectInstructionsSnapshot,
-  shouldRefreshProjectInstructions,
-  type ProjectInstructionsSnapshot,
-  type ProjectInstructionsState,
-} from "@/lib/ai-chat/project-instructions";
 import type {
   AgentsSettings,
   AppSettings,
@@ -161,12 +161,12 @@ import { useTheme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
-const APP_NAME = "Chat Forge";
+const APP_NAME = "Molten Forge";
 const APP_VERSION_LABEL = `v${__APP_VERSION__}`;
 const APP_TITLE = `${APP_NAME} ${APP_VERSION_LABEL}`;
 
-const SIDEBAR_COLLAPSED_STORAGE_KEY = "chat-forge-sidebar-collapsed";
-const COMPOSER_DRAFTS_STORAGE_KEY = "chat-forge-composer-drafts";
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "molten-forge-sidebar-collapsed";
+const COMPOSER_DRAFTS_STORAGE_KEY = "molten-forge-composer-drafts";
 // Draft-state key for the unsaved "New chat" composer. A real chat is only
 // created (and persisted) once the user sends the first message.
 const NEW_CHAT_DRAFT_KEY = "__new_chat_draft__";
@@ -266,11 +266,12 @@ function migrateMcpToolPermissions(
       if (!isValidMcpExposedToolName(exposedName)) continue;
 
       const previousTool = previousServer?.tools?.[tool.originalName];
-      const previousExposedName = previousServer && previousTool
-        ? getStoredMcpPermissionToolName(previousServer, previousTool)
-        : tool.exposedName && tool.exposedName !== exposedName
-          ? tool.exposedName
-          : undefined;
+      const previousExposedName =
+        previousServer && previousTool
+          ? getStoredMcpPermissionToolName(previousServer, previousTool)
+          : tool.exposedName && tool.exposedName !== exposedName
+            ? tool.exposedName
+            : undefined;
 
       if (
         previousExposedName &&
@@ -279,7 +280,8 @@ function migrateMcpToolPermissions(
         nextToolPermissions[previousExposedName] &&
         !nextToolPermissions[exposedName]
       ) {
-        nextToolPermissions[exposedName] = nextToolPermissions[previousExposedName];
+        nextToolPermissions[exposedName] =
+          nextToolPermissions[previousExposedName];
         changed = true;
       }
 
@@ -313,7 +315,6 @@ function migrateMcpToolPermissions(
     toolPermissions: nextToolPermissions,
   };
 }
-
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -349,9 +350,8 @@ export default function Home() {
   const [loadedSkills, setLoadedSkills] = useState<LoadedSkillInfo[]>([]);
   const [loadedAgents, setLoadedAgents] = useState<LoadedAgentInfo[]>([]);
   const [chats, setChats] = useState<ChatSession[]>([]);
-  const [projectInstructionsByChatId, setProjectInstructionsByChatId] = useState<
-    Record<string, ProjectInstructionsState | undefined>
-  >({});
+  const [projectInstructionsByChatId, setProjectInstructionsByChatId] =
+    useState<Record<string, ProjectInstructionsState | undefined>>({});
   const projectInstructionsByChatIdRef = useRef<
     Record<string, ProjectInstructionsState | undefined>
   >({});
@@ -477,7 +477,7 @@ export default function Home() {
   }, [appSettings.fontFamily]);
 
   useEffect(() => {
-    return window.chatForgeFind?.onFoundInPage((result) => {
+    return window.moltenForgeFind?.onFoundInPage((result) => {
       setFindResult({
         activeMatchOrdinal: result.activeMatchOrdinal,
         matches: result.matches,
@@ -517,7 +517,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!findBarOpen) {
-      void window.chatForgeFind?.stopFindInPage("clearSelection");
+      void window.moltenForgeFind?.stopFindInPage("clearSelection");
       setFindResult(EMPTY_FIND_RESULT);
       return;
     }
@@ -554,17 +554,17 @@ export default function Home() {
     const trimmedQuery = query.trim();
 
     if (!trimmedQuery) {
-      void window.chatForgeFind?.stopFindInPage("clearSelection");
+      void window.moltenForgeFind?.stopFindInPage("clearSelection");
       setFindResult(EMPTY_FIND_RESULT);
       return;
     }
 
-    if (!window.chatForgeFind) {
+    if (!window.moltenForgeFind) {
       setFindResult(EMPTY_FIND_RESULT);
       return;
     }
 
-    void window.chatForgeFind.findInPage({
+    void window.moltenForgeFind.findInPage({
       text: trimmedQuery,
       forward: options.forward ?? true,
       findNext: options.findNext ?? false,
@@ -1423,7 +1423,6 @@ export default function Home() {
     toast(message, description ? { description } : undefined);
   }
 
-
   function getProjectInstructionsPathFromState(
     state: ProjectInstructionsState | undefined,
   ) {
@@ -1578,7 +1577,12 @@ export default function Home() {
   useEffect(() => {
     if (!activeChat || isNewChatDraft) return;
     void ensureProjectInstructionsForChat(activeChat);
-  }, [activeChat?.id, activeChatVisibleWorkspaceRoots[0]?.path, isNewChatDraft, ensureProjectInstructionsForChat]);
+  }, [
+    activeChat?.id,
+    activeChatVisibleWorkspaceRoots[0]?.path,
+    isNewChatDraft,
+    ensureProjectInstructionsForChat,
+  ]);
 
   const activeChatIdRef = useRef(activeChatId);
 
@@ -1601,19 +1605,19 @@ export default function Home() {
   }, [chats, generatingChatIds]);
 
   function getToolsBridge() {
-    if (!window.chatForgeTools) {
+    if (!window.moltenForgeTools) {
       throw new Error("Electron tools bridge is not available.");
     }
 
-    return window.chatForgeTools;
+    return window.moltenForgeTools;
   }
 
   function getWorkspaceBridge() {
-    if (!window.chatForgeWorkspace) {
+    if (!window.moltenForgeWorkspace) {
       throw new Error("Electron workspace bridge is not available.");
     }
 
-    return window.chatForgeWorkspace;
+    return window.moltenForgeWorkspace;
   }
 
   async function addActiveChatWorkspaceRoot() {
@@ -1881,7 +1885,7 @@ export default function Home() {
         executableTools.find((candidate) => candidate.name === toolName);
       const executionId = createId();
       const isMcpTool = tool?.source === "mcp";
-      const bridge = isMcpTool ? window.chatForgeMcp : getToolsBridge();
+      const bridge = isMcpTool ? window.moltenForgeMcp : getToolsBridge();
       const skillWorkspaceRoots: ChatWorkspaceRoot[] = loadedSkills
         .filter((skill) => skill.directoryPath)
         .map((skill, index) => ({
@@ -1945,7 +1949,7 @@ export default function Home() {
         });
 
         if (isMcpTool) {
-          window.chatForgeMcp
+          window.moltenForgeMcp
             ?.executeTool({ executionId, tool, args })
             .then(settleResolve, settleReject);
           return;
@@ -2308,9 +2312,7 @@ export default function Home() {
     createNewChat();
   }
 
-  function setActiveOrDraftChatThinkingMode(
-    thinkingMode: ChatThinkingMode,
-  ) {
+  function setActiveOrDraftChatThinkingMode(thinkingMode: ChatThinkingMode) {
     if (isNewChatDraft) {
       setNewChatDraftSettings((currentSettings) => ({
         ...(currentSettings ?? {}),
@@ -2773,7 +2775,7 @@ export default function Home() {
       <main className="flex h-dvh items-center justify-center bg-background text-foreground">
         <div className="flex flex-col items-center gap-4 text-center">
           <div
-            className="chat-forge-loading-text text-muted-foreground"
+            className="molten-forge-loading-text text-muted-foreground"
             aria-label="Loading app data"
           />
         </div>

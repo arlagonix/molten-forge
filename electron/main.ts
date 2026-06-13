@@ -455,7 +455,7 @@ const WEB_FETCH_ALLOWED_CONTENT_TYPES = new Set([
   "text/xml",
 ]);
 const TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
-const APP_TITLE = `Chat Forge v${app.getVersion()}`;
+const APP_TITLE = `Molten Forge v${app.getVersion()}`;
 let win: BrowserWindow | null = null;
 
 function normalizeBaseUrl(baseUrl: string) {
@@ -731,7 +731,8 @@ function normalizeToolsSettings(value: unknown): ToolsSettings {
 function normalizeSkillsSettings(value: unknown): SkillsSettings {
   if (!isPlainObject(value)) return DEFAULT_SKILLS_SETTINGS;
 
-  const permissionModelVersion = value.permissionModelVersion === 2 ? 2 : undefined;
+  const permissionModelVersion =
+    value.permissionModelVersion === 2 ? 2 : undefined;
   const skillsPermission: FeaturePermission =
     permissionModelVersion === 2
       ? normalizeFeaturePermission(value.skillsPermission, "custom")
@@ -971,10 +972,11 @@ function normalizeSkillDefinition(candidate: unknown): SkillDefinition {
     })(),
     sourcePath: safeString(source.sourcePath).trim() || undefined,
     workspaceRoots: normalizeWorkspaceRoots(source.workspaceRoots).map(
-      (root) => ({
-        ...root,
-        createdAt: root.createdAt ?? new Date(0).toISOString(),
-      }) satisfies ChatWorkspaceRoot,
+      (root) =>
+        ({
+          ...root,
+          createdAt: root.createdAt ?? new Date(0).toISOString(),
+        }) satisfies ChatWorkspaceRoot,
     ),
     fileTree: Array.isArray(source.fileTree)
       ? source.fileTree
@@ -2011,7 +2013,7 @@ const STORAGE_SCHEMA_VERSION = 1;
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
 
 function getStorageRoot() {
-  return path.join(app.getPath("userData"), "chat-forge-data");
+  return path.join(app.getPath("userData"), "molten-forge-data");
 }
 
 function getStoragePaths() {
@@ -2033,11 +2035,15 @@ function getStoragePaths() {
 }
 
 function getTempAttachmentRoot() {
-  return path.join(app.getPath("temp"), "chat-forge", "attachments");
+  return path.join(app.getPath("temp"), "molten-forge", "attachments");
 }
 
 function getPendingTempAttachmentPath(id: string) {
-  return path.join(getTempAttachmentRoot(), "pending", sanitizeFileNamePart(id));
+  return path.join(
+    getTempAttachmentRoot(),
+    "pending",
+    sanitizeFileNamePart(id),
+  );
 }
 
 const CHAT_WORKSPACE_ROOT_ID = "chat";
@@ -2234,7 +2240,7 @@ async function exportManagedFile(request: unknown) {
     safeString(value.name).trim() || path.basename(storagePath),
   );
   const sourcePath = storagePath
-    ? normalizeManagedFilePath(storagePath) ?? path.resolve(storagePath)
+    ? (normalizeManagedFilePath(storagePath) ?? path.resolve(storagePath))
     : undefined;
   if (!sourcePath) throw new Error("File is unavailable.");
   const sourceStats = await fs.stat(sourcePath);
@@ -2478,9 +2484,12 @@ function inferMimeType(
     ".webp": "image/webp",
     ".gif": "image/gif",
     ".pdf": "application/pdf",
-    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".docx":
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx":
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pptx":
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     ".zip": "application/zip",
     ".tar": "application/x-tar",
     ".tar.gz": "application/gzip",
@@ -2562,7 +2571,10 @@ function isLikelyBinary(buffer: Buffer) {
   return nonPrintable / sample.length > 0.3;
 }
 
-async function storeTemporaryAttachmentBuffer(buffer: Buffer, originalName: string) {
+async function storeTemporaryAttachmentBuffer(
+  buffer: Buffer,
+  originalName: string,
+) {
   const id = randomUUID();
   const safeName = sanitizeFileNamePart(path.basename(originalName));
   const directory = getPendingTempAttachmentPath(id);
@@ -2573,13 +2585,20 @@ async function storeTemporaryAttachmentBuffer(buffer: Buffer, originalName: stri
 }
 
 function isPathInsideRoot(rootPath: string, candidatePath: string) {
-  const relative = path.relative(path.resolve(rootPath), path.resolve(candidatePath));
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+  const relative = path.relative(
+    path.resolve(rootPath),
+    path.resolve(candidatePath),
+  );
+  return (
+    relative === "" ||
+    (!relative.startsWith("..") && !path.isAbsolute(relative))
+  );
 }
 
 function getAttachmentStorageMode(storagePath: string | undefined) {
   if (!storagePath) return undefined;
-  if (isPathInsideRoot(getTempAttachmentRoot(), storagePath)) return "temporary" as const;
+  if (isPathInsideRoot(getTempAttachmentRoot(), storagePath))
+    return "temporary" as const;
   if (normalizeManagedFilePath(storagePath)) return "managed" as const;
   return "original" as const;
 }
@@ -2588,7 +2607,8 @@ async function readAttachmentInput(input: AttachmentInput) {
   if ("path" in input && typeof input.path === "string") {
     const resolvedPath = path.resolve(input.path);
     const stats = await fs.stat(resolvedPath);
-    if (!stats.isFile()) throw new Error(`Attachment path is not a file: ${input.path}`);
+    if (!stats.isFile())
+      throw new Error(`Attachment path is not a file: ${input.path}`);
     return {
       name: input.name || path.basename(resolvedPath),
       sourcePath: resolvedPath,
@@ -2762,7 +2782,9 @@ async function processImageAttachment({
     sizeBytes,
     storagePath: stored.storagePath,
     ...(sizeBytes > ATTACHMENT_LIMITS.maxImageBytes
-      ? { error: `Image was not inserted visually because it exceeds ${Math.round(ATTACHMENT_LIMITS.maxImageBytes / 1024 / 1024)} MB.` }
+      ? {
+          error: `Image was not inserted visually because it exceeds ${Math.round(ATTACHMENT_LIMITS.maxImageBytes / 1024 / 1024)} MB.`,
+        }
       : {}),
     tokenEstimate: 0,
   });
@@ -2904,11 +2926,29 @@ async function processPdfAttachment({
 async function convertOfficeAttachment(filePath: string) {
   const officeParser = await import("officeparser");
   const parseOfficeAsync =
-    (officeParser as { parseOfficeAsync?: (filePath: string, config?: unknown) => Promise<unknown> }).parseOfficeAsync ??
-    ((officeParser as { default?: { parseOfficeAsync?: (filePath: string, config?: unknown) => Promise<unknown> } }).default?.parseOfficeAsync);
+    (
+      officeParser as {
+        parseOfficeAsync?: (
+          filePath: string,
+          config?: unknown,
+        ) => Promise<unknown>;
+      }
+    ).parseOfficeAsync ??
+    (
+      officeParser as {
+        default?: {
+          parseOfficeAsync?: (
+            filePath: string,
+            config?: unknown,
+          ) => Promise<unknown>;
+        };
+      }
+    ).default?.parseOfficeAsync;
 
   if (!parseOfficeAsync) {
-    throw new Error("officeparser is installed but does not expose parseOfficeAsync.");
+    throw new Error(
+      "officeparser is installed but does not expose parseOfficeAsync.",
+    );
   }
 
   const parsed = await parseOfficeAsync(filePath);
@@ -2971,7 +3011,9 @@ async function processOfficeAttachment({
     storagePath: stored.storagePath,
     extractedText: capped.text,
     truncated: capped.truncated,
-    ...(extracted.trim() ? {} : { error: "No readable text was extracted from this Office document." }),
+    ...(extracted.trim()
+      ? {}
+      : { error: "No readable text was extracted from this Office document." }),
   });
   attachment.tokenEstimate = estimateAttachmentTokens(attachment);
   return attachment;
@@ -3032,15 +3074,33 @@ async function processAttachmentBuffer({
 
   try {
     if (kind === "image") {
-      return processImageAttachment({ name, buffer, sourcePath, sizeBytes, mimeType });
+      return processImageAttachment({
+        name,
+        buffer,
+        sourcePath,
+        sizeBytes,
+        mimeType,
+      });
     }
 
     if (kind === "pdf") {
-      return processPdfAttachment({ name, buffer, sourcePath, sizeBytes, state });
+      return processPdfAttachment({
+        name,
+        buffer,
+        sourcePath,
+        sizeBytes,
+        state,
+      });
     }
 
     if (kind === "office") {
-      return processOfficeAttachment({ name, buffer, sourcePath, sizeBytes, state });
+      return processOfficeAttachment({
+        name,
+        buffer,
+        sourcePath,
+        sizeBytes,
+        state,
+      });
     }
 
     if (kind === "archive") {
@@ -3054,7 +3114,14 @@ async function processAttachmentBuffer({
       });
     }
 
-    return processTextAttachment({ name, buffer, sourcePath, sizeBytes, mimeType, state });
+    return processTextAttachment({
+      name,
+      buffer,
+      sourcePath,
+      sizeBytes,
+      mimeType,
+      state,
+    });
   } catch (error) {
     return makeAttachmentError({
       name,
@@ -3107,7 +3174,10 @@ async function processArchiveAttachment({
   if (sourcePath) {
     stored = { id: randomUUID(), storagePath: sourcePath };
   } else {
-    stored = await storeTemporaryAttachmentBuffer(buffer ?? Buffer.alloc(0), name);
+    stored = await storeTemporaryAttachmentBuffer(
+      buffer ?? Buffer.alloc(0),
+      name,
+    );
   }
 
   const archive = createPathBackedAttachment({
@@ -3125,7 +3195,11 @@ async function processArchiveAttachment({
     return archive;
   }
 
-  const extractRoot = path.join(getTempAttachmentRoot(), "extracted", stored.id);
+  const extractRoot = path.join(
+    getTempAttachmentRoot(),
+    "extracted",
+    stored.id,
+  );
   try {
     await fs.rm(extractRoot, { recursive: true, force: true });
     await fs.mkdir(extractRoot, { recursive: true });
@@ -3136,28 +3210,45 @@ async function processArchiveAttachment({
     }
 
     const children: ChatAttachment[] = [];
-    for (const filePath of files.slice(0, ATTACHMENT_LIMITS.maxEntriesPerArchive)) {
+    for (const filePath of files.slice(
+      0,
+      ATTACHMENT_LIMITS.maxEntriesPerArchive,
+    )) {
       if (state.totalEntries >= ATTACHMENT_LIMITS.maxEntriesTotal) {
-        pushWarning(state, `Only the first ${ATTACHMENT_LIMITS.maxEntriesTotal} archive entries were processed.`);
+        pushWarning(
+          state,
+          `Only the first ${ATTACHMENT_LIMITS.maxEntriesTotal} archive entries were processed.`,
+        );
         break;
       }
       const stats = await fs.stat(filePath);
       if (!stats.isFile()) continue;
-      if (state.totalExtractedBytes + stats.size > ATTACHMENT_LIMITS.maxExtractedBytesTotal) {
-        pushWarning(state, `Archive extraction stopped after ${Math.round(ATTACHMENT_LIMITS.maxExtractedBytesTotal / 1024 / 1024)} MB of extracted files.`);
+      if (
+        state.totalExtractedBytes + stats.size >
+        ATTACHMENT_LIMITS.maxExtractedBytesTotal
+      ) {
+        pushWarning(
+          state,
+          `Archive extraction stopped after ${Math.round(ATTACHMENT_LIMITS.maxExtractedBytesTotal / 1024 / 1024)} MB of extracted files.`,
+        );
         break;
       }
       state.totalEntries += 1;
       state.totalExtractedBytes += stats.size;
-      const childName = path.relative(extractRoot, filePath).split(path.sep).join("/");
-      children.push(await processAttachmentBuffer({
-        name: childName,
-        sourcePath: filePath,
-        sizeBytes: stats.size,
-        mimeType: inferMimeType(childName),
-        state,
-        depth: depth + 1,
-      }));
+      const childName = path
+        .relative(extractRoot, filePath)
+        .split(path.sep)
+        .join("/");
+      children.push(
+        await processAttachmentBuffer({
+          name: childName,
+          sourcePath: filePath,
+          sizeBytes: stats.size,
+          mimeType: inferMimeType(childName),
+          state,
+          depth: depth + 1,
+        }),
+      );
     }
     archive.children = children;
     archive.tokenEstimate = estimateAttachmentTokens(archive);
@@ -3224,7 +3315,10 @@ function normalizeDeletableAttachmentStoragePath(storagePath: string) {
   const resolvedStoragePath = path.resolve(storagePath);
   for (const storageRoot of deletableRoots) {
     const relative = path.relative(storageRoot, resolvedStoragePath);
-    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+    if (
+      relative === "" ||
+      (!relative.startsWith("..") && !path.isAbsolute(relative))
+    ) {
       return { storageRoot, resolvedStoragePath };
     }
   }
@@ -3232,7 +3326,8 @@ function normalizeDeletableAttachmentStoragePath(storagePath: string) {
 }
 
 function normalizeAttachmentStoragePath(storagePath: string) {
-  return normalizeDeletableAttachmentStoragePath(storagePath)?.resolvedStoragePath;
+  return normalizeDeletableAttachmentStoragePath(storagePath)
+    ?.resolvedStoragePath;
 }
 
 function collectNormalizedAttachmentStoragePaths(value: unknown) {
@@ -3279,7 +3374,10 @@ async function deleteAttachmentStoragePath(storagePath: string) {
   let deleteTarget = path.dirname(normalized.resolvedStoragePath);
   const tempRoot = path.resolve(getTempAttachmentRoot());
   if (normalized.storageRoot === tempRoot) {
-    const relativeToTempRoot = path.relative(tempRoot, normalized.resolvedStoragePath);
+    const relativeToTempRoot = path.relative(
+      tempRoot,
+      normalized.resolvedStoragePath,
+    );
     const [bucket, ownerId] = relativeToTempRoot.split(path.sep);
     if ((bucket === "pending" || bucket === "extracted") && ownerId) {
       deleteTarget = path.join(tempRoot, bucket, ownerId);
@@ -4294,7 +4392,7 @@ async function openJsonToolsFolder() {
 // ---------------------------------------------------------------------------
 // Editable filesystem skill discovery.
 //
-// Skills are folders with SKILL.md. Chat Forge discovers the global
+// Skills are folders with SKILL.md. Molten Forge discovers the global
 // ~/.agents/skills folder plus the selected workspace .agents/skills folder,
 // lets the user edit the raw SKILL.md, and creates/deletes the whole skill
 // folder when requested.
@@ -4367,21 +4465,27 @@ function validateSkillName(value: string) {
     );
   }
   if (name.toLowerCase() === "skill") {
-    throw new Error("skill is a built-in tool name and cannot be used by a skill.");
+    throw new Error(
+      "skill is a built-in tool name and cannot be used by a skill.",
+    );
   }
   if (name === "." || name === ".." || INVALID_SKILL_FOLDER_CHARS.test(name)) {
-    throw new Error("Skill name cannot contain path separators or reserved characters.");
+    throw new Error(
+      "Skill name cannot contain path separators or reserved characters.",
+    );
   }
   return name;
 }
 
-async function readSkillFolderTree(folderPath: string): Promise<SkillFolderTreeItem[]> {
+async function readSkillFolderTree(
+  folderPath: string,
+): Promise<SkillFolderTreeItem[]> {
   try {
     const entries = await fs.readdir(folderPath, { withFileTypes: true });
     return entries
       .map((entry) => ({
         name: entry.name,
-        type: entry.isDirectory() ? "directory" as const : "file" as const,
+        type: entry.isDirectory() ? ("directory" as const) : ("file" as const),
       }))
       .sort((left, right) => {
         if (left.name === SKILL_MANIFEST_FILENAME) return -1;
@@ -4566,7 +4670,8 @@ function annotateSkillConflicts(records: SkillDefinition[]) {
 }
 
 async function loadJsonSkills(request?: unknown) {
-  const { globalRecords, workspaceRecords } = await discoverSkillRecords(request);
+  const { globalRecords, workspaceRecords } =
+    await discoverSkillRecords(request);
   const workspaceSkillNames = new Set(
     workspaceRecords.map((record) => record.skill.name.toLowerCase()),
   );
@@ -4601,8 +4706,9 @@ function getSkillSaveRoot(skill: SkillDefinition) {
   return path.resolve(getGlobalSkillSearchDirs()[0]);
 }
 
-
-function getWorkspaceRootFromSkillsDir(skillsDir: string): ChatWorkspaceRoot | undefined {
+function getWorkspaceRootFromSkillsDir(
+  skillsDir: string,
+): ChatWorkspaceRoot | undefined {
   const resolvedSkillsDir = path.resolve(skillsDir);
   if (path.basename(resolvedSkillsDir) !== "skills") return undefined;
   const agentsDir = path.dirname(resolvedSkillsDir);
@@ -4628,14 +4734,21 @@ function mergeWorkspaceRootsForSkillSave(
     if (!skillsDir) return;
     const root = getWorkspaceRootFromSkillsDir(skillsDir);
     if (!root) return;
-    if (roots.some((candidate) => getSkillPathKey(candidate.path) === getSkillPathKey(root.path))) {
+    if (
+      roots.some(
+        (candidate) =>
+          getSkillPathKey(candidate.path) === getSkillPathKey(root.path),
+      )
+    ) {
       return;
     }
     roots.push(root);
   };
 
-  if (targetSourceKind === "workspace") maybeAddRootFromSkillsDir(targetSourcePath);
-  if (skill.sourceKind === "workspace") maybeAddRootFromSkillsDir(skill.sourcePath);
+  if (targetSourceKind === "workspace")
+    maybeAddRootFromSkillsDir(targetSourcePath);
+  if (skill.sourceKind === "workspace")
+    maybeAddRootFromSkillsDir(skill.sourcePath);
 
   return roots;
 }
@@ -4666,7 +4779,9 @@ async function saveJsonSkill(value: unknown, _previousName?: unknown) {
   if (!manifestContent.trim()) throw new Error("SKILL.md content is required.");
 
   const parsed = parseSkillManifest(manifestContent);
-  const effectiveName = validateSkillName(parsed.frontmatter.name || skill.name);
+  const effectiveName = validateSkillName(
+    parsed.frontmatter.name || skill.name,
+  );
   const sourceKind = skill.sourceKind === "workspace" ? "workspace" : "global";
   const sourcePath = getSkillSaveRoot({ ...skill, sourceKind });
   const currentDirectoryPath = skill.directoryPath
@@ -4675,19 +4790,28 @@ async function saveJsonSkill(value: unknown, _previousName?: unknown) {
   const existing = Boolean(currentDirectoryPath);
   const sourcePathKey = getSkillPathKey(sourcePath);
   const currentDirectoryPathKey = getSkillPathKey(currentDirectoryPath);
-  const isRootSkill = Boolean(currentDirectoryPathKey) && currentDirectoryPathKey === sourcePathKey;
+  const isRootSkill =
+    Boolean(currentDirectoryPathKey) &&
+    currentDirectoryPathKey === sourcePathKey;
 
   await fs.mkdir(sourcePath, { recursive: true });
   await assertSkillNameUnique({
     name: effectiveName,
     currentDirectoryPath,
     request: {
-      workspaceRoots: mergeWorkspaceRootsForSkillSave(skill, sourceKind, sourcePath),
+      workspaceRoots: mergeWorkspaceRootsForSkillSave(
+        skill,
+        sourceKind,
+        sourcePath,
+      ),
     },
   });
 
   const targetDirectoryPath = path.resolve(sourcePath, effectiveName);
-  if (!targetDirectoryPath.startsWith(sourcePath + path.sep) && targetDirectoryPath !== sourcePath) {
+  if (
+    !targetDirectoryPath.startsWith(sourcePath + path.sep) &&
+    targetDirectoryPath !== sourcePath
+  ) {
     throw new Error("Skill path is outside the skills folder.");
   }
 
@@ -4697,23 +4821,40 @@ async function saveJsonSkill(value: unknown, _previousName?: unknown) {
     try {
       await fs.mkdir(targetDirectoryPath, { recursive: false });
     } catch (error) {
-      const code = typeof error === "object" && error && "code" in error ? (error as { code?: string }).code : undefined;
-      if (code === "EEXIST") throw new Error(`A skill folder named "${effectiveName}" already exists.`);
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? (error as { code?: string }).code
+          : undefined;
+      if (code === "EEXIST")
+        throw new Error(
+          `A skill folder named "${effectiveName}" already exists.`,
+        );
       throw error;
     }
     finalDirectoryPath = targetDirectoryPath;
-  } else if (!isRootSkill && currentDirectoryPath && getSkillPathKey(currentDirectoryPath) !== getSkillPathKey(targetDirectoryPath)) {
+  } else if (
+    !isRootSkill &&
+    currentDirectoryPath &&
+    getSkillPathKey(currentDirectoryPath) !==
+      getSkillPathKey(targetDirectoryPath)
+  ) {
     try {
       await fs.rename(currentDirectoryPath, targetDirectoryPath);
       renamed = true;
       finalDirectoryPath = targetDirectoryPath;
     } catch (error) {
-      throw new Error(`Failed to rename skill folder: ${getErrorMessage(error)}`);
+      throw new Error(
+        `Failed to rename skill folder: ${getErrorMessage(error)}`,
+      );
     }
   }
 
   try {
-    await fs.writeFile(path.join(finalDirectoryPath, SKILL_MANIFEST_FILENAME), manifestContent, "utf8");
+    await fs.writeFile(
+      path.join(finalDirectoryPath, SKILL_MANIFEST_FILENAME),
+      manifestContent,
+      "utf8",
+    );
   } catch (error) {
     if (renamed && currentDirectoryPath) {
       try {
@@ -5287,7 +5428,9 @@ ipcMain.handle(
       throw new Error("Attachment storage path is required.");
     }
 
-    const resolvedStoragePath = normalizeManagedFilePath(request.storagePath) ?? path.resolve(request.storagePath);
+    const resolvedStoragePath =
+      normalizeManagedFilePath(request.storagePath) ??
+      path.resolve(request.storagePath);
     const stats = await fs.stat(resolvedStoragePath);
     if (!stats.isFile()) {
       throw new Error("Attachment path is not a file.");
@@ -5565,7 +5708,9 @@ ipcMain.handle("tools:execute-stream", async (event, request: unknown) => {
       {
         workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
         allowedExactFilePaths: Array.isArray(value.allowedExactFilePaths)
-          ? value.allowedExactFilePaths.filter((item): item is string => typeof item === "string")
+          ? value.allowedExactFilePaths.filter(
+              (item): item is string => typeof item === "string",
+            )
           : [],
         allowedReadRoots: normalizeWorkspaceRoots(value.allowedReadRoots),
         signal: controller.signal,
@@ -5598,7 +5743,9 @@ ipcMain.handle("tools:execute", async (_event, request: unknown) => {
     return await executeToolManifest(value.name, value.args, {
       workspaceRoots: normalizeWorkspaceRoots(value.workspaceRoots),
       allowedExactFilePaths: Array.isArray(value.allowedExactFilePaths)
-        ? value.allowedExactFilePaths.filter((item): item is string => typeof item === "string")
+        ? value.allowedExactFilePaths.filter(
+            (item): item is string => typeof item === "string",
+          )
         : [],
       allowedReadRoots: normalizeWorkspaceRoots(value.allowedReadRoots),
       signal: controller.signal,
@@ -5686,8 +5833,12 @@ ipcMain.handle("workspace:open-folder", async (_event, folderPath: unknown) =>
   openWorkspaceFolder(folderPath),
 );
 
-ipcMain.handle("workspace:load-project-instructions", async (_event, request: unknown) =>
-  readProjectInstructionsForWorkspace(normalizeProjectInstructionsRequest(request)),
+ipcMain.handle(
+  "workspace:load-project-instructions",
+  async (_event, request: unknown) =>
+    readProjectInstructionsForWorkspace(
+      normalizeProjectInstructionsRequest(request),
+    ),
 );
 
 ipcMain.handle("tools:test", async (_event, request: unknown) => {

@@ -631,7 +631,7 @@ export function ToolExecutionBlock({
     }
 
     try {
-      const result = await window.codeForgeAI?.exportAttachment?.({
+      const result = await window.moltenForgeAI?.exportAttachment?.({
         storagePath,
         name: file.name,
       });

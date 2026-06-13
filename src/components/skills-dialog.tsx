@@ -655,7 +655,7 @@ export const SkillsDialog = memo(function SkillsDialog({
 
   const openSelectedSkillFolder = useCallback(() => {
     if (!selectedSkill?.directoryPath) return;
-    const bridge = window.chatForgeWorkspace;
+    const bridge = window.moltenForgeWorkspace;
     if (!bridge) {
       showError("Workspace bridge is unavailable.");
       return;

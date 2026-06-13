@@ -2,11 +2,9 @@ import {
   AlertTriangle,
   BookOpen,
   Bot,
-  Lock,
   Paperclip,
   Send,
   Square,
-  Wrench,
 } from "lucide-react";
 import type { ClipboardEvent, DragEvent, FormEvent, ReactNode } from "react";
 import {
@@ -270,7 +268,9 @@ export const ChatComposer = memo(
       if (!activeMention || disabled || isSending) return [];
 
       const options: ToolMentionOption[] =
-        activeMention.type === "skill" ? skillMentionOptions : agentMentionOptions;
+        activeMention.type === "skill"
+          ? skillMentionOptions
+          : agentMentionOptions;
       const query = activeMention.query.trim().toLowerCase();
       const filteredOptions = query
         ? options.filter((option) => option.name.toLowerCase().includes(query))
@@ -415,14 +415,14 @@ export const ChatComposer = memo(
 
     async function addFiles(inputs: AttachmentInput[]) {
       if (!inputs.length) return;
-      if (!window.codeForgeAI?.processAttachments) {
+      if (!window.moltenForgeAI?.processAttachments) {
         toast.error("Attachment processing is not available.");
         return;
       }
 
       setIsProcessingAttachments(true);
       try {
-        const result = await window.codeForgeAI.processAttachments(inputs);
+        const result = await window.moltenForgeAI.processAttachments(inputs);
         onAttachmentsChange([...attachments, ...result.attachments]);
         for (const warning of result.warnings ?? []) {
           toast.warning(warning);
@@ -439,11 +439,11 @@ export const ChatComposer = memo(
     }
 
     async function handlePickAttachments() {
-      if (!window.codeForgeAI?.pickAttachments) {
+      if (!window.moltenForgeAI?.pickAttachments) {
         toast.error("File picker is not available.");
         return;
       }
-      const picked = await window.codeForgeAI.pickAttachments();
+      const picked = await window.moltenForgeAI.pickAttachments();
       await addFiles(picked);
     }
 
@@ -457,7 +457,7 @@ export const ChatComposer = memo(
 
     function getFileSystemPath(file: File) {
       return (
-        window.codeForgeAI?.getPathForFile?.(file) ||
+        window.moltenForgeAI?.getPathForFile?.(file) ||
         (file as File & { path?: string }).path ||
         ""
       );
@@ -511,10 +511,11 @@ export const ChatComposer = memo(
       );
 
       const clipboardFilePaths = !files.length
-        ? (window.codeForgeAI?.readClipboardFilePathsSync?.() ?? [])
+        ? (window.moltenForgeAI?.readClipboardFilePathsSync?.() ?? [])
         : [];
 
-      if (!files.length && !clipboardFilePaths.length && !hasFileClipboardHint) return;
+      if (!files.length && !clipboardFilePaths.length && !hasFileClipboardHint)
+        return;
 
       event.preventDefault();
       if (files.length) {
@@ -528,7 +529,7 @@ export const ChatComposer = memo(
       try {
         const paths = clipboardFilePaths.length
           ? clipboardFilePaths
-          : ((await window.codeForgeAI?.readClipboardFilePaths?.()) ?? []);
+          : ((await window.moltenForgeAI?.readClipboardFilePaths?.()) ?? []);
         if (!paths.length) return;
         await addFiles(
           paths.map((filePath) => ({
@@ -619,8 +620,9 @@ export const ChatComposer = memo(
             {hasImageAttachments && !supportsVision && (
               <div className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="size-3.5" />
-                This model is not marked as vision-capable. Images will still
-                be sent, but the model may ignore them or the provider may reject the request.
+                This model is not marked as vision-capable. Images will still be
+                sent, but the model may ignore them or the provider may reject
+                the request.
               </div>
             )}
             <div className="relative">
@@ -640,14 +642,17 @@ export const ChatComposer = memo(
                 >
                   {mentionSuggestions.map((option, index) => {
                     const isSelected = index === selectedMentionSuggestionIndex;
-                    const Icon = activeMention?.type === "skill" ? BookOpen : Bot;
+                    const Icon =
+                      activeMention?.type === "skill" ? BookOpen : Bot;
 
                     return (
                       <button
                         key={option.name}
                         type="button"
                         data-mention-suggestion-index={index}
-                        onMouseEnter={() => setSelectedMentionSuggestionIndex(index)}
+                        onMouseEnter={() =>
+                          setSelectedMentionSuggestionIndex(index)
+                        }
                         onMouseDown={(event) => {
                           event.preventDefault();
                           applyMentionSuggestion(option.name);

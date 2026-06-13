@@ -31,7 +31,7 @@ import type {
   ToolsSettings,
 } from "./types";
 
-const DB_NAME = "chat-forge";
+const DB_NAME = "molten-forge";
 const DB_VERSION = 1;
 const KV_STORE = "settings";
 const CHATS_STORE = "chats";
@@ -525,8 +525,7 @@ export function normalizeAppSettings(
     fontFamily: value?.fontFamily === "mono" ? "mono" : "sans",
     chatFolders: normalizeChatFolders(value?.chatFolders),
     thinkingAutoCollapse: value?.thinkingAutoCollapse ?? true,
-    renderMarkdownWhileStreaming:
-      value?.renderMarkdownWhileStreaming ?? true,
+    renderMarkdownWhileStreaming: value?.renderMarkdownWhileStreaming ?? true,
   };
 }
 
@@ -665,8 +664,8 @@ function normalizeMcpSettings(
 
 function getJsonStorageApi() {
   return typeof window !== "undefined"
-    ? (window as Window & { chatForgeStorage?: ChatForgeStorageApi })
-        .chatForgeStorage
+    ? (window as Window & { moltenForgeStorage?: ChatForgeStorageApi })
+        .moltenForgeStorage
     : undefined;
 }
 

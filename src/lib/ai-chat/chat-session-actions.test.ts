@@ -79,7 +79,6 @@ describe("chat session actions", () => {
     ).toEqual([]);
   });
 
-
   it("opens a same-settings chat as an unsaved empty draft configuration instead of a clone", () => {
     const sourceChat = createSourceChat({
       folderId: "folder-1",
@@ -142,7 +141,9 @@ describe("chat session actions", () => {
     expect(newChat.activeSkillNames).toEqual(sourceChat.activeSkillNames);
     expect(newChat.workspaceRoots).toEqual(sourceChat.workspaceRoots);
     expect(newChat.workspaceRoots).not.toBe(sourceChat.workspaceRoots);
-    expect(newChat.fileToolAutoApproval).toEqual(sourceChat.fileToolAutoApproval);
+    expect(newChat.fileToolAutoApproval).toEqual(
+      sourceChat.fileToolAutoApproval,
+    );
     expect(newChat.thinkingMode).toBe(sourceChat.thinkingMode);
   });
 
@@ -183,7 +184,7 @@ describe("chat session actions", () => {
               mimeType: "text/plain",
               sizeBytes: 128,
               storageMode: "managed",
-              storagePath: "/tmp/chat-forge/attachments/notes.txt",
+              storagePath: "/tmp/molten-forge/attachments/notes.txt",
             },
           ],
         },
@@ -205,9 +206,13 @@ describe("chat session actions", () => {
     expect(clonedChat.enabledToolNames).toEqual(sourceChat.enabledToolNames);
     expect(clonedChat.disabledToolNames).toEqual(sourceChat.disabledToolNames);
     expect(clonedChat.enabledSkillNames).toEqual(sourceChat.enabledSkillNames);
-    expect(clonedChat.disabledSkillNames).toEqual(sourceChat.disabledSkillNames);
+    expect(clonedChat.disabledSkillNames).toEqual(
+      sourceChat.disabledSkillNames,
+    );
     expect(clonedChat.enabledAgentNames).toEqual(sourceChat.enabledAgentNames);
-    expect(clonedChat.disabledAgentNames).toEqual(sourceChat.disabledAgentNames);
+    expect(clonedChat.disabledAgentNames).toEqual(
+      sourceChat.disabledAgentNames,
+    );
     expect(clonedChat.activeSkillNames).toEqual(sourceChat.activeSkillNames);
     expect(clonedChat.workspaceRoots).toEqual(sourceChat.workspaceRoots);
     expect(clonedChat.fileToolAutoApproval).toEqual(
@@ -221,11 +226,16 @@ describe("chat session actions", () => {
     const clonedUserMessage = clonedChat.messages[0];
     const sourceUserMessage = sourceChat.messages[0];
     expect(clonedUserMessage).not.toBe(sourceUserMessage);
-    if (clonedUserMessage.role !== "user" || sourceUserMessage.role !== "user") {
+    if (
+      clonedUserMessage.role !== "user" ||
+      sourceUserMessage.role !== "user"
+    ) {
       throw new Error("Expected user messages");
     }
 
-    expect(clonedUserMessage.attachments).toEqual(sourceUserMessage.attachments);
+    expect(clonedUserMessage.attachments).toEqual(
+      sourceUserMessage.attachments,
+    );
     expect(clonedUserMessage.attachments).not.toBe(
       sourceUserMessage.attachments,
     );

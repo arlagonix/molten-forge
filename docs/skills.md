@@ -1,6 +1,6 @@
 # Skills settings
 
-Skills are filesystem folders that contain a `SKILL.md` file. Chat Forge discovers skills from:
+Skills are filesystem folders that contain a `SKILL.md` file. Molten Forge discovers skills from:
 
 - the global skills folder: `~/.agents/skills`
 - the active workspace skills folder: `<workspace>/.agents/skills`
@@ -36,7 +36,7 @@ Use:
 - **Save** to write changes to disk.
 - **Reset** to restore the last saved version.
 
-If the `name` in `SKILL.md` changes, Chat Forge attempts to rename the skill folder on save. If the folder rename fails, the save is aborted and the current on-disk skill is left unchanged when possible.
+If the `name` in `SKILL.md` changes, Molten Forge attempts to rename the skill folder on save. If the folder rename fails, the save is aborted and the current on-disk skill is left unchanged when possible.
 
 ## Cloning skills
 

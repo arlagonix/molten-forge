@@ -1,11 +1,9 @@
 import {
   BookOpen,
   Bot,
-  Lock,
   Paperclip,
   Save as SaveIcon,
   Send,
-  Wrench,
   X,
 } from "lucide-react";
 import {
@@ -232,7 +230,9 @@ export const UserMessageEditor = memo(function UserMessageEditor({
     if (!activeMention || disabled) return [];
 
     const options =
-      activeMention.type === "skill" ? skillMentionOptions : agentMentionOptions;
+      activeMention.type === "skill"
+        ? skillMentionOptions
+        : agentMentionOptions;
     const query = activeMention.query.trim().toLowerCase();
 
     return options
@@ -313,14 +313,14 @@ export const UserMessageEditor = memo(function UserMessageEditor({
 
   async function addFiles(inputs: AttachmentInput[]) {
     if (!inputs.length) return;
-    if (!window.codeForgeAI?.processAttachments) {
+    if (!window.moltenForgeAI?.processAttachments) {
       toast.error("Attachment processing is not available.");
       return;
     }
 
     setIsProcessingAttachments(true);
     try {
-      const result = await window.codeForgeAI.processAttachments(inputs);
+      const result = await window.moltenForgeAI.processAttachments(inputs);
       setAttachments((current) => [...current, ...result.attachments]);
       for (const warning of result.warnings ?? []) toast.warning(warning);
     } catch (error) {
@@ -336,7 +336,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
 
   function getFileSystemPath(file: File) {
     return (
-      window.codeForgeAI?.getPathForFile?.(file) ||
+      window.moltenForgeAI?.getPathForFile?.(file) ||
       (file as File & { path?: string }).path ||
       ""
     );
@@ -386,7 +386,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
     );
 
     const clipboardFilePaths = !files.length
-      ? (window.codeForgeAI?.readClipboardFilePathsSync?.() ?? [])
+      ? (window.moltenForgeAI?.readClipboardFilePathsSync?.() ?? [])
       : [];
 
     if (!files.length && !clipboardFilePaths.length && !hasFileClipboardHint)
@@ -405,7 +405,7 @@ export const UserMessageEditor = memo(function UserMessageEditor({
     try {
       const paths = clipboardFilePaths.length
         ? clipboardFilePaths
-        : ((await window.codeForgeAI?.readClipboardFilePaths?.()) ?? []);
+        : ((await window.moltenForgeAI?.readClipboardFilePaths?.()) ?? []);
       if (!paths.length) return;
       await addFiles(
         paths.map((filePath) => ({
@@ -423,12 +423,12 @@ export const UserMessageEditor = memo(function UserMessageEditor({
   }
 
   async function handlePickAttachments() {
-    if (!window.codeForgeAI?.pickAttachments) {
+    if (!window.moltenForgeAI?.pickAttachments) {
       toast.error("File picker is not available.");
       return;
     }
 
-    await addFiles(await window.codeForgeAI.pickAttachments());
+    await addFiles(await window.moltenForgeAI.pickAttachments());
   }
 
   function handleRemoveAttachment(attachmentId: string) {
@@ -495,7 +495,9 @@ export const UserMessageEditor = memo(function UserMessageEditor({
                     key={option.name}
                     type="button"
                     data-mention-suggestion-index={index}
-                    onMouseEnter={() => setSelectedMentionSuggestionIndex(index)}
+                    onMouseEnter={() =>
+                      setSelectedMentionSuggestionIndex(index)
+                    }
                     onMouseDown={(event) => {
                       event.preventDefault();
                       applyMentionSuggestion(option.name);
