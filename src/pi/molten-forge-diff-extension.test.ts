@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import moltenForgeDiffExtension, { buildFileDiff, diffLineOperations } from "./molten-forge-diff-extension";
 
-describe("Molten Forge Pi diff extension", () => {
+describe("Molten Forge diff extension", () => {
   it("keeps a tiny change in a huge file to three lines of context", () => {
     const before = Array.from({ length: 10000 }, (_, index) => `line ${index + 1}`);
     const after = [...before];

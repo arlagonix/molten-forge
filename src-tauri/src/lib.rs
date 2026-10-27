@@ -84,14 +84,14 @@ const MOLTEN_FORGE_DIFF_EXTENSION_SOURCE: &str = include_str!("../../src/pi/molt
 fn materialize_molten_forge_diff_extension() -> Result<PathBuf, String> {
     let dir = env::temp_dir().join("molten-forge-pi");
     fs::create_dir_all(&dir)
-        .map_err(|error| format!("Failed to create Molten Forge Pi extension directory {}: {error}", dir.display()))?;
+        .map_err(|error| format!("Failed to create Molten Forge extension directory {}: {error}", dir.display()))?;
     let path = dir.join(format!("molten-forge-diff-extension-{}.js", env!("CARGO_PKG_VERSION")));
     let needs_write = fs::read_to_string(&path)
         .map(|current| current != MOLTEN_FORGE_DIFF_EXTENSION_SOURCE)
         .unwrap_or(true);
     if needs_write {
         fs::write(&path, MOLTEN_FORGE_DIFF_EXTENSION_SOURCE)
-            .map_err(|error| format!("Failed to write Molten Forge Pi diff extension {}: {error}", path.display()))?;
+            .map_err(|error| format!("Failed to write Molten Forge diff extension {}: {error}", path.display()))?;
     }
     Ok(path)
 }
@@ -1415,7 +1415,7 @@ pub fn run() {
             stop_pi,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running Molten Forge Pi");
+        .expect("error while running Molten Forge");
 }
 
 #[cfg(test)]
@@ -1644,10 +1644,42 @@ mod tests {
         fs::write(extension.join("README.md"), "not a skill").expect("readme");
         fs::write(cwd.join(".pi/settings.json"), r#"{"packages":["npm:example-pkg"],"extensions":["extensions/custom"]}"#).expect("settings");
         let inventory = discover_pi_resources(&cwd, &home);
-        assert_eq!(inventory.skills.len(), 2);
+        // Ancestor walking is real Pi behavior: a cwd nested under the user home
+        // also inherits that home's own `.agents/skills`, so assert on the entries
+        // this fixture created instead of on a machine-dependent total.
+        let skill_names: Vec<&str> = inventory.skills.iter().map(|skill| skill.name.as_str()).collect();
+        assert!(skill_names.contains(&"coding"), "missing global skill: {skill_names:?}");
+        assert!(skill_names.contains(&"markdown"), "missing project skill: {skill_names:?}");
+        let coding = inventory.skills.iter().find(|skill| skill.name == "coding").expect("global skill entry");
+        assert_eq!(coding.scope, "Global");
+        let markdown = inventory.skills.iter().find(|skill| skill.name == "markdown").expect("project skill entry");
+        assert_eq!(markdown.scope, "Project");
+        // `README.md` beside the extension entry point is not itself a skill.
+        assert!(!skill_names.contains(&"README"), "README was misclassified as a skill: {skill_names:?}");
         assert_eq!(inventory.extensions.len(), 1);
         assert_eq!(inventory.extensions[0].name, "custom");
         assert_eq!(inventory.packages[0].name, "npm:example-pkg");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pi_resource_inventory_does_not_escape_into_unrelated_ancestor_skill_dirs() {
+        // A project outside the user home must not inherit skills from the home
+        // directory; only the fixture's own global and project skills are visible.
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let root = env::temp_dir().join(format!("mf-pi-isolated-{}-{unique}", std::process::id()));
+        let home = root.join("home");
+        let cwd = root.join("project");
+        let global_skill = home.join(".pi/agent/skills/coding");
+        let project_skill = cwd.join(".agents/skills/markdown");
+        for path in [&global_skill, &project_skill, &cwd] { fs::create_dir_all(path).expect("create resource dir"); }
+        fs::write(global_skill.join("SKILL.md"), "---\nname: coding\n---\n").expect("global skill");
+        fs::write(project_skill.join("SKILL.md"), "---\nname: markdown\n---\n").expect("project skill");
+        let inventory = discover_pi_resources(&cwd, &home);
+        let skill_names: Vec<&str> = inventory.skills.iter().map(|skill| skill.name.as_str()).collect();
+        // `coding` appears once through the explicit global path, not twice via ancestry.
+        assert_eq!(skill_names.iter().filter(|name| **name == "coding").count(), 1, "{skill_names:?}");
+        assert_eq!(skill_names.iter().filter(|name| **name == "markdown").count(), 1, "{skill_names:?}");
         let _ = fs::remove_dir_all(root);
     }
 

@@ -1,6 +1,6 @@
 # Runtime grouping rules
 
-This document is the source of truth for how Molten Forge Pi groups Thinking, tool, retry, and assistant blocks in the transcript.
+This document is the source of truth for how Molten Forge groups Thinking, tool, retry, and assistant blocks in the transcript.
 
 The UI has two independent grouping layers:
 

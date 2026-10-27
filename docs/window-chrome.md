@@ -1,6 +1,6 @@
 # Window chrome and startup loading
 
-This document is the source of truth for the frameless desktop chrome and initial loading screen in Molten Forge Pi.
+This document is the source of truth for the frameless desktop chrome and initial loading screen in Molten Forge.
 
 The visual reference is the old Electron Molten Forge implementation. The wrapper should not add a second dedicated title-bar row above the application. Instead, the existing top rows are the title bar:
 

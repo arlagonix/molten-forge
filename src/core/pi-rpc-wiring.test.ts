@@ -8,7 +8,15 @@ const rust = readFileSync(fileURLToPath(new URL("../../src-tauri/src/lib.rs", im
 describe("Pi RPC boundary contracts", () => {
   it("dispatches Pi records through the latest render instead of a stale listener closure", () => {
     expect(app).toContain("handleRecordRef.current = handleRecord");
-    expect(app).toContain("handleRecordRef.current(JSON.parse(event.payload))");
+
+    // Records reach the latest handler through the delta coalescer, which reads
+    // handleRecordRef at flush time rather than capturing a first-render closure.
+    expect(app).toContain("createPiDeltaCoalescer((record) => handleRecordRef.current(record))");
+    const listenerStart = app.indexOf('listen<string>("pi-record"');
+    expect(listenerStart).toBeGreaterThan(0);
+    const listenerBlock = app.slice(listenerStart, app.indexOf("]);", listenerStart));
+    expect(listenerBlock).toContain("piDeltas.push(JSON.parse(event.payload))");
+    expect(listenerBlock).not.toContain("handleRecord(");
   });
   it("does not expose the UI as connected before the RPC readiness barrier", () => {
     expect(app).toContain("Process existence is not RPC readiness");

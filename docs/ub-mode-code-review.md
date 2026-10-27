@@ -1,4 +1,4 @@
-# Molten Forge Pi — ub-mode code review
+# Molten Forge — ub-mode code review
 
 **Baseline:** v0.36.79, source archive dated 2026-10-26. **Review date:** 2026-10-27.  
 **Reference:** [unclebob/ub-mode](https://github.com/unclebob/ub-mode/blob/master/SKILL.md).  

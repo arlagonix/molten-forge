@@ -1,6 +1,6 @@
 # Frontend skill audit
 
-Audit target: Molten Forge Pi frontend/desktop architecture around v0.35.x.
+Audit target: Molten Forge frontend/desktop architecture around v0.35.x.
 
 This audit uses the project-local skills under `.agents/skills/` as review lenses. It is not a demand to rewrite working code. Existing `AGENTS.md` and feature-specific `docs/` contracts remain authoritative.
 

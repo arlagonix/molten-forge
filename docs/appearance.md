@@ -1,6 +1,6 @@
 # Appearance and background behavior
 
-This document is the source of truth for theme and background behavior in Molten Forge Pi.
+This document is the source of truth for theme and background behavior in Molten Forge.
 
 The visual reference is the old Electron Molten Forge implementation, specifically the light/dark palette and the background controls from the 1.16.10/1.16.11 background-glass work.
 

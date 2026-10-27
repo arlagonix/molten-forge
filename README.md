@@ -1,3 +1,18 @@
+# Molten Forge
+
+Molten Forge is a lightweight desktop interface for the [Pi coding agent](https://github.com/arlagonix/pi). It wraps the system-installed `pi` CLI in Tauri's frameless desktop shell and provides the transcript, thinking/tool rendering, session and project navigation, theming, attachments, and other desktop UX.
+
+Pi is the underlying agent runtime. It owns the agent loop, tools, sessions, providers, extensions, and configuration; Molten Forge owns the desktop experience around it. The two names are distinct: Molten Forge is this application, Pi is the agent it drives.
+
+- **Stack:** Tauri 2, React 19, TypeScript, Rust, and the Pi agent runtime over JSONL RPC.
+- **Runtime:** Pi must already be installed and available on `PATH`; Molten Forge does not bundle or fork Pi.
+- **Data:** settings, session history, and attachments stay in Pi's own locations and the Tauri app-data directory (identifier `com.moltenforge.pi`).
+- **Build:** `npm install`, then `npm run tauri:dev` (development) or `npm run tauri:build` (release). `npm run check` runs unit tests, TypeScript checks, the production build, and Rust tests.
+
+## Changelog
+
+The entries below are newest-first and record the incremental development history that led to the current implementation.
+
 ## v0.36.91 — Restore user-message colors
 
 - Fixes the unintended v0.36.88 change that painted dark-theme user bubbles with the generic `#252526` card color. Their original distinct background `rgba(52,55,59,.64)` is restored; light-theme user bubbles return to the original primary-color surface at 90% opacity. No backdrop blur is reintroduced.
@@ -188,7 +203,7 @@
 - Project groups with loaded metadata sort by most recent conversation activity; projects without loaded metadata retain their recent-project order. The 8-project saved-history limit and lack of a global session index remain unchanged pending the next phase.
 - Groups are progressively rendered in chunks of 25 if more paths are ever available. No new sidebar, background Pi processes, or separate project manager.
 
-# Molten Forge Pi — v0.36.67 prototype
+# Molten Forge — v0.36.67 prototype
 
 ## v0.36.67 Miracode replacement and build recovery
 
@@ -399,7 +414,7 @@
 - Swapped the compact header telemetry arrows so input points downward toward the user and output points upward away from the user.
 - Kept Cached (`C`) and Cache hit (`H`) unchanged.
 
-# Molten Forge Pi — v0.36.30 prototype
+# Molten Forge — v0.36.30 prototype
 
 ## v0.36.32 regression-test contract fix
 

@@ -1,8 +1,8 @@
-# Molten Forge Pi — Agent Guide
+# Molten Forge — Agent Guide
 
 ## Purpose
 
-Molten Forge Pi is a small Tauri desktop client around the system-installed Pi coding agent. Pi owns the agent/runtime behavior; Molten Forge owns the desktop UX, rendering, session navigation, and native integration.
+Molten Forge is a small Tauri desktop client around the system-installed Pi coding agent. Pi owns the agent/runtime behavior; Molten Forge owns the desktop UX, rendering, session navigation, and native integration.
 
 Keep the wrapper thin. Do not reimplement Pi features when Pi already exposes them through RPC, session files, extensions, skills, or commands.
 

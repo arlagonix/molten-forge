@@ -15,7 +15,7 @@ Molten Forge renders `edit` and `write` tool **Input** as a compact unified diff
 
 ## `edit`
 
-Pi remains authoritative. Its native `result.details.patch` is parsed for the completed diff. The bundled Molten Forge Pi extension adds only file metadata (path, line counts, and text-format changes) needed for stable display and session restore.
+Pi remains authoritative. Its native `result.details.patch` is parsed for the completed diff. The bundled Molten Forge extension adds only file metadata (path, line counts, and text-format changes) needed for stable display and session restore.
 
 ## `write`
 

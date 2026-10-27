@@ -27,7 +27,13 @@ describe("opaque dark/light theme surfaces", () => {
     expect(css).toMatch(/\.app-loading-background\s*\{[^}]*filter:\s*blur\(18px\);/);
   });
   it("keeps settings and context surfaces solid instead of alpha tints", () => {
-    expect(css).toMatch(/\.settings-main\s*\{[^}]*background:\s*var\(--app-glass-strong\);/);
+    // The Settings main pane shares the full-height workspace tint with chat
+    // (see docs/appearance.md), so its contract is the shared tint token rather
+    // than the generic strong glass surface.
+    expect(css).toMatch(/\.settings-main\s*\{[^}]*background:\s*var\(--app-settings-tint\);/);
+    expect(css).toMatch(/--app-workspace-tint:\s*var\(--app-settings-tint\);/);
+    expect(lightRoot).toMatch(/--app-settings-tint:\s*oklch\(from var\(--background\) l c h \/ \.80\);/);
+    expect(css).toMatch(/\.settings-main-titlebar\s*\{[^}]*background:\s*var\(--app-glass-strong\);/);
     expect(css).toMatch(/\.context-popover\.context-popover-portal\s*\{[^}]*background:\s*var\(--app-glass-card\);/);
   });
 });

@@ -7,3 +7,5 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+ai_artifacts/
+archives/
