@@ -1,0 +1,20 @@
+[package]
+name = "molten-forge-pi"
+version = "0.36.91"
+description = "A minimal Tauri wrapper around Pi RPC"
+authors = ["Molten Forge"]
+edition = "2021"
+
+[lib]
+name = "molten_forge_pi_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.2", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.3", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rfd = "0.15"
+tauri-plugin-notification = "=2.6.0"
