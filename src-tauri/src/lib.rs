@@ -140,6 +140,9 @@ struct ProjectSummary {
     cwd: String,
     activity_timestamp: Option<String>,
     modified_at: u64,
+    // Sessions outlive their folders. Report reachability so the sidebar can
+    // group missing projects instead of making the user click to find out.
+    reachable: bool,
 }
 
 #[derive(Serialize)]
@@ -537,7 +540,12 @@ fn collect_project_summaries(root: &Path) -> Result<Vec<ProjectSummary>, String>
         let key = normalize_path_for_compare(Path::new(cwd));
         let Some(session) = read_session_info(&path, &key) else { continue };
         let timestamp = session.activity_timestamp.or(session.timestamp);
-        let candidate = ProjectSummary { cwd: cwd.to_string(), activity_timestamp: timestamp, modified_at: session.modified_at };
+        let candidate = ProjectSummary {
+            cwd: cwd.to_string(),
+            activity_timestamp: timestamp,
+            modified_at: session.modified_at,
+            reachable: Path::new(cwd).is_dir(),
+        };
         match projects.entry(key) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
                 let existing = entry.get();
@@ -1625,6 +1633,30 @@ mod tests {
         assert_eq!(summaries[0].cwd, a_cwd);
         assert_eq!(summaries[0].activity_timestamp.as_deref(), Some("2026-01-04T00:00:00Z"));
         assert_eq!(summaries[1].cwd, b_cwd);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_discovery_reports_missing_folders_without_dropping_history() {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).expect("clock").as_nanos();
+        let root = env::temp_dir().join(format!("molten-forge-missing-{}-{unique}", std::process::id()));
+        let dir = root.join("sessions");
+        fs::create_dir_all(&dir).expect("create sessions");
+        let live = root.join("live-project");
+        fs::create_dir_all(&live).expect("create live project");
+        let gone = root.join("deleted-project").to_string_lossy().to_string();
+        let session = |cwd: &str, timestamp: &str| format!("{}\n{}\n",
+            json!({"type":"session","id":"s","cwd":cwd,"timestamp":"2026-01-01T00:00:00Z"}),
+            json!({"type":"message","timestamp":timestamp,"message":{"role":"user","content":"hi"}}),
+        );
+        fs::write(dir.join("live.jsonl"), session(&live.to_string_lossy(), "2026-01-05T00:00:00Z")).expect("live");
+        fs::write(dir.join("gone.jsonl"), session(&gone, "2026-01-06T00:00:00Z")).expect("gone");
+        let summaries = collect_project_summaries(&dir).expect("project discovery");
+        // A deleted folder keeps its entry so its conversations stay restorable.
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].cwd, gone);
+        assert!(!summaries[0].reachable, "deleted project must be reported unreachable");
+        assert!(summaries[1].reachable, "existing project must be reported reachable");
         let _ = fs::remove_dir_all(root);
     }
 

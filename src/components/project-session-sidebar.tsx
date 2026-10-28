@@ -3,8 +3,9 @@ import { Folder, FolderOpen, Plus } from "lucide-react";
 import { formatSessionDate } from "../core/session-display";
 import { projectNameFromPath } from "../core/recent-projects";
 import {
-  PROJECT_PAGE_SIZE, SESSION_BATCH_SIZE, nextVisibleSessionCount, orderedProjectPaths,
-  projectKeyForSidebar, sortProjectPaths, sortSessionsByActivity, type ProjectSummary,
+  PROJECT_BATCH_SIZE, SESSION_BATCH_SIZE, filterReachableProjects, nextVisibleProjectCount, nextVisibleSessionCount,
+  orderedProjectPaths, projectKeyForSidebar, sortProjectPaths, sortSessionsByActivity, visibleProjectPaths,
+  type ProjectSummary,
 } from "../core/project-sidebar";
 
 export type SidebarSession = {
@@ -45,7 +46,7 @@ export function ProjectSessionSidebar({
 }: Props) {
   const activeKey = projectKeyForSidebar(cwd);
   const [counts, setCounts] = useState<Record<string, number>>({});
-  const [visibleProjects, setVisibleProjects] = useState(PROJECT_PAGE_SIZE);
+  const [visibleProjects, setVisibleProjects] = useState(PROJECT_BATCH_SIZE);
   const [leaving, setLeaving] = useState<{ key: string; sessions: SidebarSession[] } | null>(null);
   // New projects open only after their complete session list is ready.
   // Deferring the class change by one frame gives CSS a real 0 -> 1fr
@@ -53,7 +54,6 @@ export function ProjectSessionSidebar({
   const [openedKey, setOpenedKey] = useState(activeKey && !sessionsLoading ? activeKey : "");
   const previous = useRef({ key: activeKey, sessions: [...sessions] });
   const viewport = useRef<HTMLElement>(null);
-  const sentinel = useRef<HTMLDivElement>(null);
   const activeChildrenRef = useRef<HTMLDivElement | null>(null);
   const pendingBatchAnimationRef = useRef<{ key: string; from: number } | null>(null);
   const batchAnimationRef = useRef<Animation | null>(null);
@@ -119,28 +119,24 @@ export function ProjectSessionSidebar({
     ...projects.map((entry) => entry.cwd), ...recentProjects,
   ]), [cwd, recentProjects, projects]);
   const paths = useMemo(() => sortProjectPaths(allPaths, projects, cwd, sessions), [allPaths, projects, cwd, sessions]);
+  // Projects whose folder is gone cannot host a session, so they are not listed.
+  const listedPaths = useMemo(() => filterReachableProjects(paths, projects, cwd), [paths, projects, cwd]);
+  const visiblePaths = useMemo(
+    () => visibleProjectPaths(listedPaths, visibleProjects, cwd),
+    [listedPaths, visibleProjects, cwd],
+  );
+  const remainingProjects = Math.max(0, listedPaths.length - visiblePaths.length);
+  const canShowFewerProjects = visibleProjects > PROJECT_BATCH_SIZE;
   const sortedSessions = useMemo(() => sortSessionsByActivity(sessions), [sessions]);
   // On the first render after cwd changes the effect that stores `leaving`
   // hasn't run yet. Read the last committed project's rows synchronously,
   // otherwise the outgoing list vanishes before its collapse can animate.
   const departing = previous.current.key && previous.current.key !== activeKey
     ? previous.current : leaving;
-  const shown = Math.min(visibleProjects, paths.length);
-  useEffect(() => {
-    const root = viewport.current, node = sentinel.current;
-    if (!root || !node || shown >= paths.length) return;
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some((entry) => entry.isIntersecting)) {
-        setVisibleProjects((count) => Math.min(count + PROJECT_PAGE_SIZE, paths.length));
-      }
-    }, { root, rootMargin: "120px 0px" });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [shown, paths.length]);
 
   return (
     <nav className="session-list project-session-list" aria-label="Projects and Pi sessions" ref={viewport}>
-      {paths.slice(0, shown).map((project) => {
+      {visiblePaths.map((project) => {
         const key = projectKeyForSidebar(project);
         const current = key === activeKey;
         const missing = missingProjectPath ? key === projectKeyForSidebar(missingProjectPath) : false;
@@ -214,7 +210,7 @@ export function ProjectSessionSidebar({
                   {current && !sessionsLoading && !sessionsError && (remaining > 0 || canShowLess) && (
                     <div className="project-session-pagination">
                       {remaining > 0 && <button type="button" className="project-session-show-more" onClick={() => changeVisibleSessionCount(key, count, list.length, "more")}>
-                        Show 5 more ({remaining})
+                        Show {SESSION_BATCH_SIZE} more ({remaining})
                       </button>}
                       {canShowLess && <button type="button" className="project-session-show-more" onClick={() => changeVisibleSessionCount(key, count, list.length, "less")}>Show less</button>}
                     </div>
@@ -225,7 +221,32 @@ export function ProjectSessionSidebar({
           </section>
         );
       })}
-      {shown < paths.length && <div ref={sentinel} className="project-session-page-sentinel" aria-hidden="true" />}
+      {(remainingProjects > 0 || canShowFewerProjects) && (
+        <div className="project-session-pagination">
+          {remainingProjects > 0 && (
+            <button
+              type="button"
+              className="project-session-show-more"
+              onClick={() => setVisibleProjects(
+                (count) => nextVisibleProjectCount(count, listedPaths.length, "more"),
+              )}
+            >
+              Show {PROJECT_BATCH_SIZE} more ({remainingProjects})
+            </button>
+          )}
+          {canShowFewerProjects && (
+            <button
+              type="button"
+              className="project-session-show-more"
+              onClick={() => setVisibleProjects(
+                (count) => nextVisibleProjectCount(count, listedPaths.length, "less"),
+              )}
+            >
+              Show less
+            </button>
+          )}
+        </div>
+      )}
     </nav>
   );
 }

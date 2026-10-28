@@ -32,13 +32,25 @@ export function projectActivityTime(sessions?: readonly DatedSession[]): number 
 
 
 export const SESSION_BATCH_SIZE = 5;
-export const PROJECT_PAGE_SIZE = 25;
+export const PROJECT_BATCH_SIZE = 12;
+
+/**
+ * Steps a "Show N more" list by whole batches and never below one batch.
+ * Sessions and projects share this so both paginate identically.
+ */
+export function nextVisibleCount(current: number, total: number, direction: "more" | "less", batchSize: number): number {
+  const normalized = Math.max(batchSize, Math.ceil(current / batchSize) * batchSize);
+  return direction === "more"
+    ? Math.min(total, normalized + batchSize)
+    : Math.max(batchSize, normalized - batchSize);
+}
 
 export function nextVisibleSessionCount(current: number, total: number, direction: "more" | "less"): number {
-  const normalized = Math.max(SESSION_BATCH_SIZE, Math.ceil(current / SESSION_BATCH_SIZE) * SESSION_BATCH_SIZE);
-  return direction === "more"
-    ? Math.min(total, normalized + SESSION_BATCH_SIZE)
-    : Math.max(SESSION_BATCH_SIZE, normalized - SESSION_BATCH_SIZE);
+  return nextVisibleCount(current, total, direction, SESSION_BATCH_SIZE);
+}
+
+export function nextVisibleProjectCount(current: number, total: number, direction: "more" | "less"): number {
+  return nextVisibleCount(current, total, direction, PROJECT_BATCH_SIZE);
 }
 
 type SortableSession = DatedSession & { path: string };
@@ -51,7 +63,8 @@ export function sortSessionsByActivity<T extends SortableSession>(sessions: read
   return [...sessions].sort((a, b) => sessionActivityTime(b) - sessionActivityTime(a) || a.path.localeCompare(b.path));
 }
 
-export type ProjectSummary = { cwd: string; activityTimestamp?: string | null; modifiedAt?: number };
+export type ProjectSummary = { cwd: string; activityTimestamp?: string | null; modifiedAt?: number; reachable?: boolean };
+
 export function sortProjectPaths(
   paths: readonly string[], summaries: readonly ProjectSummary[],
   activeProject: string, activeSessions: readonly DatedSession[],
@@ -61,4 +74,36 @@ export function sortProjectPaths(
     activity.get(projectKeyForSidebar(activeProject)) ?? 0, projectActivityTime(activeSessions),
   ));
   return [...paths].sort((a, b) => (activity.get(projectKeyForSidebar(b)) ?? 0) - (activity.get(projectKeyForSidebar(a)) ?? 0));
+}
+
+/**
+ * Drops projects whose folder no longer exists. A deleted directory cannot host a
+ * Pi session, so listing it only offers an action that cannot succeed. Sessions on
+ * disk are untouched: restore the folder and the project reappears on next load.
+ * The active project is always kept, because the user is already inside it.
+ */
+export function filterReachableProjects(
+  paths: readonly string[], summaries: readonly ProjectSummary[], activeProject: string,
+): string[] {
+  const reachable = new Map(summaries.map((summary) => [projectKeyForSidebar(summary.cwd), summary.reachable !== false]));
+  const activeKey = activeProject ? projectKeyForSidebar(activeProject) : "";
+  return paths.filter((path) => {
+    const key = projectKeyForSidebar(path);
+    return key === activeKey || (reachable.get(key) ?? true);
+  });
+}
+
+/**
+ * Projects visible under "Show more". Mirrors the session list so both read the
+ * same. The active project is always inside the page, because entering the app
+ * must never hide where you are.
+ */
+export function visibleProjectPaths(
+  paths: readonly string[], count: number, activeProject: string,
+): string[] {
+  const visible = paths.slice(0, Math.max(0, count));
+  const activeKey = activeProject ? projectKeyForSidebar(activeProject) : "";
+  if (!activeKey || visible.some((path) => projectKeyForSidebar(path) === activeKey)) return visible;
+  const activePath = paths.find((path) => projectKeyForSidebar(path) === activeKey);
+  return activePath === undefined ? visible : [...visible, activePath];
 }

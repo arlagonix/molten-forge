@@ -116,3 +116,62 @@ describe("project quick-action hover styling", () => {
     expect(css).toMatch(/\.project-session-new:hover:not\(:disabled\)\s*\{\s*cursor:\s*pointer;/);
   });
 });
+
+describe("project list cap and reachability", () => {
+  const manyProjects = Array.from({ length: 30 }, (_, index) => `/repo/p${index}`);
+  const manySummaries = manyProjects.map((cwd) => ({ cwd, activityTimestamp: "2026-10-21T10:00:00Z" }));
+
+  it("pages projects with the same Show more / Show less buttons as sessions", () => {
+    const markup = render({ cwd: "/repo/p0", recentProjects: manyProjects, projects: manySummaries });
+    expect(markup).toContain("Show 12 more (18)");
+    // Show less only appears once the list has been grown past one batch.
+    expect(markup).not.toContain("Show less");
+    expect(markup).toContain('aria-label="p0"');
+    expect(markup).not.toContain('aria-label="p12"');
+    expect(markup).not.toContain('aria-label="p29"');
+  });
+
+  it("renders no pagination buttons when every project already fits", () => {
+    const markup = render();
+    expect(markup).not.toContain("Show 12 more");
+    expect(markup).not.toContain("Show less");
+  });
+
+  it("does not list projects whose folder is gone", () => {
+    const markup = render({
+      cwd: "/repo",
+      recentProjects: ["/repo/gone"],
+      projects: [
+        { cwd: "/repo", activityTimestamp: "2026-10-21T10:00:00Z" },
+        { cwd: "/repo/gone", activityTimestamp: "2026-10-22T10:00:00Z", reachable: false },
+      ],
+    });
+    // A deleted folder cannot host a session, so the row offers nothing to do.
+    expect(markup).not.toContain('aria-label="gone"');
+    expect(markup).not.toContain("Folder not found");
+  });
+
+  it("keeps listing the active project even when its folder is gone", () => {
+    // The user is already inside it; hiding the row would strand the open chat.
+    const markup = render({
+      cwd: "/repo/gone",
+      recentProjects: ["/repo"],
+      projects: [
+        { cwd: "/repo", activityTimestamp: "2026-10-21T10:00:00Z" },
+        { cwd: "/repo/gone", activityTimestamp: "2026-10-22T10:00:00Z", reachable: false },
+      ],
+    });
+    expect(markup).toContain('aria-label="gone"');
+  });
+
+  it("keeps the active project visible even when it sorts past the cap", () => {
+    // A much older project further down the activity order is still where the
+    // user is, so the sidebar must never hide their current location.
+    const summaries = manyProjects.map((cwd, index) => ({
+      cwd, activityTimestamp: `2026-10-${String(30 - index).padStart(2, "0")}T10:00:00Z`,
+    }));
+    const markup = render({ cwd: "/repo/p29", recentProjects: manyProjects, projects: summaries });
+    expect(markup).toContain('aria-label="p29"');
+    expect(markup).toContain('aria-label="p0"');
+  });
+});
