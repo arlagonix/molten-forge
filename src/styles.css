@@ -275,7 +275,7 @@ code, pre { font-family: var(--app-font-code); }
   gap: 9px;
   padding: 0 16px;
   border-bottom: 1px solid var(--soft-border);
-  background: var(--app-glass-background);
+  background: var(--app-chrome-tint);
 }
 
 .brand-mark {
@@ -382,7 +382,7 @@ button.primary:hover { background: rgba(88, 113, 133, .9); border-color: rgba(11
   display: grid;
   grid-template-rows: 41px 38px minmax(0, 1fr) 42px;
   border-right: 1px solid rgba(255,255,255,.095);
-  background: var(--app-sidebar-tint);
+  background: var(--app-chrome-tint);
 }
 .sidebar-titlebar { display: flex; align-items: center; justify-content: space-between; padding: 0 11px 0 12px; border-bottom: 1px solid rgba(255,255,255,.075); }
 .sidebar-brand { min-width: 0; display: flex; align-items: center; gap: 9px; color: #dedede; }
@@ -424,7 +424,7 @@ button.primary:hover { background: rgba(88, 113, 133, .9); border-color: rgba(11
 .sidebar-footer button:hover { background: var(--hover); color: #b8bdc2; }
 
 .chat-pane { min-width: 0; min-height: 0; display: grid; grid-template-rows: 41px minmax(0, 1fr) auto; background: rgba(22, 23, 24, .52); }
-.chat-header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 18px; border-bottom: 1px solid rgba(255,255,255,.085); background: var(--app-glass-card); }
+.chat-header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 0 18px; border-bottom: 1px solid rgba(255,255,255,.085); background: var(--app-chrome-tint); }
 .chat-heading { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
 .chat-heading strong { min-width: 0; max-width: min(44vw, 520px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #dedede; font-size: 13px; font-weight: 600; }
 .chat-path { min-width: 0; max-width: 34vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #646b73; font-size: 10px; }
@@ -851,7 +851,7 @@ body { font-size: 16px; }
   background: var(--app-workspace-tint);
 }
 .chat-header {
-  background: var(--app-glass-card);
+  background: var(--app-chrome-tint);
 }
 .transcript {
   background: transparent;
@@ -2779,7 +2779,9 @@ body.sidebar-width-resizing * {
   /* Full-height panes tint the wallpaper, while small cards stay opaque.
      These panes have no backdrop-filter, avoiding the former GPU blur cost. */
   --app-workspace-tint: var(--app-settings-tint);
-  --app-sidebar-tint: rgba(28, 29, 30, .82);
+  /* Every chrome bar and both sidebars share one solid surface, so no surface
+     can drift into its own hue or read as a translucent pane. */
+  --app-chrome-tint: var(--app-glass-card);
   --app-settings-tint: rgba(30, 30, 30, .82);
   --app-skills-tint: rgba(37, 37, 38, .12);
   --app-glass-background: #1e1e1e;
@@ -2822,7 +2824,7 @@ body.sidebar-width-resizing * {
   --app-background-overlay: oklch(from var(--background) l c h / .42);
   --app-background-vignette: oklch(from var(--background) l c h / .22);
   --app-workspace-tint: var(--app-settings-tint);
-  --app-sidebar-tint: oklch(from var(--background) l c h / .84);
+  --app-chrome-tint: var(--app-glass-card);
   --app-settings-tint: oklch(from var(--background) l c h / .80);
   --app-skills-tint: oklch(from var(--card) l c h / .12);
   --app-glass-background: var(--background);
@@ -2978,7 +2980,7 @@ body.sidebar-width-resizing * {
   display: grid;
   grid-template-rows: 41px minmax(0, 1fr) 48px;
   border-right: 1px solid rgba(255,255,255,.075);
-  background: var(--app-sidebar-tint);
+  background: var(--app-chrome-tint);
 }
 
 .settings-sidebar-titlebar {
@@ -3074,7 +3076,7 @@ body.sidebar-width-resizing * {
   align-items: center;
   padding: 0 112px 0 16px;
   border-bottom: 1px solid rgba(255,255,255,.075);
-  background: var(--app-glass-strong);
+  background: var(--app-chrome-tint);
 }
 
 .settings-main-titlebar strong {
@@ -3153,7 +3155,6 @@ html[data-theme="light"] .app-shell {
 html[data-theme="light"] .launch-topbar,
 html[data-theme="light"] .chat-header {
   border-color: var(--soft-border);
-  background: var(--app-glass-background);
 }
 
 html[data-theme="light"] .chat-pane {
@@ -3378,7 +3379,6 @@ html[data-theme="light"] .settings-text-button { color: var(--muted-foreground);
 
 html[data-theme="light"] .settings-main-titlebar {
   border-color: var(--border);
-  background: var(--app-glass-strong);
 }
 html[data-theme="light"] .settings-main {
   background: var(--app-settings-tint);
@@ -5272,7 +5272,6 @@ html[data-theme="light"] .icon-button:focus-visible:not(:disabled) {
 .project-session-open-folder:hover { background: var(--hover); color: #d3d5d7; }
 .project-session-heading:focus-visible, .project-session-row:focus-visible,
 .project-session-show-more:focus-visible, .project-session-open-folder:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
-.project-session-page-sentinel { height: 2px; }
 html[data-theme="light"] .project-session-heading { color: color-mix(in oklab, var(--foreground) 79%, transparent); background: transparent; border-color: transparent; }
 html[data-theme="light"] .project-session-heading:hover,
 html[data-theme="light"] .project-session-open-folder:hover,

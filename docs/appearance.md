@@ -130,11 +130,25 @@ retained through `--app-glass-user-message`, without expensive backdrop blur.
 
 **Full-height pane tints are different from foreground surfaces.** The app's
 wallpaper (bundled or custom) is painted by `.app-shell` behind the content.
-The chat, session sidebar, Settings and Skills workspace panes must keep
-translucent theme-specific backgrounds so that wallpaper remains visible.
+The chat, Settings and Skills workspace panes keep translucent theme-specific
+backgrounds so that wallpaper remains visible. **The sidebars are the
+exception: they are opaque.** The session sidebar and the Settings sidebar must
+read as one solid color with the chat header rather than as a pane over the
+wallpaper, so the left column never looks washed out or half transparent.
 Chat and Settings main share the **same tint**: `--app-workspace-tint` aliases
 `--app-settings-tint`, so changing the Settings tint changes chat identically
-in dark and light themes. The sidebar uses `--app-sidebar-tint`, while Skills
+in dark and light themes. Every chrome bar and both sidebars read one token,
+`--app-chrome-tint`, which is `var(--app-glass-card)` itself. That covers the
+chat header, launcher topbar, Settings main titlebar (the "General" heading),
+the session sidebar and the Settings sidebar, so the whole frame reads as a
+single solid neutral surface instead of a mix of darker, bluish panes.
+Do not reintroduce per-surface chrome tokens or light-theme overrides that
+repaint one bar with `--app-glass-strong`/`--app-glass-background`; that
+divergence is what the token exists to prevent. Do not reintroduce a
+`color-mix(... N%, transparent)` or `rgba()`/`oklch()` alpha form here either:
+that is exactly how the sidebars previously drifted into a translucent pane.
+A change that needs to darken or lighten the chat column belongs in the pane
+tint (`--app-workspace-tint`), never in the chrome surface. Skills
 subpanes use `--app-skills-tint` as only a subtle extra
 tint inside the already-tinted Settings pane. Do not make them opaque and do not restore
 costly `backdrop-filter`. The `.app-shell` image/vignette/overlay stays

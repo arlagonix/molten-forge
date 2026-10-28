@@ -80,7 +80,10 @@ describe("Pi Skills Settings visual structure", () => {
   });
   it("preserves dark/light tint and bounded glass panels", () => {
     expect(css).toContain("background: var(--app-glass-card);");
-    expect(css).toContain("background: var(--app-glass-strong);");
+    // The strong surface is still a real token used by foreground chrome such as
+    // the scroll-to-bottom button, so assert the declaration rather than one
+    // specific consumer. Settings chrome itself now uses --app-chrome-tint.
+    expect(css).toMatch(/--app-glass-strong:\s*#[a-f\d]+;/i);
     expect(css).toContain("background: var(--code-bg);");
     expect(css).toMatch(/\.pi-skill-editor-frame\s*\{[^}]*overflow: hidden;/);
     expect(css).toMatch(/\.pi-skill-code-viewer \.cm-scroller\s*\{[^}]*overflow-x: hidden;/);

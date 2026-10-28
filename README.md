@@ -13,6 +13,25 @@ Pi is the underlying agent runtime. It owns the agent loop, tools, sessions, pro
 
 The entries below are newest-first and record the incremental development history that led to the current implementation.
 
+## v0.36.93 — Solid sidebars matching the chat header
+
+- Fixes v0.36.92's half-transparent left column. The session sidebar and the Settings sidebar are now **opaque** and share the chat header's exact surface: `--app-chrome-tint` is `var(--app-glass-card)` itself, with no `color-mix(... transparent)` or alpha form left anywhere in the token.
+- This intentionally overrides the previous "every full-height pane must be translucent" contract for these two panes only. Chat, Settings main and the Skills subpanes stay translucent so the wallpaper is still visible where it belongs.
+- Rewrote the affected tests to the new contract instead of patching weights: the source check now rejects any alpha chrome token, an SSR/CSS contract asserts both sidebars equal the header surface, and the Chromium regression measures a zero wallpaper delta inside each sidebar while still requiring the wallpaper to show through the chat column and Settings pane, in both themes.
+- Test fixture gained the missing `--session-sidebar-width`, so the sidebar/chat split is measured at real coordinates rather than collapsing to a single column.
+
+**Upgrade:** Nothing to delete. Extract over v0.36.92; no new dependencies, no identifier or storage-path changes.
+
+## v0.36.92 — Sidebar tint, reachable projects, unified list paging
+
+- Both sidebars (projects/conversations and Settings) now derive their tint from `--app-glass-card`, the same surface as the chat header, instead of a darker cool-grey of their own. Mixing weight stays at 82% so the wallpaper remains visible through the panes.
+- Projects whose folder no longer exists are no longer listed. A deleted directory cannot host a Pi session, so the row only offered an action that could not succeed; this also removes the duplicated `Folder not found` label that appeared both under the project name and again after clicking it. Sessions on disk are untouched — restore the folder and the project returns on next load. The active project is always kept so an open conversation is never stranded.
+- Project paging now mirrors the conversation list: `Show 12 more (N)` and `Show less` step in whole batches. The previous `Show all projects` button and the 25-row infinite-scroll sentinel are gone, so the sidebar has one paging mechanism instead of two.
+- Extracted the shared batching step into `nextVisibleCount` with `nextVisibleSessionCount`/`nextVisibleProjectCount` wrappers, and `visibleProjectPaths` as the single place that decides which projects are on screen (including the active-project guarantee).
+- Tests cover batch stepping in both directions, out-of-step normalization, slicing/empty lists, active-project pinning and case-insensitive matching, plus render contracts for the new labels and the absence of `Show all`.
+
+**Upgrade:** Nothing to delete. Extract over v0.36.91; no new dependencies, no identifier or storage-path changes.
+
 ## v0.36.91 — Restore user-message colors
 
 - Fixes the unintended v0.36.88 change that painted dark-theme user bubbles with the generic `#252526` card color. Their original distinct background `rgba(52,55,59,.64)` is restored; light-theme user bubbles return to the original primary-color surface at 90% opacity. No backdrop blur is reintroduced.

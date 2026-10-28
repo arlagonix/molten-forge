@@ -2098,7 +2098,7 @@ dependencies = [
 
 [[package]]
 name = "molten-forge-pi"
-version = "0.36.91"
+version = "0.36.93"
 dependencies = [
  "rfd",
  "serde",

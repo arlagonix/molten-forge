@@ -1,6 +1,6 @@
 [package]
 name = "molten-forge-pi"
-version = "0.36.91"
+version = "0.36.93"
 description = "A minimal Tauri wrapper around Pi RPC"
 authors = ["Molten Forge"]
 edition = "2021"

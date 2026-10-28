@@ -18,7 +18,7 @@ wallpaper = f'url("data:image/svg+xml,{quote(image)}")'
 fixture = '''<!doctype html><html data-theme="dark"><head><style>
 html,body{width:100%;height:100%;margin:0;}
 [hidden]{display:none!important;}
-.app-shell{height:100%;width:100%;}
+.app-shell{height:100%;width:100%;--session-sidebar-width:180px;}
 .workspace{width:100%;height:100%;display:grid;grid-template-columns:180px 1fr;}
 .session-sidebar{height:100%;}
 .chat-pane{height:100%;}
@@ -36,6 +36,8 @@ html,body{width:100%;height:100%;margin:0;}
 </div></main>
 </body></html>'''
 
+OPAQUE_PANES = ('.chat-header', '.session-sidebar', '.settings-sidebar')
+
 with sync_playwright() as pw:
     browser = pw.chromium.launch(headless=True, executable_path='/usr/bin/chromium', args=['--no-sandbox'])
     page = browser.new_page(viewport={'width': 800, 'height': 500}, device_scale_factor=1)
@@ -46,20 +48,36 @@ with sync_playwright() as pw:
     for theme in ('dark', 'light'):
         page.evaluate('(theme) => { document.documentElement.dataset.theme = theme; }', theme)
         pane_colors = page.evaluate('''() => Object.fromEntries(
-          ['.chat-pane', '.session-sidebar', '.settings-main', '.settings-sidebar',
+          ['.chat-pane', '.chat-header', '.session-sidebar', '.settings-main', '.settings-sidebar',
            '.pi-skills-list-pane', '.pi-skill-detail-scroll'].map(selector => {
            const el = document.querySelector(selector) || document.createElement('div');
            if (!el.isConnected) { el.className=selector.slice(1); document.body.append(el); }
            const cs = getComputedStyle(el);
            return [selector, { background: cs.backgroundColor, filter: cs.backdropFilter }];
           }))''')
+        def opacity_of(color):
+            if color.startswith('rgba('):
+                return float(color.split(',')[-1].strip(' )'))
+            if '/' in color:
+                return float(re.search(r'/\s*(\d*\.?\d+)\s*\)$', color).group(1))
+            return 1
+
         for selector, values in pane_colors.items():
             color = values['background']
-            opacity = (float(color.split(',')[-1].strip(' )')) if color.startswith('rgba(')
-                       else float(re.search(r'/\s*(\d*\.?\d+)\s*\)$', color).group(1))
-                       if '/' in color else 1)
-            assert 0 < opacity < 1, f'{theme} {selector} must be translucent: {color}'
+            opacity = opacity_of(color)
             assert values['filter'] == 'none', f'{theme} {selector} expensive blur returned: {values}'
+            if selector in OPAQUE_PANES:
+                # The sidebars must read as one solid color with the chat header,
+                # so they must not let the wallpaper through at all.
+                assert opacity == 1, f'{theme} {selector} must be opaque: {color}'
+            else:
+                assert 0 < opacity < 1, f'{theme} {selector} must be translucent: {color}'
+        # Both sidebars must be exactly the chat header surface.
+        for selector in OPAQUE_PANES:
+            assert pane_colors[selector]['background'] == pane_colors['.chat-header']['background'], (
+                f"{theme} {selector} {pane_colors[selector]['background']} must equal "
+                f"header {pane_colors['.chat-header']['background']}"
+            )
         # Chat wallpaper tint must visually match the Settings main-pane tint.
         assert pane_colors['.chat-pane']['background'] == pane_colors['.settings-main']['background'], (
             f"{theme} chat tint {pane_colors['.chat-pane']['background']} must equal "
@@ -71,18 +89,27 @@ with sync_playwright() as pw:
         page.evaluate('document.querySelector(".app-shell").classList.add("background-disabled")')
         hidden = Image.open(BytesIO(page.screenshot())).convert('RGB')
         page.evaluate('document.querySelector(".app-shell").classList.remove("background-disabled")')
-        for pos in ((380, 240), (110, 240)):
+        # Both samples sit inside the translucent chat column (x > 180).
+        for pos in ((300, 240), (420, 240)):
             delta = max(abs(a-b) for a,b in zip(visible.getpixel(pos),hidden.getpixel(pos)))
-            assert delta >= 6, f'{theme} wallpaper invisible under pane at {pos}: difference {delta}'
+            assert delta >= 6, f'{theme} wallpaper invisible under chat pane at {pos}: difference {delta}'
+        # x=60/170 sit inside the solid session sidebar; no wallpaper may show.
+        for pos in ((60, 240), (170, 300)):
+            delta = max(abs(a-b) for a,b in zip(visible.getpixel(pos), hidden.getpixel(pos)))
+            assert delta == 0, f'{theme} wallpaper leaks through the solid sidebar at {pos}: {delta}'
         page.evaluate('document.getElementById("settings").hidden = false')
         settings_with_image = Image.open(BytesIO(page.screenshot())).convert('RGB')
         page.evaluate('document.querySelector(".app-shell").classList.add("background-disabled")')
         settings_without_image = Image.open(BytesIO(page.screenshot())).convert('RGB')
         page.evaluate('''() => { document.getElementById('settings').hidden = true;
             document.querySelector('.app-shell').classList.remove('background-disabled'); }''')
-        for pos in ((450, 240), (650, 240), (110, 240)):
+        for pos in ((450, 240), (650, 240), (300, 240)):
             delta = max(abs(a-b) for a,b in zip(settings_with_image.getpixel(pos), settings_without_image.getpixel(pos)))
             assert delta >= 2, f'{theme} wallpaper invisible under Settings at {pos}: difference {delta}'
-        print(f'{theme}: wallpaper visible in chat/sidebar/Settings/Skills; toggle works; no blur')
+        # The Settings sidebar is solid too.
+        for pos in ((60, 240),):
+            delta = max(abs(a-b) for a,b in zip(settings_with_image.getpixel(pos), settings_without_image.getpixel(pos)))
+            assert delta == 0, f'{theme} wallpaper leaks through the solid Settings sidebar at {pos}: {delta}'
+        print(f'{theme}: wallpaper visible in chat/Settings/Skills, hidden under the solid sidebars; toggle works; no blur')
     browser.close()
 print('PASS: tinted panes preserve wallpaper across themes')
