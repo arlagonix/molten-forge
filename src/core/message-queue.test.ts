@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { composerOverlayClearance, createPiUserMessageDelivery, normalizePiQueue, sendBehavior, textareaHeightLimit } from "./message-queue";
+import { composerFadeInset, composerOverlayClearance, createPiUserMessageDelivery, normalizePiQueue, sendBehavior, textareaHeightLimit } from "./message-queue";
 
 describe("Pi message queue", () => {
   it("treats each queue_update as a complete snapshot", () => {
@@ -35,6 +35,12 @@ describe("Pi message queue", () => {
     expect(composerOverlayClearance(800, 500)).toBe(316);
     expect(composerOverlayClearance(800, 740)).toBe(190);
     expect(composerOverlayClearance(520, 240)).toBe(296);
+  });
+  it("positions the fade at the actual composer top even when the clearance minimum dominates", () => {
+    expect(composerFadeInset(800, 680)).toBe(120);
+    expect(composerOverlayClearance(800, 680)).toBe(190); // not the same number
+    expect(composerFadeInset(800, 500)).toBe(300);
+    expect(composerFadeInset(520, 580)).toBe(0);
   });
   it("caps input growth in a short chat pane", () => {
     expect(textareaHeightLimit(480, 24, 13, 13)).toBeLessThanOrEqual(168);

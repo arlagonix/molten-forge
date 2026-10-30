@@ -191,3 +191,30 @@ The control follows the measured composer clearance so a tall multiline composer
 
 
 For queue strip and short-window multiline drafts, also see `docs/pi-queue-and-composer.md`. The resize observer tracks both the composer and chat pane, plus window resize/focus.
+
+## Phase 4: Floating composer fade
+
+The composer **already** overlays the transcript. Preserve its absolute
+positioning, measured bottom clearance, 16px safety gap, queue/widget height
+bounds, center alignment, and existing auto-follow/reader-anchor owners.
+
+The new fade is a 16px `mask-image` gradient on the **transcript scroll viewport**,
+not a backdrop blur, tinted card, or per-message mask. Because the mask belongs
+to the viewport, its horizon remains stationary while virtualized messages
+scroll beneath it. A mask affects only appearance, not hit testing or scroll
+geometry; avoid `transform` on the virtualized rows and their sticky code headers.
+
+`--composer-fade-inset` measures the actual overlap from the transcript's bottom
+to `.composer-wrap`'s top, independently of `--composer-overlay-clearance`.
+The overlay has **no top padding**, so its measured top coincides with the first
+visible composer/queue/widget surface; otherwise the masked viewport would
+show an invisible strip immediately above the composer.
+The latter retains the 190px minimum, needed for scroll clearance and large
+composer/queue layouts. Using that minimum as the fade position would make a
+short composer hide text far above its actual top. The existing ResizeObserver
+updates both values and keeps automatic following/reader intent unchanged.
+
+The mask is disabled for empty and history-loading transcripts, and applies in
+both light/dark themes without an extra image layer or blur. It begins fading
+at the composer top and returns to full opacity 16px above it, where the last
+message is allowed to settle.

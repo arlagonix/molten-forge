@@ -78,3 +78,43 @@ Notation: `T` = Thinking, `A/B/C` = sequential tool calls, `[A B]p1` = one expli
 - `segmentRuntimeGroupItems()` owns **parallel subgroup segmentation** only.
 - Rendering code must consume these helpers rather than reimplementing the rules.
 - Any change to these rules must update this document and `src/core/chat-logic.test.ts` in the same change.
+
+## Timeline presentation (Compact / Full)
+
+Timeline detail is a **UI-only** preference independent from runtime grouping and Pi RPC.
+It is stored under `molten-forge-pi-timeline-mode` and defaults to `compact`.
+
+- **Compact**: one collapsible top-level `Used …` summary covers contiguous
+  assistant Thinking/tool activity until prose, retry, maintenance, user or any
+  other non-runtime item interrupts it. Different canonical reasoning phases
+  **do not create additional top-level summaries**. Per-tool counts reflect the
+  complete disclosure in first-use order: `Used 3 Read, 2 Write`, with errors
+  and interruptions visible while collapsed. Thinking is included inside but
+  counted only when there are no tools. An active group uses `Using …`.
+  Expanding reveals **multiple independent bordered blocks**, with gaps and
+  rounded corners, rather than one giant bordered list with internal lines.
+  These inner blocks follow canonical `groupTranscriptItems()` reason → act
+  boundaries and `segmentRuntimeGroupItems()` explicit parallel batches:
+  `T [A B]p1 [C D]p2` has one disclosure containing `T + p1` and `p2`
+  blocks, while `T [A B]p1 C [D E]p2` has three internal blocks.
+  Each block contains chronological, individually expandable Thinking/tool
+  rows separated edge-to-edge. The summary's left activity icon changes to
+  an expand/collapse chevron on hover **and keyboard focus**, never using a
+  separate right-aligned chevron. Summary rows use no horizontal inset
+  padding or hover/pressed background fill in either theme; focus indication
+  remains visible. The collapsed state persists over ordinary virtualization
+  remounts.
+- **Full**: keeps original canonical runtime grouping and the auto-expand
+  preferences. It now uses the **same flat row surface and full-width dividers**
+  as expanded Compact, without a nested Parallel tool calls heading; each
+  row retains its `toolBatchId` metadata for explicit batch identity.
+  Standalone Thinking and tools use the same understated border treatment.
+- **Both**: nested Thinking and tool details have no redundant left border or
+  horizontal rail padding. Existing Markdown/CodeMirror rendering, diffs,
+  tool streaming, long-session virtualization, keyboard accessibility,
+  and transcript scrolling must be preserved.
+
+A change of presentation mode must not change the underlying transcript, Pi
+execution state, turn IDs, parallel metadata, or scroll-follow ownership.
+Expanded Compact groups may be collapsed independently, and the UI should
+retain their state across normal virtualized row mounting/unmounting.

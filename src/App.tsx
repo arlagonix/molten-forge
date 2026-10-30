@@ -25,14 +25,14 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, Image as ImageIcon, Loader2, Maximize2, Menu, Paperclip, Plus, Settings, Square, Terminal, Wrench, X } from "lucide-react";
+import { ArrowUp, BookOpen, Brain, Check, ChevronDown, ChevronRight, FilePenLine, FilePlus2, Image as ImageIcon, Loader2, Maximize2, Menu, Paperclip, Plus, Settings, Square, Terminal, Wrench, X } from "lucide-react";
 import { MarkdownRenderer } from "./components/markdown-renderer";
 import { AttachmentChip } from "./components/attachment-chip";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_WEBVIEW_ATTACHMENT_BYTES, composeAttachmentPrompt, parseAttachmentPrompt, supportsImageInput, uint8ToBase64, type ManagedAttachment } from "./core/attachments";
 import { ModelSwitcher } from "./components/model-switcher";
 import { MessageQueue } from "./components/message-queue";
 import { QueueModeSelect } from "./components/queue-mode-select";
-import { composerOverlayClearance, createPiUserMessageDelivery, normalizePiQueue, sendBehavior, textareaHeightLimit, type PiQueue, type QueueDelivery } from "./core/message-queue";
+import { composerFadeInset, composerOverlayClearance, createPiUserMessageDelivery, normalizePiQueue, sendBehavior, textareaHeightLimit, type PiQueue, type QueueDelivery } from "./core/message-queue";
 import { ContextUsagePopover, type ContextUsageDetails } from "./components/context-usage-popover";
 import { ProjectSessionSidebar } from "./components/project-session-sidebar";
 import { type ProjectSummary, projectKeyForSidebar } from "./core/project-sidebar";
@@ -45,6 +45,7 @@ import { ToolOutputContent } from "./components/tool-text-viewer";
 import { LoadingScreen } from "./components/loading-screen";
 import { PiStartupWelcome } from "./components/pi-startup-welcome";
 import { SettingsView, type SettingsSection } from "./components/settings-view";
+import { groupCompactActivityGroups, readTimelineMode, summarizeCompactActivity, type TimelineMode } from "./core/timeline-detail";
 import { shouldNotifyForSettledRun } from "./core/response-notifications";
 import { WindowControls } from "./components/window-controls";
 import { HoverMarqueeText } from "./components/hover-marquee-text";
@@ -253,7 +254,18 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = "molten-forge-pi-sidebar-collapsed";
 const LAST_WORKING_DIRECTORY_STORAGE_KEY = "molten-forge-pi-last-working-directory";
 const AUTO_EXPAND_THINKING_STORAGE_KEY = "molten-forge-pi-auto-expand-thinking";
 const AUTO_EXPAND_TOOLS_STORAGE_KEY = "molten-forge-pi-auto-expand-tools";
+const TIMELINE_MODE_STORAGE_KEY = "molten-forge-pi-timeline-mode";
 const BACKGROUND_COMPLETION_NOTIFICATION_KEY = "molten-forge-pi-notify-when-response-completes";
+/* MF appearance surfaces: phase 2 */
+const WALLPAPER_OVERLAY_STORAGE_KEY = "molten-forge-pi-wallpaper-overlay-percent";
+function getInitialWallpaperOverlayPercent() {
+  try {
+    const value = Number(window.localStorage.getItem(WALLPAPER_OVERLAY_STORAGE_KEY));
+    return Number.isFinite(value) && value >= 0 && value <= 25 ? Math.round(value) : 0;
+  } catch {
+    return 0;
+  }
+}
 const PREFERRED_MODEL_STORAGE_KEY = "molten-forge-pi-preferred-model";
 const HISTORY_SYNC_TIMEOUT_MS = 60_000;
 const READER_LAYOUT_INTERACTION_SELECTOR = '[data-reader-layout-interaction="true"]';
@@ -373,11 +385,13 @@ function persistPreferredModel(model: PiModel) {
 }
 
 type ActivityDisplaySettings = {
+  timelineMode: TimelineMode;
   autoExpandThinking: boolean;
   autoExpandTools: boolean;
 };
 
 const ActivityDisplaySettingsContext = createContext<ActivityDisplaySettings>({
+  timelineMode: "compact",
   autoExpandThinking: true,
   autoExpandTools: true,
 });
@@ -702,13 +716,15 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
 function HoverSwapActivityIcon({
   icon: Icon,
   hoverIcon: HoverIcon,
+  spinning = false,
 }: {
   icon: typeof Brain;
   hoverIcon: typeof Brain;
+  spinning?: boolean;
 }) {
   return (
     <span className="activity-icon activity-hover-icon" aria-hidden="true">
-      <Icon className="activity-base-icon" size={14} />
+      <Icon className={spinning ? "activity-base-icon activity-spinner-icon" : "activity-base-icon"} size={14} />
       <HoverIcon className="activity-expand-icon" size={14} />
     </span>
   );
@@ -1066,7 +1082,7 @@ const Composer = memo(function Composer({
             }
           }}
           placeholder="Message Pi or type /command…"
-          rows={3}
+          rows={1}
           autoFocus
         />
         <div className="composer-actions">
@@ -1186,6 +1202,7 @@ export default function App() {
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => getInitialAppearanceSettings().theme);
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
   const [backgroundImagesEnabled, setBackgroundImagesEnabled] = useState(() => getInitialAppearanceSettings().backgroundImagesEnabled);
+  const [wallpaperOverlayPercent, setWallpaperOverlayPercent] = useState(getInitialWallpaperOverlayPercent);
   const [customBackgrounds, setCustomBackgrounds] = useState<CustomBackgroundViews>({});
   const [backgroundPickerTheme, setBackgroundPickerTheme] = useState<BackgroundTheme | null>(null);
   const [backgroundError, setBackgroundError] = useState<string | null>(null);
@@ -1194,6 +1211,9 @@ export default function App() {
   const [loadingVisualReadyUrl, setLoadingVisualReadyUrl] = useState<string | null | undefined>(undefined);
   const [autoExpandThinking, setAutoExpandThinking] = useState(() => getStoredBoolean(AUTO_EXPAND_THINKING_STORAGE_KEY, true));
   const [autoExpandTools, setAutoExpandTools] = useState(() => getStoredBoolean(AUTO_EXPAND_TOOLS_STORAGE_KEY, true));
+  const [timelineMode, setTimelineMode] = useState<TimelineMode>(() => {
+    try { return readTimelineMode(window.localStorage, TIMELINE_MODE_STORAGE_KEY); } catch { return "compact"; }
+  });
   const [notifyWhenBackground, setNotifyWhenBackground] = useState(() => getStoredBoolean(BACKGROUND_COMPLETION_NOTIFICATION_KEY, false));
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const backgroundRunStartedRef = useRef(false);
@@ -1387,6 +1407,9 @@ export default function App() {
   useEffect(() => {
     try { writeBackgroundImagesEnabled(window.localStorage, backgroundImagesEnabled); } catch {}
   }, [backgroundImagesEnabled]);
+  useEffect(() => {
+    try { window.localStorage.setItem(WALLPAPER_OVERLAY_STORAGE_KEY, String(wallpaperOverlayPercent)); } catch {}
+  }, [wallpaperOverlayPercent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2745,6 +2768,10 @@ export default function App() {
   }, [autoExpandTools]);
 
   useEffect(() => {
+    try { window.localStorage.setItem(TIMELINE_MODE_STORAGE_KEY, timelineMode); } catch {}
+  }, [timelineMode]);
+
+  useEffect(() => {
     try { window.localStorage.setItem(BACKGROUND_COMPLETION_NOTIFICATION_KEY, String(notifyWhenBackground)); } catch {}
   }, [notifyWhenBackground]);
 
@@ -2790,10 +2817,20 @@ export default function App() {
       pane.style.getPropertyValue("--composer-overlay-clearance"),
     );
     if (!Number.isFinite(lastClearance)) lastClearance = 190;
+    let lastFadeInset = Number.parseFloat(pane.style.getPropertyValue("--composer-fade-inset"));
+    if (!Number.isFinite(lastFadeInset)) lastFadeInset = 0;
 
     const sync = () => {
       const transcriptBottom = transcriptRef.current?.getBoundingClientRect().bottom ?? pane.getBoundingClientRect().bottom;
-      const clearance = composerOverlayClearance(transcriptBottom, composerWrap.getBoundingClientRect().top);
+      const composerTop = composerWrap.getBoundingClientRect().top;
+      const fadeInset = composerFadeInset(transcriptBottom, composerTop);
+      // The 190px minimum clearance can stay unchanged while a short composer
+      // grows. Track its actual top independently so the fade follows it.
+      if (Math.abs(fadeInset - lastFadeInset) >= 1) {
+        lastFadeInset = fadeInset;
+        pane.style.setProperty("--composer-fade-inset", `${fadeInset}px`);
+      }
+      const clearance = composerOverlayClearance(transcriptBottom, composerTop);
       if (Math.abs(clearance - lastClearance) < 1) return;
 
       // The composer overlays the transcript. Growing it must extend the legal
@@ -2821,9 +2858,12 @@ export default function App() {
     // A restored tall draft needs its real clearance before the first visible
     // frame. Later growth/shrink is owned by the ResizeObserver below.
     const transcriptBottom = transcriptRef.current?.getBoundingClientRect().bottom ?? pane.getBoundingClientRect().bottom;
-    const initialClearance = composerOverlayClearance(transcriptBottom, composerWrap.getBoundingClientRect().top);
+    const composerTop = composerWrap.getBoundingClientRect().top;
+    const initialClearance = composerOverlayClearance(transcriptBottom, composerTop);
     lastClearance = initialClearance;
     pane.style.setProperty("--composer-overlay-clearance", `${initialClearance}px`);
+    lastFadeInset = composerFadeInset(transcriptBottom, composerTop);
+    pane.style.setProperty("--composer-fade-inset", `${lastFadeInset}px`);
 
     const observer = new ResizeObserver(scheduleSync);
     observer.observe(composerWrap);
@@ -4676,7 +4716,11 @@ export default function App() {
     toolDefinitionTokens,
   ]);
 
-  const activityDisplaySettings = useMemo(() => ({ autoExpandThinking, autoExpandTools }), [autoExpandThinking, autoExpandTools]);
+  const activityDisplaySettings = useMemo(() => ({
+    timelineMode,
+    autoExpandThinking: timelineMode === "full" && autoExpandThinking,
+    autoExpandTools: timelineMode === "full" && autoExpandTools,
+  }), [autoExpandThinking, autoExpandTools, timelineMode]);
   const activeBackgroundUrl = selectActiveBackgroundUrl(
     backgroundImagesEnabled,
     resolvedTheme,
@@ -4686,6 +4730,7 @@ export default function App() {
   const appStyle = {
     "--session-sidebar-width": `${sidebarWidth}px`,
     "--app-background-image": activeBackgroundUrl ? `url(${JSON.stringify(activeBackgroundUrl)})` : "none",
+    "--mf-wallpaper-overlay-opacity": String(wallpaperOverlayPercent / 100),
   } as CSSProperties;
 
   const loadingBackgroundUrl = activeBackgroundUrl ?? null;
@@ -4702,7 +4747,7 @@ export default function App() {
   }
 
   return (
-    <main className={`app-shell is-connected ${backgroundImagesEnabled ? "background-enabled" : "background-disabled"}`} style={appStyle}>
+    <main className={`app-shell is-connected ${backgroundImagesEnabled ? "background-enabled" : "background-disabled"} ${wallpaperOverlayPercent > 0 ? "wallpaper-overlay-enabled" : ""}`} style={appStyle}>
       <WindowControls />
       <>
           <div
@@ -4817,6 +4862,7 @@ export default function App() {
                 <TranscriptView
                   key={activeSessionPath ?? "__new-session__"}
                   items={visibleTranscriptItems}
+                  timelineMode={timelineMode}
                   historyLoading={historyLoading}
                   piVersion={piVersion}
                   commands={commands}
@@ -4933,11 +4979,14 @@ export default function App() {
             themePreference={themePreference}
             appFontFamily={appFontFamily}
             autoExpandThinking={autoExpandThinking}
+            timelineMode={timelineMode}
             autoExpandTools={autoExpandTools}
             notifyWhenBackground={notifyWhenBackground}
             notificationError={notificationError}
             onNotifyWhenBackgroundChange={(value) => void changeBackgroundNotificationSetting(value)}
             backgroundImagesEnabled={backgroundImagesEnabled}
+            wallpaperOverlayPercent={wallpaperOverlayPercent}
+            onWallpaperOverlayPercentChange={setWallpaperOverlayPercent}
             customBackgrounds={customBackgrounds}
             backgroundPickerTheme={backgroundPickerTheme}
             backgroundError={backgroundError}
@@ -4947,6 +4996,7 @@ export default function App() {
             onAppFontFamilyChange={(font) => preserveChatViewportThroughSettingsChange(() => setAppFontFamily(font))}
             onAutoExpandThinkingChange={(value) => preserveChatViewportThroughSettingsChange(() => setAutoExpandThinking(value))}
             onAutoExpandToolsChange={(value) => preserveChatViewportThroughSettingsChange(() => setAutoExpandTools(value))}
+            onTimelineModeChange={(value) => preserveChatViewportThroughSettingsChange(() => setTimelineMode(value))}
             onBackgroundImagesEnabledChange={setBackgroundImagesEnabled}
             onChooseBackgroundImage={chooseBackgroundImage}
             onClearBackgroundImage={(theme) => void clearBackgroundImage(theme)}
@@ -5513,10 +5563,16 @@ function RetryTranscript({ item }: { item: TranscriptItem }) {
   );
 }
 
-function ToolTranscript({ item }: { item: TranscriptItem }) {
+function ToolTranscript({ item, compact = false }: { item: TranscriptItem; compact?: boolean }) {
   const terminalLike = /^(bash|shell|terminal|powershell|pwsh)/i.test(item.title ?? "");
   const running = item.state === "running";
   const fileMutation = isFileMutationTool(item.title);
+  const compactIcon = !compact ? null
+    : terminalLike ? Terminal
+    : /^(read|read_file)$/i.test(item.title ?? "") ? BookOpen
+    : /^(write|create)$/i.test(item.title ?? "") ? FilePlus2
+    : /^(edit|patch|apply_patch)$/i.test(item.title ?? "") ? FilePenLine
+    : Wrench;
   const { autoExpandTools } = useContext(ActivityDisplaySettingsContext);
   const cwd = useContext(WorkingDirectoryContext);
   const [manualExpandedOverride, setManualExpandedOverride] = useState<boolean | undefined>(() =>
@@ -5603,7 +5659,7 @@ function ToolTranscript({ item }: { item: TranscriptItem }) {
         aria-expanded={expanded}
       >
         <HoverSwapActivityIcon
-          icon={terminalLike ? Terminal : Wrench}
+          icon={compactIcon ?? (terminalLike ? Terminal : Wrench)}
           hoverIcon={Maximize2}
         />
         <span className="activity-title">{formatToolDisplayName(item.title ?? "tool")}</span>
@@ -5696,22 +5752,78 @@ function ToolTranscript({ item }: { item: TranscriptItem }) {
   );
 }
 
-function RuntimeTranscriptGroup({ items }: { items: TranscriptItem[] }) {
-  const segments = useMemo(() => segmentRuntimeGroupItems(items), [items]);
+/** One disclosure per continuous activity run, with independently bordered
+ * smart-grouped thinking/tool phases and explicit Pi parallel batches. */
+const compactGroupExpandedById = new Map<string, boolean>();
+
+function CompactRuntimeTranscriptGroup({ items, blocks }: { items: TranscriptItem[]; blocks: TranscriptItem[][] }) {
+  const summary = useMemo(() => summarizeCompactActivity(items), [items]);
+  const groupId = items[0]?.id ?? "";
+  const [expanded, setExpanded] = useState(() => compactGroupExpandedById.get(groupId) ?? false);
+  const hasTools = items.some((item) => item.kind === "tool");
 
   return (
-    <div className="runtime-group">
-      {segments.map((segment) => (
-        segment.kind === "parallel-tools" ? (
-          <div className="parallel-tool-group" key={segment.key}>
-            <div className="parallel-tool-label">Parallel tool calls</div>
-            <div className="parallel-tool-items">
-              {segment.items.map((tool) => <MemoToolTranscript key={tool.id} item={tool} />)}
-            </div>
+    <div className="compact-runtime-episode">
+      <div className={`compact-tool-group${expanded ? " expanded" : ""}${summary.errors ? " has-errors" : ""}`}>
+        <button
+          className="compact-tool-summary"
+          type="button"
+          data-message-id={expanded ? undefined : groupId}
+          data-reader-layout-interaction="true"
+          aria-expanded={expanded}
+          aria-label={`${summary.label}${summary.errors ? `, ${summary.errors} failed` : ""}${summary.interrupted ? `, ${summary.interrupted} interrupted` : ""}`}
+          onClick={() => {
+            const next = !expanded;
+            compactGroupExpandedById.set(groupId, next);
+            setExpanded(next);
+          }}
+        >
+          <HoverSwapActivityIcon
+            icon={summary.running ? Loader2 : hasTools ? Wrench : Brain}
+            hoverIcon={expanded ? ChevronDown : ChevronRight}
+            spinning={summary.running}
+          />
+          <span className="compact-tool-label">{summary.label}</span>
+          {summary.errors > 0 && <span className="compact-tool-failures">{summary.errors} failed</span>}
+          {summary.interrupted > 0 && <span className="compact-tool-interrupted">{summary.interrupted} interrupted</span>}
+        </button>
+        {expanded && (
+          <div className="compact-tool-details">
+            {blocks.map((block) => (
+              <div className="compact-activity-block" key={block[0].id}>
+                {block.map((item) => (
+                  <div className="compact-activity-row" key={item.id} data-parallel-batch={item.toolBatchId}>
+                    {item.kind === "thinking"
+                      ? <MemoThinkingTranscript item={item} />
+                      : <MemoToolTranscript item={item} compact />}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
-        ) : (
-          <MemoTranscript key={segment.item.id} item={segment.item} />
-        )
+        )}
+      </div>
+    </div>
+  );
+}
+
+const MemoCompactRuntimeTranscriptGroup = memo(CompactRuntimeTranscriptGroup);
+
+function RuntimeTranscriptGroup({ items }: { items: TranscriptItem[] }) {
+  // Keep explicit batch metadata and authoritative segmentation even though the
+  // visual treatment is a flat row list with shared, edge-to-edge separators.
+  const segments = useMemo(() => segmentRuntimeGroupItems(items), [items]);
+  return (
+    <div className="runtime-group activity-row-list">
+      {segments.flatMap<{ item: TranscriptItem; parallelBatch?: string }>((segment) => segment.kind === "parallel-tools"
+        ? segment.items.map((item) => ({ item, parallelBatch: segment.key }))
+        : [{ item: segment.item, parallelBatch: undefined }],
+      ).map(({ item, parallelBatch }) => (
+        <div className="runtime-activity-row" key={item.id} data-parallel-batch={parallelBatch}>
+          {item.kind === "thinking"
+            ? <MemoThinkingTranscript item={item} />
+            : <MemoToolTranscript item={item} compact />}
+        </div>
       ))}
     </div>
   );
@@ -5753,7 +5865,9 @@ const MemoTranscript = memo(Transcript);
 const MemoRuntimeTranscriptGroup = memo(RuntimeTranscriptGroup);
 
 function TranscriptTurnView({ turn }: { turn: TranscriptTurn }) {
+  const { timelineMode } = useContext(ActivityDisplaySettingsContext);
   const agentGroups = useMemo(() => groupTranscriptItems(turn.agentItems), [turn.agentItems]);
+  const compactGroups = useMemo(() => timelineMode === "compact" ? groupCompactActivityGroups(agentGroups) : null, [agentGroups, timelineMode]);
   return (
     <div className="transcript-turn">
       {turn.userItems.length > 0 && (
@@ -5763,11 +5877,13 @@ function TranscriptTurnView({ turn }: { turn: TranscriptTurn }) {
       )}
       {turn.agentItems.length > 0 && (
         <div className="transcript-turn-agent">
-          {agentGroups.map((group) => (
-            group.kind === "runtime"
+          {timelineMode === "compact"
+            ? compactGroups?.map((group) => group.kind === "activity"
+              ? <MemoCompactRuntimeTranscriptGroup key={group.key} items={group.items} blocks={group.blocks} />
+              : <MemoTranscript key={group.item.id} item={group.item} />)
+            : agentGroups.map((group) => group.kind === "runtime"
               ? <MemoRuntimeTranscriptGroup key={group.key} items={group.items} />
-              : <MemoTranscript key={group.item.id} item={group.item} />
-          ))}
+              : <MemoTranscript key={group.item.id} item={group.item} />)}
         </div>
       )}
     </div>
@@ -5786,6 +5902,7 @@ const TRANSCRIPT_VIRTUAL_OVERSCAN = 8;
 
 type TranscriptViewProps = {
   items: TranscriptItem[];
+  timelineMode: TimelineMode;
   historyLoading: boolean;
   piVersion: string | null;
   commands: CommandInfo[];
@@ -5801,6 +5918,7 @@ type TranscriptViewProps = {
 
 const TranscriptView = memo(function TranscriptView({
   items,
+  timelineMode,
   historyLoading,
   piVersion,
   commands,
@@ -5854,6 +5972,11 @@ const TranscriptView = memo(function TranscriptView({
     directDomUpdates: true,
     directDomUpdatesMode: "position",
   });
+
+  useLayoutEffect(() => {
+    measuredHeightsRef.current.clear();
+    virtualizer.measure();
+  }, [timelineMode, virtualizer]);
 
   // Molten Forge owns transcript scroll position while Pi is streaming: the
   // original Electron moving-bottom rAF lerp owns live follow, while

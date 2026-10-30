@@ -41,6 +41,12 @@ describe("composer render isolation", () => {
     expect(rootAppSource).not.toContain("composerTextareaRef");
   });
 
+  it("starts with one editable row while preserving auto-growth for multiline drafts", () => {
+    expect(composerSource).toContain("rows={1}");
+    expect(composerSource).toContain("textarea.scrollHeight");
+    expect(composerSource).toContain("textareaHeightLimit(");
+  });
+
   it("keeps transcript rendering memoized independently of Composer", () => {
     expect(appSource).toContain("const TranscriptView = memo(function TranscriptView");
     expect(appSource).toContain("const MemoTranscriptTurn = memo(");

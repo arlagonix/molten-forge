@@ -1221,10 +1221,10 @@ textarea,
   cursor: progress;
 }
 
-/* One authoritative textarea maximum: JS computes the height. When the whole
-   overlay becomes crowded, flex may shrink it to this readable 3-row floor. */
+/* One-line idle composer (24px line-height + 13px top and 5px bottom
+   padding). JavaScript still grows it with content and caps tall drafts. */
 .composer textarea {
-  min-height: 72px;
+  min-height: 42px;
   max-height: none;
   resize: none;
   overflow-y: auto;
@@ -1379,8 +1379,10 @@ textarea,
   max-width: none;
 }
 
+/* The dock starts at its first visible surface. Top padding used to put the
+   timeline fade 10px above the composer and leave a blank strip. */
 .composer-wrap {
-  padding: 10px 0 14px;
+  padding: 0 0 14px;
 }
 
 .composer {
@@ -1686,15 +1688,7 @@ body.chat-width-resizing * {
 
 /* v0.9: reconnect-safe runtime, mirrored content resizing, resizable sidebar */
 
-/* User messages occupy the same full content column as assistant output. */
-.message.user {
-  width: 100%;
-}
-.user-bubble {
-  display: block;
-  width: 100%;
-  max-width: none;
-}
+/* User turns occupy the full virtualized column; their bubbles do not. */
 
 /* The composer shares the transcript column and keeps the subtle neutral outline
    used by Molten Forge's glass input surface. */
@@ -1879,20 +1873,24 @@ body.sidebar-width-resizing * {
   line-height: 24px;
 }
 
+/* Molten Forge chat geometry: content-sized user bubbles (phase 1) */
 .message.user {
+  display: flex;
+  justify-content: flex-end;
   width: 100%;
 }
-
 .user-bubble {
   display: block;
-  width: 100%;
-  max-width: none;
-  padding: 12px 16px;
-  border: 0;
-  border-radius: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  width: fit-content;
+  max-width: min(82%, 64ch);
+  padding: 8px 12px;
+  border: 1px solid var(--soft-border);
+  border-radius: 10px;
   font-size: 16px;
   line-height: 24px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+  box-shadow: none;
   /* Giant pasted prompts must not turn the whole transcript into one enormous
      virtual row. Keep a generous reading window and scroll the prompt itself. */
   max-height: clamp(240px, 44dvh, 480px);
@@ -1901,6 +1899,14 @@ body.sidebar-width-resizing * {
   scrollbar-width: thin;
 }
 
+
+/* Compact consecutive-user groups, preserving 8px turn-internal spacing. */
+.transcript-turn-users > .message.user:has(+ .message.user) .user-bubble {
+  border-bottom-right-radius: 4px;
+}
+.transcript-turn-users > .message.user + .message.user .user-bubble {
+  border-top-right-radius: 4px;
+}
 /* Direct port of the old .chat-markdown vertical rhythm, expressed without
    Tailwind so ReactMarkdown receives the same spacing in this small wrapper. */
 .markdown-body {
@@ -4839,6 +4845,27 @@ html[data-theme="light"] .tool-text-viewer {
   padding-bottom: var(--composer-overlay-clearance, 190px);
 }
 
+/* Phase 4: OpenCode-style content fade at the floating composer edge.
+   Mask the scrolling viewport rather than placing a tinted/blurred sheet over
+   the wallpaper. Its inset tracks the actual composer top (independently from
+   the 190px minimum scroll clearance), so the last line remains fully readable
+   with the existing +16px safety space. Do not mask the inner virtualized list:
+   that would make the fade scroll along with the messages. */
+.transcript:not(.transcript-empty):not(.transcript-history-loading) {
+  -webkit-mask-image: linear-gradient(to top,
+    transparent var(--composer-fade-inset, 0px),
+    rgba(0, 0, 0, .16) calc(var(--composer-fade-inset, 0px) + 4px),
+    rgba(0, 0, 0, .5) calc(var(--composer-fade-inset, 0px) + 8px),
+    rgba(0, 0, 0, .84) calc(var(--composer-fade-inset, 0px) + 12px),
+    #000 calc(var(--composer-fade-inset, 0px) + 16px));
+  mask-image: linear-gradient(to top,
+    transparent var(--composer-fade-inset, 0px),
+    rgba(0, 0, 0, .16) calc(var(--composer-fade-inset, 0px) + 4px),
+    rgba(0, 0, 0, .5) calc(var(--composer-fade-inset, 0px) + 8px),
+    rgba(0, 0, 0, .84) calc(var(--composer-fade-inset, 0px) + 12px),
+    #000 calc(var(--composer-fade-inset, 0px) + 16px));
+}
+
 /* Empty/history states keep the same reserved scrollbar gutter as populated
    chats. This prevents the measured transcript center (and therefore the
    composer) from shifting a few pixels during a session switch. */
@@ -5774,3 +5801,278 @@ html[data-theme="light"] .project-session-loading { color: var(--muted-foregroun
 .composer-queue-mode select:hover { color: var(--foreground); background: var(--hover); }
 .composer-queue-mode select option { color: var(--foreground); background: var(--background); }
 .composer-attachments { max-height: min(160px, 15dvh); }
+/* MF visual surfaces: phase 2 */
+/* Prefer restrained semantic surface tokens over per-element hard-coded shadows. */
+:root {
+  --mf-surface-border: color-mix(in oklab, var(--foreground) 11%, transparent);
+  --mf-surface-border-strong: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --mf-surface-radius: 10px;
+  --mf-control-radius: 8px;
+}
+html[data-theme="light"] {
+  --mf-surface-border: color-mix(in oklab, var(--foreground) 14%, transparent);
+  --mf-surface-border-strong: color-mix(in oklab, var(--foreground) 20%, transparent);
+}
+/* Settings and utility cards use a single subdued border and uniform curvature. */
+.settings-panel,
+.context-popover,
+.model-popover,
+.command-menu,
+.empty-state-card {
+  border-color: var(--mf-surface-border);
+  border-radius: var(--mf-control-radius);
+  box-shadow: none;
+}
+.settings-panel {
+  background: var(--app-glass-medium);
+}
+html[data-theme="light"] .settings-panel,
+html[data-theme="light"] .context-popover,
+html[data-theme="light"] .model-popover,
+html[data-theme="light"] .command-menu,
+html[data-theme="light"] .empty-state-card {
+  border-color: var(--mf-surface-border);
+  box-shadow: none;
+}
+/* Keep the input geometry and Bash warning border behavior unchanged. */
+.composer:not(.composer-bash-mode),
+.composer:not(.composer-bash-mode):hover,
+.composer:not(.composer-bash-mode):focus-within {
+  border-color: var(--mf-surface-border-strong) !important;
+  border-radius: var(--mf-surface-radius);
+  box-shadow: none !important;
+}
+.composer-queue { border-color: var(--mf-surface-border); border-radius: var(--mf-control-radius); }
+.settings-sidebar-row.active { border-color: var(--mf-surface-border); }
+/* Overlay mimics the source plugin: unblurred image composited over the UI.
+   It is opt-in and reuses the currently selected theme-specific wallpaper. */
+.app-shell.background-enabled.wallpaper-overlay-enabled::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5000;
+  pointer-events: none;
+  background-image: var(--app-background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--mf-wallpaper-overlay-opacity, 0);
+}
+.settings-wallpaper-overlay-row {
+  grid-template-columns: 24px minmax(0, 1fr) minmax(90px, 180px) 40px;
+  column-gap: 12px;
+  border-top: 1px solid var(--mf-surface-border);
+}
+.settings-wallpaper-overlay-slider {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.settings-wallpaper-overlay-slider:disabled { opacity: .4; cursor: not-allowed; }
+.settings-wallpaper-overlay-value {
+  justify-self: end;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 690px) {
+  .settings-wallpaper-overlay-row { grid-template-columns: 24px minmax(0, 1fr) 40px; }
+  .settings-wallpaper-overlay-slider { grid-column: 2; grid-row: 2; }
+  .settings-wallpaper-overlay-value { grid-column: 3; grid-row: 2; }
+}
+
+/* Compact timeline: one chronological disclosure over adjacent tool + thinking
+   phases. Full mode deliberately retains the established runtime-group style. */
+.compact-runtime-episode,
+.compact-tool-group { min-width: 0; }
+.compact-tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--pi-thinking-text, var(--muted-foreground));
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.compact-tool-summary > svg { flex: none; }
+.compact-tool-summary > svg:last-child { margin-left: auto; opacity: .68; }
+.compact-tool-label { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
+.compact-tool-summary:hover { color: var(--foreground); }
+.compact-tool-summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+.compact-tool-failures { flex: none; font-size: 12px; color: var(--danger, var(--error, #df7373)); }
+.compact-tool-interrupted { flex: none; font-size: 12px; color: var(--muted-foreground); }
+.compact-tool-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  margin-top: 2px;
+  min-width: 0;
+  background: var(--app-glass-medium);
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  box-shadow: none;
+}
+.compact-activity-row {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+}
+/* Dividers belong to full-width rows, not the inset tool header. */
+.compact-activity-row + .compact-activity-row {
+  border-top: 1px solid var(--mf-surface-border, var(--border));
+}
+.compact-activity-row > :is(.thinking, .tool) {
+  display: block;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.compact-activity-row > :is(.thinking, .tool) > .activity-header { min-width: 0; }
+.compact-activity-row:hover { background: var(--app-glass-card); }
+.compact-activity-row:first-child { border-radius: 7px 7px 0 0; }
+.compact-activity-row:last-child { border-radius: 0 0 7px 7px; }
+.compact-activity-row:only-child { border-radius: 7px; }
+html[data-theme="light"] .compact-tool-summary { color: var(--pi-thinking-text, var(--muted-foreground)); }
+html[data-theme="light"] .compact-tool-summary:hover { color: var(--foreground); }
+
+/* Phase 3.2 — shared activity chrome (Compact and Full).
+   The parent list owns its outer border and edge-to-edge row separators.
+   Never inset separators into a nested tool panel or add a redundant left rail. */
+.compact-tool-summary {
+  padding: 7px 0;
+  min-height: 30px;
+  line-height: 1.4;
+  border-radius: var(--mf-control-radius, 8px);
+}
+/* The summary sits flush with transcript content. No fill on hover/press,
+   including light theme where generic button rules would otherwise apply. */
+html[data-theme="light"] .compact-tool-summary { background: transparent; border: 0; }
+.compact-tool-summary:is(:hover, :active),
+html[data-theme="light"] .compact-tool-summary:is(:hover, :active) {
+  background: transparent;
+  border-color: transparent;
+}
+.compact-tool-failures,
+.compact-tool-interrupted {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+}
+.compact-tool-details { margin-top: 7px; }
+
+/* Full mode shares the same clean surface and divider geometry. */
+.runtime-group.activity-row-list,
+.compact-tool-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 0;
+  padding: 0;
+  overflow: visible; /* Preserve sticky CodeMirror headers and nested scrolling. */
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-medium);
+  box-shadow: none;
+  min-width: 0;
+}
+.runtime-activity-row,
+.compact-activity-row { min-width: 0; width: 100%; padding: 0; margin: 0; }
+.runtime-activity-row + .runtime-activity-row,
+.compact-activity-row + .compact-activity-row {
+  border-top: 1px solid var(--mf-surface-border, var(--border));
+}
+.runtime-activity-row > :is(.thinking, .tool),
+.compact-activity-row > :is(.thinking, .tool) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 7px 10px;
+  border: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.runtime-activity-row:hover,
+.compact-activity-row:hover { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+.runtime-activity-row:first-child,
+.compact-activity-row:first-child { border-radius: 7px 7px 0 0; }
+.runtime-activity-row:last-child,
+.compact-activity-row:last-child { border-radius: 0 0 7px 7px; }
+.runtime-activity-row:only-child,
+.compact-activity-row:only-child { border-radius: 7px; }
+
+/* Standalone activity, including Thinking-only, uses the same understated
+   solid surface rather than the legacy dashed container. */
+.transcript-turn-agent > :is(.thinking, .tool) {
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-medium);
+  box-shadow: none;
+  padding: 7px 10px;
+}
+/* Opening any tool or thought reveals its viewer without another vertical
+   divider or the 7px+14px left indentation inherited from the old design. */
+:is(.runtime-activity-row, .compact-activity-row, .transcript-turn-agent > .thinking, .transcript-turn-agent > .tool)
+  :is(.thinking-content, .tool-details) {
+  margin: 8px 0 0;
+  padding: 2px 0 2px;
+  border-left: none;
+  min-width: 0;
+}
+html[data-theme="light"] .runtime-group.activity-row-list,
+html[data-theme="light"] .compact-tool-details,
+html[data-theme="light"] .transcript-turn-agent > :is(.thinking, .tool) {
+  border-color: var(--mf-surface-border, var(--border));
+  box-shadow: none;
+}
+
+/* Phase 3.3 — one disclosure with multiple smart-grouped, bordered blocks.
+   No outer frame: each runtime phase / explicit parallel batch is its own card. */
+.compact-tool-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 9px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+.compact-activity-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-medium);
+  overflow: visible; /* CodeMirror sticky toolbars require visible ancestors. */
+}
+.compact-activity-block .compact-activity-row:first-child { border-radius: 7px 7px 0 0; }
+.compact-activity-block .compact-activity-row:last-child { border-radius: 0 0 7px 7px; }
+.compact-activity-block .compact-activity-row:only-child { border-radius: 7px; }
+/* Reuse the original icon-to-chevron hover/focus transition in the summary. */
+.compact-tool-summary:is(:hover, :focus-visible) .activity-base-icon { display: none !important; }
+.compact-tool-summary:is(:hover, :focus-visible) .activity-expand-icon { display: block !important; }
+html[data-theme="light"] .compact-activity-block {
+  border-color: var(--mf-surface-border, var(--border));
+}

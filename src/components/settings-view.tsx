@@ -17,6 +17,7 @@ import type { BackgroundTheme, ThemePreference } from "../core/appearance";
 import type { AppFontFamily } from "../core/ui-preferences";
 import type { CommandInfo, TranscriptItem } from "../core/chat-logic";
 import { PiResourcesSettings } from "./pi-resources-settings";
+import type { TimelineMode } from "../core/timeline-detail";
 import { PiSkillsSettings } from "./pi-skills-settings";
 import { PiToolsSettings } from "./pi-tools-settings";
 
@@ -48,10 +49,14 @@ type SettingsViewProps = {
   themePreference: ThemePreference;
   appFontFamily: AppFontFamily;
   autoExpandThinking: boolean;
+  timelineMode: TimelineMode;
   autoExpandTools: boolean;
   notifyWhenBackground: boolean;
   notificationError: string | null;
   backgroundImagesEnabled: boolean;
+  /* MF appearance settings: phase 2 */
+  wallpaperOverlayPercent: number;
+  onWallpaperOverlayPercentChange: (value: number) => void;
   customBackgrounds: BackgroundViews;
   backgroundPickerTheme: BackgroundTheme | null;
   backgroundError: string | null;
@@ -60,6 +65,7 @@ type SettingsViewProps = {
   onThemePreferenceChange: (theme: ThemePreference) => void;
   onAppFontFamilyChange: (font: AppFontFamily) => void;
   onAutoExpandThinkingChange: (value: boolean) => void;
+  onTimelineModeChange: (value: TimelineMode) => void;
   onAutoExpandToolsChange: (value: boolean) => void;
   onNotifyWhenBackgroundChange: (value: boolean) => void;
   onBackgroundImagesEnabledChange: (value: boolean) => void;
@@ -72,16 +78,20 @@ function GeneralSettings({
   themePreference,
   appFontFamily,
   autoExpandThinking,
+  timelineMode,
   autoExpandTools,
   notifyWhenBackground,
   notificationError,
   backgroundImagesEnabled,
+  wallpaperOverlayPercent,
+  onWallpaperOverlayPercentChange,
   customBackgrounds,
   backgroundPickerTheme,
   backgroundError,
   onThemePreferenceChange,
   onAppFontFamilyChange,
   onAutoExpandThinkingChange,
+  onTimelineModeChange,
   onAutoExpandToolsChange,
   onNotifyWhenBackgroundChange,
   onBackgroundImagesEnabledChange,
@@ -141,11 +151,31 @@ function GeneralSettings({
               </span>
             </label>
 
+            <label className="settings-control-row">
+              <span className="settings-row-icon"><Wrench size={16} /></span>
+              <span className="settings-row-copy">
+                <strong>Timeline detail</strong>
+                <small>Compact groups tool calls; Full shows the original individual activity blocks.</small>
+              </span>
+              <span className="settings-select-shell">
+                <select
+                  className="settings-select"
+                  value={timelineMode}
+                  onChange={(event) => onTimelineModeChange(event.target.value as TimelineMode)}
+                  aria-label="Timeline detail"
+                >
+                  <option value="compact">Compact</option>
+                  <option value="full">Full</option>
+                </select>
+                <ChevronDown className="settings-select-chevron" size={15} aria-hidden="true" />
+              </span>
+            </label>
+
             <label className="settings-switch-row">
               <span className="settings-row-icon"><Brain size={16} /></span>
               <span className="settings-row-copy">
                 <strong>Auto-expand thinking</strong>
-                <small>Open thinking while the model is actively reasoning. Completed thinking collapses automatically.</small>
+                <small>In Full mode, open thinking while the model is reasoning. Completed thinking collapses automatically.</small>
               </span>
               <input
                 type="checkbox"
@@ -159,7 +189,7 @@ function GeneralSettings({
               <span className="settings-row-icon"><Wrench size={16} /></span>
               <span className="settings-row-copy">
                 <strong>Auto-expand tool calls</strong>
-                <small>Open tool details while a tool call is active. Completed calls collapse automatically.</small>
+                <small>In Full mode, open tool details while a call is active. Completed calls collapse automatically.</small>
               </span>
               <input
                 type="checkbox"
@@ -203,6 +233,22 @@ function GeneralSettings({
               <span className="settings-switch" aria-hidden="true" />
             </label>
 
+            <div className="settings-control-row settings-wallpaper-overlay-row">
+              <span className="settings-row-icon"><ImageIcon size={16} /></span>
+              <span className="settings-row-copy">
+                <strong>Wallpaper overlay</strong>
+                <small>Repeat the wallpaper above panels, as in OpenCode. 0% disables the effect.</small>
+              </span>
+              <input
+                className="settings-wallpaper-overlay-slider"
+                type="range" min={0} max={25} step={1}
+                value={wallpaperOverlayPercent}
+                onChange={(event) => onWallpaperOverlayPercentChange(Number(event.target.value))}
+                disabled={!backgroundImagesEnabled}
+                aria-label="Wallpaper overlay opacity"
+              />
+              <output className="settings-wallpaper-overlay-value">{wallpaperOverlayPercent}%</output>
+            </div>
             {(["light", "dark"] as const).map((backgroundTheme) => {
               const customBackground = customBackgrounds[backgroundTheme];
               const label = `${backgroundTheme === "light" ? "Light" : "Dark"} background`;

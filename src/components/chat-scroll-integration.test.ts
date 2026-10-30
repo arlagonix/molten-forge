@@ -130,6 +130,14 @@ describe("chat scroll integration contracts", () => {
     expect(styles).toMatch(/\.composer-wrap\s*\{[\s\S]*?position:\s*absolute;/);
   });
 
+  it("fades timeline content beneath the floating composer without adding blur or changing scroll geometry", () => {
+    expect(appSource).toContain("composerFadeInset(transcriptBottom, composerTop)");
+    expect(appSource).toContain('setProperty("--composer-fade-inset"');
+    expect(styles).toMatch(/\.transcript:not\(\.transcript-empty\):not\(\.transcript-history-loading\)\s*\{[^}]*mask-image:\s*linear-gradient\(to top,/);
+    expect(styles).toMatch(/-webkit-mask-image:\s*linear-gradient\(to top,/);
+    expect(styles).toContain("var(--composer-fade-inset, 0px)");
+  });
+
   it("lets nested CodeMirror panes hand wheel scrolling back to the transcript", () => {
     expect(styles).toMatch(/\.chat-code-viewer \.cm-scroller\s*\{[\s\S]*?overscroll-behavior-y:\s*auto;/);
     expect(styles).toMatch(/\.tool-text-viewer,[\s\S]*?\.thinking-content\s*\{[\s\S]*?overscroll-behavior-y:\s*auto;/);
