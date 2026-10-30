@@ -1,99 +1,31 @@
-# Attachments and model context
+# Attachments — v0.36.52
 
-Molten Forge treats attachments as model context and as files that tools can inspect.
+## Pi boundary
 
-## Core behavior
+Use the existing Pi RPC `prompt` with a `message` string and optional `images: [{ type: "image", data: base64, mimeType }]`. Pass the actual image payload **only** when the active Pi model advertises `input: ["text", "image"]`. Regular files are never inlined. All files, including images, have persistent local paths included as readable JSON metadata appended to the prompt. Pi can `read` those paths on demand. Pi's session JSONL is authoritative for restoring the visible user attachment chips and message text.
 
-When a user attaches a file, Molten Forge gives the model a real filesystem path whenever possible.
+## Persistence
 
-- If the file already has a local path, Molten Forge keeps that original path and does not copy the file.
-- If the file has no stable path, for example a pasted image/blob, Molten Forge stages it under the OS temp directory:
+- Rust stages picker selections, clipboard images/files, and native OS drag/drops in the app-data `attachments/<unique-id>/<safe-filename>` hierarchy. The original path or clipboard data is not needed afterward.
+- React Composer stores only metadata. It reads image data when sending to Pi, never on every keystroke. Thumbnails read bytes only while mounted (no base64 in root App state).
+- Pi session messages retain a `<molten-forge-attachments-v1>` metadata suffix. `src/core/attachments.ts` constructs/parses it, and the visible transcript strips it. Clone/fork sessions naturally preserve absolute-path references.
+- Draft removal removes the managed attachment directory. **Sent attachments are intentionally preserved** while Pi sessions reference them, including across clone/fork. There is no session delete UI in Molten Forge v0.36.52; do not delete sent attachments on session switch or compact. When adding session deletion, implement reference-aware garbage collection rather than blindly deleting the original session's folder.
 
-```text
-<os-temp>/molten-forge/attachments/...
-```
+## Limits and interactions
 
-The temp directory is intentionally temporary. Old chats can keep attachment metadata even if the underlying temp file has been removed by the OS or by Molten Forge cleanup.
+- At most 12 attachments per prompt.
+- Native path picker/OS drop: up to 50 MB for files and 16 MB for supported images.
+- Browser clipboard/DOM drop: 16 MB due to IPC byte-array overhead.
+- Supported vision raster types: png/jpeg/gif/webp/bmp. Unknown, HEIC, SVG, PDF, ZIP, etc. stay regular files with paths (no implied document extraction).
+- `+`: native Add image or Upload file picker. `Ctrl/Cmd+V` accepts clipboard `File` items on the textarea. Native Tauri and browser drop events are separate integrations; browser file drops are handled in the composer, native drop events at the webview level.
+- Pending stages disable Send to avoid losing attachments before they have valid paths. Errors are visible in the composer. Image thumbnail click opens the image lightbox; × discards an unsent attachment.
 
-## Model-facing manifest
+## Future work
 
-Every attachment adds a manifest entry to the model context with:
+- Session-level draft persistence and reference-aware attachment garbage collection.
+- PDF/DOCX/XLSX extraction via explicit readers (not context inlining).
+- Native clipboard-file handling for desktop platforms that do not expose Explorer/Finder file copies through `clipboardData.files`.
 
-- file name,
-- file kind,
-- byte size,
-- path available to tools,
-- whether the file is temporary,
-- whether extracted text was included.
+## Regression contracts
 
-Text extracted from supported files is inserted into the prompt under configured limits. The path remains available so the model can call tools for more targeted inspection.
-
-## File type handling
-
-### Images
-
-Images are sent as multimodal `image_url` parts when attached. The model also receives their path.
-
-The `read` tool is multimodal: reading a supported image path returns an image data URL payload instead of raw binary text. On the next model request, Molten Forge converts that tool result into an attached image message so vision-capable models can inspect workspace images.
-
-If the selected model is not marked as vision-capable, Molten Forge shows a warning. The request is still allowed, but the model/provider may ignore or reject the image.
-
-### Text-like files
-
-Text-like files, including common source-code and data formats, are read as UTF-8 when safe. Extracted content is inserted into model context under limits. The original path is also exposed to tools.
-
-### PDFs
-
-PDF text is extracted with `pdf-parse`. If no text is found, Molten Forge marks the attachment as likely scanned/image-only and keeps the path available.
-
-### Office documents
-
-DOCX, XLSX, and PPTX files are parsed with `officeparser`. Extracted text is inserted into model context under limits. The original file path remains available to tools.
-
-### Archives
-
-Archives keep their original path when one exists. Pathless archives are staged in the Molten Forge temp attachment directory only if they are below the hard staging limit.
-
-Archive extraction is strict:
-
-- only small archives are inspected,
-- extraction depth is limited,
-- entry count is limited,
-- total extracted bytes are limited,
-- child files are processed with the same rules as normal attachments.
-
-Extracted children are staged under the Molten Forge temp attachment directory. Binary/image children are not blindly injected; image children can be inspected with `read(path)` when a vision-capable model is selected.
-
-### Unsupported binaries
-
-Unsupported binary files are metadata/path-only. Molten Forge does not inject raw bytes into the prompt.
-
-## Tool access
-
-Attachment access is added to tool execution context:
-
-- original attached files are allowed as exact file paths,
-- temporary attachment folders are added as additional read roots,
-- parent folders of original files are not exposed automatically.
-
-This means attaching:
-
-```text
-C:\Users\Acer\Downloads\report.pdf
-```
-
-allows tools to read that exact file, but it does not automatically expose the entire Downloads folder as a workspace root.
-
-## Cleanup
-
-When a message is deleted, Molten Forge deletes temporary files and extracted children owned by that message where possible. Original user files are never deleted.
-
-When a chat is deleted, Molten Forge deletes temporary/staged attachment files for that chat where possible. Original user files are never deleted.
-
-When a user edits a message and removes an attachment, Molten Forge removes the attachment reference and deletes Molten Forge-created temporary files for that removed attachment.
-
-## Old chats
-
-If an old chat references a path that still exists, the attachment remains usable.
-
-If the path no longer exists, the UI should keep the attachment record but mark it unavailable. The model context should state that the previously attached file is no longer available rather than pretending the content can still be read.
+Keep composer interaction state in `Composer` (not `App`); do not disturb chat virtualization or smooth scroll. Preserve already accepted Pi RPC prompt/abort lifecycle and existing model switching/extension commands. Path IO belongs in Rust and `read_attachment_bytes` must reject paths outside the managed root, including symlink escapes.
