@@ -12,6 +12,7 @@ Keep the wrapper thin. Do not reimplement Pi features when Pi already exposes th
 - `src/App.tsx` — application shell and Pi RPC event integration.
 - `src/core/` — pure/testable frontend logic. Prefer putting parsing, grouping, formatting, and state transformations here instead of growing `App.tsx`.
 - `docs/runtime-grouping.md` — source of truth for Thinking/tool/retry runtime grouping and explicit parallel-tool subgroup boundaries. Read it before changing transcript grouping.
+- `docs/releasing.md` — release/version rules, source-of-truth release notes, and publication validation. Read before version bumps or release packaging.
 - `docs/appearance.md` — source of truth for System/Light/Dark theme behavior, old Molten Forge palette compatibility, background visibility, and per-theme custom backgrounds. Read it before changing appearance settings.
 - `docs/window-chrome.md` — source of truth for the frameless Tauri title bar, old Molten Forge window controls, drag regions, and startup loading screen. Read it before changing desktop chrome or startup hydration UI.
 - `docs/chat-scroll.md` — source of truth for smooth sticky-to-bottom scrolling, manual-reader intent, suppression/resume rules, and programmatic-scroll guards. Read it before changing transcript scrolling.
@@ -36,6 +37,8 @@ Before changing attachments, read `docs/attachments.md`.
 Project-local agent skills live under `.agents/skills/`. This is the canonical, harness-neutral location for engineering guidance used by any coding agent working on this repository. **Before substantial React/frontend/Tauri work, read the relevant skill(s) and follow their checklist before editing unless the task is genuinely unrelated.** Do this regardless of which agent harness is currently running the task. If the harness does not automatically discover `.agents/skills/`, read the relevant `SKILL.md` files directly. This is especially important for areas with regressions that are easy to reintroduce.
 
 Recommended skills:
+
+- `.agents/skills/release-notes/SKILL.md` — consistent, source-grounded Features / Changes / Fixes release notes and GitHub Release prose. Read before publishing any release notes.
 
 - `.agents/skills/ub-mode/SKILL.md` — overall change discipline (first make it work, then make it right, then practice); read before code modifications. It supplements the feature-specific skills and does not require running unavailable external tools.
 - `.agents/skills/react-performance/SKILL.md` — state ownership, memoization, long-chat rendering, virtualization, streaming hot paths.

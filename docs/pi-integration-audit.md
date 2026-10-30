@@ -1,4 +1,4 @@
-# Pi integration audit — v0.36.18
+# Pi integration audit — initial v0.36.18 review, updated for v2.0.0
 
 Reviewed against the Pi RPC/session contract and the Tauri bridge.
 
@@ -48,13 +48,16 @@ Reviewed against the Pi RPC/session contract and the Tauri bridge.
 | Extension fire-and-forget UI | notify/status/title/editor-text/widget updates do not masquerade as blocking agent work; widgets stay around the editor instead of becoming transcript history. |
 | Process lifecycle | stdin closes first, Pi receives a grace period to dispose/flush, and force termination is only a bounded fallback. |
 
+## Additional Pi queue support (v0.36.85 onward)
+
+Steer and Follow-up are now exposed in the composer through Pi's `prompt` RPC with `streamingBehavior`. Pi `queue_update` is the source of truth for the queued items, and delivered user messages appear when Pi emits `message_start` for `role: "user"`. See [`pi-queue-and-composer.md`](pi-queue-and-composer.md).
+
 ## Pi RPC capabilities intentionally not exposed yet
 
 The audit also checked commands that the current product does not offer as first-class UI. Their absence is intentional rather than an unhandled lifecycle hole:
 
-- `steer` and `follow_up`: Molten Forge currently blocks ordinary composer submission while an agent run is active. If streaming message injection is added later, it must use Pi's explicit streaming behavior rather than sending a plain `prompt`.
 - model/thinking cycling commands: the app exposes direct model selection and thinking selection instead of cycling UI.
 - lower-level entry/tree navigation beyond the existing `/tree`, `/fork`, and session sidebar flows.
 - optional auto-compaction/auto-retry configuration RPCs that are not currently represented in Settings.
 
-Before exposing any of these, extend `docs/pi-rpc-lifecycle.md` and add boundary regression tests rather than wiring them as fire-and-forget stdin writes.
+Before exposing remaining commands, extend `docs/pi-rpc-lifecycle.md` and add boundary regression tests rather than wiring them as fire-and-forget stdin writes.
