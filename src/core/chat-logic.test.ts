@@ -3,6 +3,11 @@ import {
   BUILT_INS,
   COMMAND_SOURCE_ORDER,
   buildTranscriptTurns,
+  finalAssistantMessage,
+  turnResponseDurationMs,
+  validPiModelDurationMs,
+  formatResponseDuration,
+  withFinalAssistantDuration,
   commandSourceLabel,
   commandSourceRank,
   estimateTranscriptItemHeight,
@@ -483,5 +488,152 @@ describe("activity display state", () => {
     expect(resolveActivityExpanded(undefined, false, true)).toBe(false);
     expect(resolveActivityExpanded(false, true, true)).toBe(false);
     expect(resolveActivityExpanded(true, false, true)).toBe(true);
+  });
+});
+
+describe("one assistant metadata footer per logical turn", () => {
+  it("selects only the last assistant prose and includes intervening tool time from Pi metadata", () => {
+    const [turn] = buildTranscriptTurns([
+      item("user", "user", "Run tests", { timestamp: 500 }),
+      item("first", "assistant", "Starting", { timestamp: 1000, modelDurationMs: 1800 }),
+      item("bash", "tool"),
+      item("second", "assistant", "Verifying", { timestamp: 10000, modelDurationMs: 4000 }),
+      item("more", "tool"),
+      item("final", "assistant", "Done", { timestamp: 161000, modelDurationMs: 19000, model: "qwen" }),
+    ]);
+    expect(finalAssistantMessage(turn)?.id).toBe("final");
+    expect(turnResponseDurationMs(turn)).toBe(179000);
+    expect(formatResponseDuration(turnResponseDurationMs(turn))).toBe("2m 59s");
+  });
+
+  it("includes early tool-only and thinking-only model requests in restored run timing", () => {
+    const [turn] = buildTranscriptTurns([
+      item("user", "user", "Refactor"),
+      item("thinking", "thinking", "Planning", { timestamp: 2000 }),
+      item("tool", "tool", "", { timestamp: 2000, toolCallId: "x" }),
+      item("final", "assistant", "Done", { timestamp: 18000, modelDurationMs: 4500 }),
+    ]);
+    expect(turnResponseDurationMs(turn)).toBe(20500);
+  });
+
+  it("uses Pi's native duration for a single model request even without timestamps", () => {
+    const [turn] = buildTranscriptTurns([
+      item("user", "user", "Hi"),
+      item("assistant", "assistant", "Hello", { modelDurationMs: 18500 }),
+    ]);
+    expect(turnResponseDurationMs(turn)).toBe(18500);
+  });
+
+  it("uses the measured live run duration over historical Pi metadata", () => {
+    const [turn] = buildTranscriptTurns([
+      item("user", "user", "Hi", { timestamp: 1000 }),
+      item("assistant", "assistant", "Hello", { timestamp: 900000, modelDurationMs: 18500, durationMs: 24600 }),
+    ]);
+    expect(turnResponseDurationMs(turn)).toBe(24600);
+    expect(formatResponseDuration(turnResponseDurationMs(turn))).toBe("25s");
+  });
+
+  it("never infers timing from a user prompt and final model-start timestamp", () => {
+    const [turn] = buildTranscriptTurns([
+      item("user", "user", "Hi", { timestamp: 2500 }),
+      item("assistant", "assistant", "Hello", { timestamp: 2500 }),
+    ]);
+    expect(turnResponseDurationMs(turn)).toBeUndefined();
+    expect(formatResponseDuration(turnResponseDurationMs(turn))).toBe("");
+  });
+
+  it("does not guess complete run timing when the final Pi duration or message timestamps are missing", () => {
+    const [noAssistant] = buildTranscriptTurns([item("user", "user"), item("tool", "tool")]);
+    expect(turnResponseDurationMs(noAssistant)).toBeUndefined();
+    const [noTimestamp] = buildTranscriptTurns([
+      item("user", "user"), item("first", "assistant", "Starting"),
+      item("final", "assistant", "Done", { timestamp: 10000, modelDurationMs: 2000 }),
+    ]);
+    expect(turnResponseDurationMs(noTimestamp)).toBeUndefined();
+    const [noFinalDuration] = buildTranscriptTurns([
+      item("user", "user"), item("first", "assistant", "Starting", { timestamp: 1000, modelDurationMs: 900 }),
+      item("final", "assistant", "Done", { timestamp: 10000 }),
+    ]);
+    expect(turnResponseDurationMs(noFinalDuration)).toBeUndefined();
+    const [reversed] = buildTranscriptTurns([
+      item("user", "user"), item("first", "assistant", "Starting", { timestamp: 30000 }),
+      item("final", "assistant", "Done", { timestamp: 10000, modelDurationMs: 2000 }),
+    ]);
+    expect(turnResponseDurationMs(reversed)).toBeUndefined();
+  });
+
+  it("accepts only numeric, finite, nonnegative Pi durations", () => {
+    expect(validPiModelDurationMs(3000)).toBe(3000);
+    expect(validPiModelDurationMs(0)).toBe(0);
+    for (const value of ["0", "2000", null, -1, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+      expect(validPiModelDurationMs(value)).toBeUndefined();
+    }
+  });
+
+  it("formats subsecond, minute and hour durations and hides unknown values", () => {
+    expect(formatResponseDuration(0)).toBe("<1s");
+    expect(formatResponseDuration(100)).toBe("<1s");
+    expect(formatResponseDuration(999)).toBe("<1s");
+    expect(formatResponseDuration(24500)).toBe("25s");
+    expect(formatResponseDuration(59000)).toBe("59s");
+    expect(formatResponseDuration(59500)).toBe("1m 0s");
+    expect(formatResponseDuration(60000)).toBe("1m 0s");
+    expect(formatResponseDuration(3660000)).toBe("1h 1m");
+    expect(formatResponseDuration(-1)).toBe("");
+    expect(formatResponseDuration(Number.NaN)).toBe("");
+    expect(formatResponseDuration(undefined)).toBe("");
+  });
+
+  it("stamps only the latest assistant response without mutating earlier items", () => {
+    const original = [
+      item("u1", "user"), item("a1", "assistant"), item("tool", "tool"),
+      item("a2", "assistant"),
+    ];
+    const patched = withFinalAssistantDuration(original, 3600);
+    expect(patched).not.toBe(original);
+    expect(patched.slice(0, 3)).toEqual(original.slice(0, 3));
+    expect(patched[0]).toBe(original[0]);
+    expect(patched[1]).toBe(original[1]);
+    expect(patched[2]).toBe(original[2]);
+    expect(patched[3]).toEqual({ ...original[3], durationMs: 3600 });
+    expect(original[3].durationMs).toBeUndefined();
+  });
+
+  it("stamps the final runtime item when a turn has no final assistant text", () => {
+    const original = [item("u1", "user"), item("a1", "assistant"), item("u2", "user"), item("thinking", "thinking"), item("tool", "tool")];
+    const result = withFinalAssistantDuration(original, 9000);
+    expect(result[4]).toEqual({ ...original[4], durationMs: 9000 });
+    expect(result.slice(0, 4)).toEqual(original.slice(0, 4));
+    expect(withFinalAssistantDuration(original, Number.NaN)).toBe(original);
+    expect(withFinalAssistantDuration([item("u1", "user"), item("a1", "assistant"), item("u2", "user")], 9000))
+      .toEqual([item("u1", "user"), item("a1", "assistant"), item("u2", "user")]);
+  });
+
+  it("recovers thinking-only timing and tool-end timing from restored Pi messages", () => {
+    const [thinkingOnly] = buildTranscriptTurns([
+      item("u", "user"), item("thinking", "thinking", "reason", { modelDurationMs: 4200 }),
+    ]);
+    expect(turnResponseDurationMs(thinkingOnly)).toBe(4200);
+    const [toolOnly] = buildTranscriptTurns([
+      item("u", "user"), item("bash", "tool", "", { timestamp: 1000, modelDurationMs: 2000, completedAt: 12500 }),
+    ]);
+    expect(turnResponseDurationMs(toolOnly)).toBe(11500);
+    const [failed] = buildTranscriptTurns([
+      item("u", "user"), item("thinking", "thinking", "reason", { timestamp: 1000, modelDurationMs: 1500 }),
+      item("bash", "tool", "", { timestamp: 1000, modelDurationMs: 1500, completedAt: 7000, state: "error" }),
+      item("error", "error", "Aborted"),
+    ]);
+    expect(turnResponseDurationMs(failed)).toBe(6000);
+    const [live] = buildTranscriptTurns([item("u", "user"), item("thinking", "thinking", "reason", { durationMs: 7321 })]);
+    expect(turnResponseDurationMs(live)).toBe(7321);
+    const [errorAfterLive] = buildTranscriptTurns([
+      item("u", "user"), item("tool", "tool", "", { durationMs: 9000 }), item("error", "error", "Service unavailable"),
+    ]);
+    expect(turnResponseDurationMs(errorAfterLive)).toBe(9000);
+    const [missingToolDuration] = buildTranscriptTurns([
+      item("u", "user"), item("first", "assistant", "Starting", { timestamp: 1000, modelDurationMs: 900 }),
+      item("tool", "tool", "", { timestamp: 5000, completedAt: 12000 }),
+    ]);
+    expect(turnResponseDurationMs(missingToolDuration)).toBeUndefined();
   });
 });

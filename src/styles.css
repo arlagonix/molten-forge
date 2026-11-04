@@ -932,7 +932,7 @@ body { font-size: 16px; }
 .composer textarea { font-size: 16px; }
 .extension-status { margin-bottom: 7px; }
 
-/* Generation status copied from the old Molten Forge gradient treatment. */
+/* Generation status stays aligned with the active transcript turn. */
 .generation-status {
   min-height: 28px;
   display: inline-flex;
@@ -952,24 +952,6 @@ body { font-size: 16px; }
   border-radius: 50%;
   animation: activity-spin .75s linear infinite;
 }
-.generating-gradient-text {
-  background-image: linear-gradient(
-    90deg,
-    var(--muted-foreground),
-    var(--primary),
-    var(--foreground),
-    var(--primary),
-    var(--muted-foreground)
-  );
-  background-size: 200% auto;
-  color: transparent;
-  background-clip: text;
-  -webkit-background-clip: text;
-  /* Static gradient: animating its background-position forces continuous repaint. */
-  background-position: center;
-  font-weight: 500;
-}
-
 /* Runtime groups mirror Molten Forge's dashed process-step containers. */
 .runtime-group {
   display: grid;
@@ -6520,8 +6502,10 @@ html[data-theme="light"] .settings-inline-menu button:is(.highlighted, :hover, :
 }
 .settings-inline-menu button svg { flex: none; color: var(--muted-foreground); }
 
-/* OpenCode TextShimmer-style layered highlight. Only the text opacity/clip is
-   animated, not a full-window background gradient on the chat transcript. */
+/* Animate a clipped text-only highlight, not a gradient backing layer.
+   WebView2 can expose a rectangular artifact when background-clip: text has an
+   animated background-position. The overlay contains glyphs only, so no
+   rectangular paint surface can escape the text. */
 .generating-gradient-text {
   position: relative;
   display: inline-grid;
@@ -6533,21 +6517,24 @@ html[data-theme="light"] .settings-inline-menu button:is(.highlighted, :hover, :
 .generating-gradient-text > span { grid-area: 1 / 1; }
 .generating-gradient-text .generation-shimmer-highlight {
   color: var(--foreground);
-  -webkit-text-fill-color: transparent;
-  background: linear-gradient(95deg, transparent 16%, var(--foreground) 45%, var(--foreground) 55%, transparent 84%);
-  background-size: 250% 100%;
-  background-position: 120% center;
-  -webkit-background-clip: text;
-  background-clip: text;
-  animation: mf-working-shimmer 1.2s linear infinite;
-  transition: opacity 220ms ease;
+  -webkit-text-fill-color: currentColor;
+  background: none;
+  clip-path: inset(0 100% 0 0);
+  animation: mf-working-highlight-sweep 1.8s linear infinite;
+  pointer-events: none;
 }
-@keyframes mf-working-shimmer {
-  from { background-position: 120% center; }
-  to { background-position: -120% center; }
+/* Both ends are fully clipped: there is no visible jump on repeat. */
+@keyframes mf-working-highlight-sweep {
+  0%   { clip-path: inset(0 100% 0 0); }
+  12%  { clip-path: inset(0 82% 0 0); }
+  88%  { clip-path: inset(0 0 0 82%); }
+  100% { clip-path: inset(0 0 0 100%); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .generating-gradient-text .generation-shimmer-highlight { animation: none; opacity: 0; }
+  .generating-gradient-text .generation-shimmer-highlight {
+    animation: none;
+    clip-path: inset(0 100% 0 0);
+  }
 }
 
 /* The outer composer must not paint over the rounded corners of its own
@@ -6629,23 +6616,6 @@ html[data-theme="light"] .composer-model.model-switcher-trigger:is(:hover, .acti
   background: var(--hover);
 }
 
-/* The broad gradient's bright band is off-glyph at both keyframe endpoints.
-   This makes the shimmer seamless instead of snapping across its final frame. */
-.generating-gradient-text .generation-shimmer-highlight {
-  background: linear-gradient(90deg, transparent 0%, transparent 40%, var(--foreground) 48%, var(--foreground) 52%, transparent 60%, transparent 100%);
-  background-size: 350% 100%;
-  background-position: 0% center;
-  animation: mf-working-shimmer-seamless 1.8s linear infinite;
-  will-change: background-position;
-}
-@keyframes mf-working-shimmer-seamless {
-  from { background-position: 0% center; }
-  to { background-position: 100% center; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .generating-gradient-text .generation-shimmer-highlight { animation: none; opacity: 0; }
-}
-
 /* Lightweight message metadata; actions don't sit on top of message text. */
 .message-metadata {
   display: flex;
@@ -6674,7 +6644,8 @@ html[data-theme="light"] .composer-model.model-switcher-trigger:is(:hover, .acti
 .message.user .message-metadata { justify-content: flex-end; }
 .message.assistant .message-metadata { justify-content: flex-start; }
 .message-metadata-model { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: min(36ch, 50vw); }
-.message-metadata time { white-space: nowrap; }
+.message-metadata time,
+.message-metadata-duration { white-space: nowrap; }
 .message-metadata-separator { flex: none; opacity: .8; user-select: none; }
 .message-meta-action {
   display: inline-flex;
@@ -6697,3 +6668,15 @@ html[data-theme="light"] .composer-model.model-switcher-trigger:is(:hover, .acti
 .message.user { flex-direction: column; align-items: flex-end; }
 .message.user .user-bubble { flex: 0 1 auto; }
 .message-meta-action:disabled { opacity: .35; cursor: default; }
+
+/* T3-style completed work summary; reuse Compact's quiet icon, chevron,
+   font and focus treatment without nesting an additional card. The final
+   assistant answer remains a normal sibling below this disclosure. */
+.completed-work-disclosure,
+.completed-work-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.completed-work-details { gap: 8px; padding-top: 8px; }
+.completed-work-summary { width: 100%; }

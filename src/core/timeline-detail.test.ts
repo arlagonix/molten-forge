@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TranscriptItem } from "./chat-logic";
 import { buildTranscriptTurns, groupTranscriptItems } from "./chat-logic";
-import { activeSemiCompactActivity, groupCompactActivityGroups, readTimelineMode, summarizeCompactActivity } from "./timeline-detail";
+import { activeSemiCompactActivity, groupCompactActivityGroups, readTimelineMode, summarizeCompactActivity, splitCompletedWork, completedWorkDisclosure, firstUnsettledTurnIndex, isUnsettledWorkTurn } from "./timeline-detail";
 
 const tool = (id: string, title: string, state: TranscriptItem["state"] = "done", toolBatchId?: string): TranscriptItem =>
   ({ id, kind: "tool", title, state, text: "", toolBatchId });
@@ -140,5 +140,69 @@ describe("Semi Compact live activity frontier", () => {
   it("handles empty and prose-only histories", () => {
     expect(activeSemiCompactActivity([], true)).toBeNull();
     expect(activity([prose("user", "user"), prose("hello")])).toBeNull();
+  });
+});
+
+describe("completed work disclosure", () => {
+  it("hides only earlier agent activity and preserves the final answer", () => {
+    const items = [thought("t"), tool("bash", "Bash"), prose("update"), tool("read", "Read"), prose("final")];
+    expect(splitCompletedWork(items)).toEqual({ earlier: items.slice(0, -1), visible: [items[4]] });
+  });
+
+  it("folds completed thinking-only and tool-only turns with no final prose", () => {
+    expect(splitCompletedWork([prose("hello")])).toBeNull();
+    expect(splitCompletedWork([thought("t")])).toEqual({ earlier: [thought("t")], visible: [] });
+    const tools = [thought("t"), tool("bash", "Bash")];
+    expect(splitCompletedWork(tools)).toEqual({ earlier: tools, visible: [] });
+    const interim = [thought("t"), prose("answer"), tool("bash", "Bash")];
+    expect(splitCompletedWork(interim)).toEqual({ earlier: interim, visible: [] });
+  });
+
+  it("keeps terminal failure details and the final answer outside the disclosure", () => {
+    const failed = [thought("t"), tool("bash", "Bash", "error"), prose("error", "error")];
+    expect(splitCompletedWork(failed)).toEqual({ earlier: failed.slice(0, -1), visible: failed.slice(-1) });
+    const interrupted = [thought("t"), prose("answer"), tool("bash", "Bash", "interrupted"), prose("aborted", "error")];
+    expect(splitCompletedWork(interrupted)).toEqual({ earlier: interrupted.slice(0, -1), visible: interrupted.slice(-1) });
+    const afterAnswer = [thought("t"), tool("bash", "Bash", "error"), prose("answer"), prose("error", "error")];
+    expect(splitCompletedWork(afterAnswer)).toEqual({ earlier: afterAnswer.slice(0, 2), visible: afterAnswer.slice(2) });
+    expect(splitCompletedWork([thought("t"), prose("answer"), prose("error", "error")]))
+      .toEqual({ earlier: [thought("t")], visible: [prose("answer"), prose("error", "error")] });
+  });
+
+  it("never folds maintenance-only, retries-only or plain assistant text", () => {
+    expect(splitCompletedWork([{ ...tool("compact", "Compact"), runtimeRole: "session-maintenance" }])).toBeNull();
+    expect(splitCompletedWork([prose("retry", "retry")])).toBeNull();
+    expect(splitCompletedWork([prose("answer")])).toBeNull();
+  });
+
+  it("shows Worked for only after Pi settlement, in Compact and Semi Compact", () => {
+    const items = [thought("thinking"), tool("read", "Read"), prose("last")];
+    expect(completedWorkDisclosure(items, "compact", true)).toBeNull();
+    expect(completedWorkDisclosure(items, "semi-compact", true)).toBeNull();
+    expect(completedWorkDisclosure(items, "full", false)).toBeNull();
+    expect(completedWorkDisclosure(items, "full", true)).toBeNull();
+    expect(completedWorkDisclosure(items, "compact", false)?.visible[0].id).toBe("last");
+    expect(completedWorkDisclosure(items, "semi-compact", false)?.earlier).toEqual(items.slice(0, -1));
+  });
+
+  it("holds every Steer-generated turn unfolded until the entire run settles", () => {
+    const turns = buildTranscriptTurns([
+      prose("historical", "user"), thought("old"), prose("old-final"),
+      prose("new-prompt", "user"), thought("new"), prose("interim"),
+      prose("steer", "user"), tool("bash", "Bash"), prose("current-final"),
+    ]);
+    const first = firstUnsettledTurnIndex(turns, "new-prompt");
+    expect(first).toBe(1);
+    expect(isUnsettledWorkTurn(0, first, turns.length - 1, true)).toBe(false);
+    expect(isUnsettledWorkTurn(1, first, turns.length - 1, true)).toBe(true);
+    expect(isUnsettledWorkTurn(2, first, turns.length - 1, true)).toBe(true);
+    expect(isUnsettledWorkTurn(2, first, turns.length - 1, false)).toBe(false);
+    // If agent_start was not observed, keep the current newest turn unfolded.
+    expect(isUnsettledWorkTurn(2, -1, turns.length - 1, true)).toBe(true);
+    expect(isUnsettledWorkTurn(0, -1, turns.length - 1, true)).toBe(false);
+  });
+
+  it("never folds session maintenance into a fake assistant work disclosure", () => {
+    expect(splitCompletedWork([{ ...tool("compact", "Compact"), runtimeRole: "session-maintenance" }, prose("answer")])).toBeNull();
   });
 });

@@ -20,3 +20,13 @@ export function chatContentGeometry(
     centerOffset: contentCenter - paneCenter,
   };
 }
+
+/** Center the chat-width resize indicator on its pointer within the *rendered*
+ * guide, avoiding offsets tied to the (movable) chat header. */
+export function chatResizeMarkerY(clientY: number, guideTop: number, guideHeight: number): number {
+  const height = Number.isFinite(guideHeight) ? Math.max(0, guideHeight) : 0;
+  const top = Number.isFinite(guideTop) ? guideTop : 0;
+  const inset = Math.min(18, height / 2);
+  const pointerY = Number.isFinite(clientY) ? clientY - top : height / 2;
+  return Math.max(inset, Math.min(height - inset, pointerY));
+}

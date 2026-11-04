@@ -14,12 +14,20 @@ describe("OpenCode-inspired polish", () => {
   it("uses the same typography for Steer and the model trigger", () => {
     expect(css).toMatch(/\.composer-delivery-trigger,[\s\S]*?\.composer-model\.model-switcher-trigger,[\s\S]*?font-size: 12px;[\s\S]*?font-weight: 400;/);
   });
-  it("has a shimmer whose visible endpoints match", () => {
-    expect(css).toContain("background-size: 350% 100%");
-    expect(css).toContain("@keyframes mf-working-shimmer-seamless");
-    expect(css).toContain("from { background-position: 0% center; }");
-    expect(css).toContain("to { background-position: 100% center; }");
-    expect(css).toContain("prefers-reduced-motion: reduce");
+  it("clips the Working/Composing highlight to text without a WebView2 gradient layer", () => {
+    const statusStart = css.indexOf("/* Animate a clipped text-only highlight");
+    const statusEnd = css.indexOf("/* The outer composer must not paint", statusStart);
+    const shimmer = css.slice(statusStart, statusEnd);
+    expect(shimmer).toContain("background: none;");
+    expect(shimmer).toContain("-webkit-text-fill-color: currentColor;");
+    expect(shimmer).toContain("clip-path: inset(0 100% 0 0);");
+    expect(shimmer).toContain("animation: mf-working-highlight-sweep 1.8s linear infinite;");
+    expect(shimmer).toContain("0%   { clip-path: inset(0 100% 0 0); }");
+    expect(shimmer).toContain("100% { clip-path: inset(0 0 0 100%); }");
+    expect(shimmer).toContain("prefers-reduced-motion: reduce");
+    expect(shimmer).not.toMatch(/^\s*(?:-webkit-)?background-clip:\s*text;/m);
+    expect(shimmer).not.toContain("background-position:");
+    expect(css).not.toContain("mf-working-shimmer-seamless");
   });
   it("reveals message metadata on hover or keyboard focus without shifting layout", () => {
     expect(css).toMatch(/\.message-metadata \{[\s\S]*?opacity: 0;[\s\S]*?pointer-events: none;/);
@@ -43,5 +51,27 @@ describe("OpenCode-inspired polish", () => {
     expect(app).toContain("navigator.clipboard.writeText(item.text)");
     expect(app).toContain("<MessageMetadata item={item}");
     expect(app).not.toContain('type: "rewind"');
+  });
+});
+
+describe("single final assistant metadata row", () => {
+  it("reserves metadata space only under the last assistant text of a completed turn", () => {
+    expect(app).toContain('const lastAssistantId = !suppressAssistantMetadata ? finalAssistantMessage(turn)?.id : undefined;');
+    expect(app).toContain('showAssistantMetadata={group.item.id === lastAssistantId}');
+    expect(app).toContain('showAssistantMetadata && <MessageMetadata item={item} durationMs={assistantDurationMs} />');
+    expect(app).toContain('suppressAssistantMetadata={isStreaming && virtualItem.index === turns.length - 1}');
+  });
+
+  it("reads persisted Pi model duration from both history and live message_end", () => {
+    expect(app).toContain('modelDurationMs: validPiModelDurationMs(message.durationMs)');
+    expect(app).toContain('modelDurationMs: validPiModelDurationMs(record.message?.durationMs)');
+    expect(app).toContain('completedAt: message.timestamp ?? message.__mfEntryTimestamp');
+  });
+
+  it("measures Pi's settled generation duration, including tool calls, instead of every intermediate message", () => {
+    expect(app).toContain('agentRunStartedAtRef.current = performance.now()');
+    expect(app).toContain('withFinalAssistantDuration(current, durationMs)');
+    expect(app).toContain('title="Pi response time, including tool calls"');
+    expect(app).toContain('turnResponseDurationMs(turn)');
   });
 });

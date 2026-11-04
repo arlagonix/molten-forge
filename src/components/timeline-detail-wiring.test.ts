@@ -32,6 +32,39 @@ describe("Compact / Full timeline wiring", () => {
     expect(css).toContain('.semi-compact-activity.is-open .semi-compact-full-reveal');
   });
 
+  it("folds completed work only after Pi settlement and keeps final prose visible", () => {
+    expect(app).toContain('activeRunFirstUserId={activeRunFirstUserId}');
+    expect(app).toContain('case "agent_settled"');
+    expect(app).toContain('setActiveRunFirstUserId(null)');
+    expect(app).toContain('completedWorkDisclosure(');
+    expect(app).toContain('suppressCompletedWork={isUnsettledWorkTurn(');
+    expect(app).toContain('className="compact-tool-summary completed-work-summary"');
+    expect(app).toContain('aria-expanded={expanded}');
+    expect(app).toContain('<MemoAgentItems items={earlier} activeSemiCompactGroupKey={null} />');
+    expect(app).toContain('items={completedWork!.visible}');
+    expect(css).toContain('.completed-work-disclosure');
+    expect(css).toContain('.completed-work-details');
+  });
+
+  it("uses a chevron (not fullscreen) when hovering Bash and other tool headers", () => {
+    const start = app.indexOf("function ToolTranscript(");
+    const end = app.indexOf("const MemoToolTranscript", start);
+    const toolView = app.slice(start, end);
+    expect(toolView).toContain("hoverIcon={expanded ? ChevronDown : ChevronRight}");
+    expect(toolView).not.toContain("hoverIcon={Maximize2}");
+  });
+
+  it("keeps the Worked for disclosure chevron visible at rest and points it down when expanded", () => {
+    const start = app.indexOf("function CompletedWorkDisclosure(");
+    const end = app.indexOf("const MemoCompletedWorkDisclosure", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const disclosure = app.slice(start, end);
+    expect(disclosure).toContain("<ChevronIcon expanded={expanded} />");
+    expect(disclosure).not.toContain("HoverSwapActivityIcon");
+    expect(disclosure).not.toContain("icon={Wrench}");
+  });
+
   it("preserves Full renderer and shows stable, individually expandable chronological episodes", () => {
     expect(app).toContain('timelineMode !== "full"');
     expect(app).toContain('groupCompactActivityGroups(agentGroups)');

@@ -127,6 +127,34 @@ execution state, turn IDs, parallel metadata, or scroll-follow ownership.
 Expanded Compact groups may be collapsed independently, and the UI should
 retain their state across normal virtualized row mounting/unmounting.
 
+## Completed turn work disclosure (Compact / Semi Compact only)
+
+- After Pi's **whole agent run** settles, a turn with Thinking/tool activity
+  shows one `Worked for …` disclosure even when it ends in Thinking, a tool, or
+  a terminal failure without a final assistant text message.
+- It is **collapsed by default** and contains all earlier assistant activity,
+  including intermediate prose messages and their canonical `Used …` groups.
+  The last assistant answer (when it follows the last activity) and any trailing
+  terminal error/notice remain visible outside the disclosure. A thinking-only
+  or tool-only response has no synthetic assistant text/footer.
+- Full mode always renders the full transcript without this disclosure.
+- Do not expose `Worked for …` merely when a model message or tool call ends.
+  Steer can create multiple user turns during the same still-running Pi agent
+  execution; all those turns remain unfolded until `agent_settled`.
+- The disclosure reuses the Compact summary's text, icon/chevron on hover and
+  focus, and keyboard-accessible button, without scroll-affecting animation.
+  Manual expansion state survives ordinary virtualization remounts.
+- The elapsed time uses a measured live `agent_start` → `agent_settled` duration
+  if available. Restored sessions reconstruct wall-clock elapsed time using
+  the first persisted Pi AssistantMessage start timestamp and the **last**
+  model request start timestamp plus native `durationMs`, using tool-result
+  completion timestamps to account for terminal tool execution. This includes
+  intervening tool execution when Pi records its end timestamp and excludes
+  user think/read time. When timing
+  data is missing, show `Work details` without inventing a duration; do not
+  subtract the user's prompt timestamp from the model start time. A measured
+  subsecond response renders `<1s`, never `0s`.
+
 ## Semi Compact presentation (transcript-only)
 
 The three timeline modes share the same authoritative runtime groups and Pi data:

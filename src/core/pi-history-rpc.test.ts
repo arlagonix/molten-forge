@@ -17,9 +17,9 @@ describe("Pi full-history request, using a scripted RPC peer", () => {
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith({ type: "get_entries" }, { silent: true, history: true }, 2400);
     expect(historyRecordsFromSessionEntries(response.data?.entries, response.data?.leafId)).toEqual([
-      { role: "user", content: "hello" },
+      expect.objectContaining({ role: "user", content: "hello", __mfEntryId: "user" }),
       expect.objectContaining({ role: "__moltenForgeCompactionEntry", summary: "before" }),
-      { role: "assistant", content: "actual" },
+      expect.objectContaining({ role: "assistant", content: "actual", __mfEntryId: "active" }),
     ]);
   });
 

@@ -26,7 +26,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowUp, BookOpen, Brain, Check, ChevronDown, ChevronRight, FilePenLine, FilePlus2, Image as ImageIcon, Loader2, Maximize2, Copy, GitFork, Menu, Paperclip, Plus, Settings, Square, Terminal, Wrench, X } from "lucide-react";
+import { ArrowUp, BookOpen, Brain, Check, ChevronDown, ChevronRight, FilePenLine, FilePlus2, Image as ImageIcon, Loader2, Copy, GitFork, Menu, Paperclip, Plus, Settings, Square, Terminal, Wrench, X } from "lucide-react";
 import { MarkdownRenderer } from "./components/markdown-renderer";
 import { AttachmentChip } from "./components/attachment-chip";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_WEBVIEW_ATTACHMENT_BYTES, composeAttachmentPrompt, parseAttachmentPrompt, supportsImageInput, uint8ToBase64, type ManagedAttachment } from "./core/attachments";
@@ -47,7 +47,7 @@ import { ToolOutputContent } from "./components/tool-text-viewer";
 import { LoadingScreen } from "./components/loading-screen";
 import { PiStartupWelcome } from "./components/pi-startup-welcome";
 import { SettingsView, type SettingsSection } from "./components/settings-view";
-import { activeSemiCompactActivity, groupCompactActivityGroups, readTimelineMode, summarizeCompactActivity, type TimelineMode } from "./core/timeline-detail";
+import { activeSemiCompactActivity, groupCompactActivityGroups, readTimelineMode, completedWorkDisclosure, firstUnsettledTurnIndex, isUnsettledWorkTurn, summarizeCompactActivity, type TimelineMode } from "./core/timeline-detail";
 import { shouldNotifyForSettledRun } from "./core/response-notifications";
 import { WindowControls } from "./components/window-controls";
 import { HoverMarqueeText } from "./components/hover-marquee-text";
@@ -119,7 +119,7 @@ import {
 } from "./core/interruption-lifecycle";
 import { extensionUiBlocksAgent, normalizeExtensionWidget, piRuntimeSnapshot } from "./core/pi-rpc-lifecycle";
 import { contextEstimateAfterCompaction, resolveContextUsage } from "./core/context-usage";
-import { chatContentGeometry } from "./core/chat-content-geometry";
+import { chatContentGeometry, chatResizeMarkerY } from "./core/chat-content-geometry";
 import {
   readAppFontFamily,
   writeAppFontFamily,
@@ -154,6 +154,11 @@ import {
   COMMAND_SOURCE_ORDER,
   TUI_ONLY,
   buildTranscriptTurns,
+  finalAssistantMessage,
+  turnResponseDurationMs,
+  validPiModelDurationMs,
+  formatResponseDuration,
+  withFinalAssistantDuration,
   commandSourceLabel,
   commandSourceRank,
   estimateTranscriptTurnHeight,
@@ -509,6 +514,8 @@ function historyToTranscript(messages: any[]): TranscriptItem[] {
           kind: "thinking",
           title: "Thinking",
           text: thinking,
+          timestamp: message.timestamp,
+          modelDurationMs: validPiModelDurationMs(message.durationMs),
           state: "done",
         });
       }
@@ -526,6 +533,8 @@ function historyToTranscript(messages: any[]): TranscriptItem[] {
           toolDiff: /^edit$/i.test(String(part.name ?? "tool")) ? previewEditDiff(part.arguments ?? {}) : undefined,
           toolCallId: callId,
           toolBatchId: batchId,
+          timestamp: message.timestamp,
+          modelDurationMs: validPiModelDurationMs(message.durationMs),
           state: abortTerminal ? "interrupted" : "done",
         };
         toolsByCallId.set(callId, result.length);
@@ -536,6 +545,7 @@ function historyToTranscript(messages: any[]): TranscriptItem[] {
       if (text) result.push({
         id: uid("history-assistant"), kind: "assistant", text,
         timestamp: message.timestamp ?? message.__mfEntryTimestamp,
+        modelDurationMs: validPiModelDurationMs(message.durationMs),
         model: typeof message.model === "string" ? message.model : undefined,
         provider: typeof message.provider === "string" ? message.provider : undefined,
       });
@@ -563,6 +573,7 @@ function historyToTranscript(messages: any[]): TranscriptItem[] {
           toolResultDetails: message.details,
           toolDiff: message.isError ? resultDiff : (resultDiff ?? existing.toolDiff),
           toolExecutionStarted: true,
+          completedAt: message.timestamp ?? message.__mfEntryTimestamp,
           state: existing.state === "interrupted"
             ? "interrupted"
             : message.isError
@@ -582,6 +593,7 @@ function historyToTranscript(messages: any[]): TranscriptItem[] {
           toolDiff: toolDiffFromResult(String(message.toolName ?? "tool"), undefined, message.details, Boolean(message.isError)),
           toolCallId: callId || undefined,
           toolExecutionStarted: true,
+          completedAt: message.timestamp ?? message.__mfEntryTimestamp,
           state: message.isError ? "error" : "done",
         });
       }
@@ -1248,6 +1260,11 @@ export default function App() {
   const [notifyWhenBackground, setNotifyWhenBackground] = useState(() => getStoredBoolean(BACKGROUND_COMPLETION_NOTIFICATION_KEY, false));
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const backgroundRunStartedRef = useRef(false);
+  const agentRunStartedAtRef = useRef<number | null>(null);
+  // A Pi run can receive several Steer messages, producing multiple visual
+  // user turns before settlement. Keep *all* of those turns unfolded until
+  // agent_settled, not just the last turn in the transcript.
+  const [activeRunFirstUserId, setActiveRunFirstUserId] = useState<string | null>(null);
   const [chatResizeMarker, setChatResizeMarker] = useState({ y: 120, visible: false });
   const [sidebarResizeMarker, setSidebarResizeMarker] = useState({ y: 120, visible: false });
   const rememberProject = useCallback((workingDirectory: string) => {
@@ -1334,6 +1351,7 @@ export default function App() {
   const userMessageDeliveryRef = useRef(createPiUserMessageDelivery());
   const composerWrapRef = useRef<HTMLElement | null>(null);
   const chatPaneRef = useRef<HTMLElement | null>(null);
+  const chatWidthGuidesRef = useRef<HTMLDivElement | null>(null);
   const sessionSidebarRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     const snapshot = () => {
@@ -1414,6 +1432,8 @@ export default function App() {
   }, []);
 
   const resetTransientRuntime = useCallback(() => {
+    agentRunStartedAtRef.current = null;
+    setActiveRunFirstUserId(null);
     assistantId.current = null;
     thinkingId.current = null;
     toolCallByContentIndex.current.clear();
@@ -3026,12 +3046,10 @@ export default function App() {
   }, [activeSessionPath, chatWidth, connected, settingsOpen, sidebarVisible, switchingFolder]);
 
   function updateChatResizeHandle(_side: "left" | "right", clientY: number) {
-    const pane = chatPaneRef.current;
-    if (!pane) return;
-    const rect = pane.getBoundingClientRect();
-    const guideTop = 52;
-    const guideHeight = Math.max(1, rect.height - guideTop);
-    const y = Math.max(18, Math.min(guideHeight - 18, clientY - rect.top - guideTop));
+    const guides = chatWidthGuidesRef.current;
+    if (!guides) return;
+    const rect = guides.getBoundingClientRect();
+    const y = chatResizeMarkerY(clientY, rect.top, rect.height);
     setChatResizeMarker({ y, visible: true });
   }
 
@@ -3685,6 +3703,8 @@ export default function App() {
         return;
 
       case "agent_start":
+        setActiveRunFirstUserId((current) => current ?? [...itemsRef.current].reverse().find((item) => item.kind === "user")?.id ?? null);
+        agentRunStartedAtRef.current = performance.now();
         backgroundRunStartedRef.current = true;
         setStreamingState(true);
         scheduleLiveContextRefresh(true);
@@ -3815,6 +3835,14 @@ export default function App() {
       case "agent_settled": {
         cancelScheduledLiveContextRefresh();
         const providerAbortNeedsReconcile = providerAbortPendingRef.current;
+        const startedAt = agentRunStartedAtRef.current;
+        agentRunStartedAtRef.current = null;
+        if (startedAt !== null && !providerAbortNeedsReconcile) {
+          // Timing is per complete Pi run, including tools and retries, not
+          // per intermediate assistant message. Keep it on the final reply.
+          const durationMs = Math.max(0, performance.now() - startedAt);
+          updateItems((current) => withFinalAssistantDuration(current, durationMs));
+        }
 
         if (providerAbortNeedsReconcile) {
           markRunningRuntimeInterrupted();
@@ -4019,6 +4047,7 @@ export default function App() {
           const text = extractText(record.message);
           const assistantMeta = {
             timestamp: record.message?.timestamp ?? Date.now(),
+            modelDurationMs: validPiModelDurationMs(record.message?.durationMs),
             model: typeof record.message?.model === "string" ? record.message.model : undefined,
             provider: typeof record.message?.provider === "string" ? record.message.provider : undefined,
           };
@@ -4958,7 +4987,7 @@ export default function App() {
               />}
             </header>
 
-            <div className="chat-width-guides" aria-hidden="true">
+            <div className="chat-width-guides" ref={chatWidthGuidesRef} aria-hidden="true">
               {(["left", "right"] as const).map((side) => (
                 <div
                   key={side}
@@ -4990,6 +5019,7 @@ export default function App() {
                   piVersion={piVersion}
                   commands={commands}
                   isStreaming={isStreaming}
+                  activeRunFirstUserId={activeRunFirstUserId}
                   generationStatus={generationStatus}
                   disableVirtualizerScrollCorrection={isStreaming || visualFlushSettling}
                   restoreScrollTop={reloadViewportApplies(reloadViewport, cwd, activeSessionPath) && !reloadViewport?.atBottom ? reloadViewport?.scrollTop : null}
@@ -5786,7 +5816,7 @@ function ToolTranscript({ item, compact = false }: { item: TranscriptItem; compa
       >
         <HoverSwapActivityIcon
           icon={compactIcon ?? (terminalLike ? Terminal : Wrench)}
-          hoverIcon={Maximize2}
+          hoverIcon={expanded ? ChevronDown : ChevronRight}
         />
         <span className="activity-title">{formatToolDisplayName(item.title ?? "tool")}</span>
         <span className="activity-separator">·</span>
@@ -5955,7 +5985,7 @@ function RuntimeTranscriptGroup({ items }: { items: TranscriptItem[] }) {
   );
 }
 
-function MessageMetadata({ item, responseModel }: { item: TranscriptItem; responseModel?: string }) {
+function MessageMetadata({ item, responseModel, durationMs }: { item: TranscriptItem; responseModel?: string; durationMs?: number }) {
   const actions = useContext(MessageActionsContext);
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
   const copyFeedbackTimerRef = useRef<number | null>(null);
@@ -5975,12 +6005,15 @@ function MessageMetadata({ item, responseModel }: { item: TranscriptItem; respon
   const readableDate = date && Number.isFinite(date.getTime()) ? formatSessionDate(timestamp) : "";
   const fullDate = date && Number.isFinite(date.getTime()) ? date.toLocaleString() : "";
   const modelName = responseModel ?? item.model;
+  const duration = formatResponseDuration(durationMs);
   const forkable = item.kind === "user" && Boolean(item.entryId);
   return (
     <div className="message-metadata" aria-label="Message details">
       {modelName && <span className="message-metadata-model" title={item.provider ? `${item.provider} / ${modelName}` : modelName}>{modelName}</span>}
       {modelName && readableDate && <span className="message-metadata-separator" aria-hidden="true">·</span>}
       {readableDate && <time title={fullDate} dateTime={date!.toISOString()}>{readableDate}</time>}
+      {duration && (modelName || readableDate) && <span className="message-metadata-separator" aria-hidden="true">·</span>}
+      {duration && <span className="message-metadata-duration" title="Pi response time, including tool calls">{duration}</span>}
       {forkable && (
         <button type="button" className="message-meta-action" title={actions?.canFork ? "Fork from this message" : "Fork unavailable during generation"} aria-label="Fork conversation from this message"
           disabled={!actions?.canFork}
@@ -6000,7 +6033,7 @@ function MessageMetadata({ item, responseModel }: { item: TranscriptItem; respon
   );
 }
 
-function Transcript({ item, responseModel }: { item: TranscriptItem; responseModel?: string }) {
+function Transcript({ item, responseModel, assistantDurationMs, showAssistantMetadata = false }: { item: TranscriptItem; responseModel?: string; assistantDurationMs?: number; showAssistantMetadata?: boolean }) {
   if (item.kind === "user") {
     return (
       <article className="message user" data-message-id={item.id}>
@@ -6016,7 +6049,7 @@ function Transcript({ item, responseModel }: { item: TranscriptItem; responseMod
     return (
       <article className="message assistant" data-message-id={item.id}>
         <Markdown messageId={item.id}>{item.text || "…"}</Markdown>
-        <MessageMetadata item={item} />
+        {showAssistantMetadata && <MessageMetadata item={item} durationMs={assistantDurationMs} />}
       </article>
     );
   }
@@ -6116,14 +6149,86 @@ function SemiCompactRuntimeTranscriptGroup({ items, blocks, active }: {
 
 const MemoSemiCompactRuntimeTranscriptGroup = memo(SemiCompactRuntimeTranscriptGroup);
 
-function TranscriptTurnView({ turn, activeSemiCompactGroupKey }: {
-  turn: TranscriptTurn;
+/** Shared activity renderer: the same canonical groups are used inside an
+ * expanded completed-turn disclosure as in an ordinary streaming turn. */
+function AgentItemsView({ items, activeSemiCompactGroupKey, lastAssistantId, assistantDurationMs }: {
+  items: TranscriptItem[];
   activeSemiCompactGroupKey: string | null;
+  lastAssistantId?: string;
+  assistantDurationMs?: number;
 }) {
   const { timelineMode } = useContext(ActivityDisplaySettingsContext);
-  const agentGroups = useMemo(() => groupTranscriptItems(turn.agentItems), [turn.agentItems]);
+  const agentGroups = useMemo(() => groupTranscriptItems(items), [items]);
   const compactGroups = useMemo(() => timelineMode !== "full" ? groupCompactActivityGroups(agentGroups) : null, [agentGroups, timelineMode]);
+  return <>
+    {timelineMode !== "full"
+      ? compactGroups?.map((group) => group.kind === "activity"
+        ? timelineMode === "semi-compact"
+          ? <MemoSemiCompactRuntimeTranscriptGroup key={group.key} items={group.items} blocks={group.blocks} active={group.key === activeSemiCompactGroupKey} />
+          : <MemoCompactRuntimeTranscriptGroup key={group.key} items={group.items} blocks={group.blocks} />
+        : <MemoTranscript key={group.item.id} item={group.item} showAssistantMetadata={group.item.id === lastAssistantId} assistantDurationMs={assistantDurationMs} />)
+      : agentGroups.map((group) => group.kind === "runtime"
+        ? <MemoRuntimeTranscriptGroup key={group.key} items={group.items} />
+        : <MemoTranscript key={group.item.id} item={group.item} showAssistantMetadata={group.item.id === lastAssistantId} assistantDurationMs={assistantDurationMs} />)}
+  </>;
+}
+const MemoAgentItems = memo(AgentItemsView);
+
+/** Keep manually opened work details across virtualized unmounts, like the
+ * existing Compact Used disclosures. No animation: old content may be tall. */
+const completedWorkExpandedByTurn = new Map<string, boolean>();
+
+function CompletedWorkDisclosure({ turnKey, earlier, durationMs }: {
+  turnKey: string;
+  earlier: TranscriptItem[];
+  durationMs?: number;
+}) {
+  const [expanded, setExpanded] = useState(() => completedWorkExpandedByTurn.get(turnKey) ?? false);
+  const duration = formatResponseDuration(durationMs);
+  const label = duration ? `Worked for ${duration}` : "Work details";
+  return (
+    <div className="completed-work-disclosure">
+      <button
+        type="button"
+        className="compact-tool-summary completed-work-summary"
+        data-reader-layout-interaction="true"
+        aria-label={`${label}, ${expanded ? "hide" : "show"} earlier activity`}
+        aria-expanded={expanded}
+        onClick={() => {
+          const next = !expanded;
+          completedWorkExpandedByTurn.set(turnKey, next);
+          setExpanded(next);
+        }}
+      >
+        <ChevronIcon expanded={expanded} />
+        <span className="compact-tool-label">{label}</span>
+      </button>
+      {expanded && (
+        <div className="completed-work-details">
+          <MemoAgentItems items={earlier} activeSemiCompactGroupKey={null} />
+        </div>
+      )}
+    </div>
+  );
+}
+const MemoCompletedWorkDisclosure = memo(CompletedWorkDisclosure);
+
+function TranscriptTurnView({ turn, activeSemiCompactGroupKey, suppressAssistantMetadata, suppressCompletedWork }: {
+  turn: TranscriptTurn;
+  activeSemiCompactGroupKey: string | null;
+  suppressAssistantMetadata: boolean;
+  suppressCompletedWork: boolean;
+}) {
+  const { timelineMode } = useContext(ActivityDisplaySettingsContext);
   const responseModel = turn.agentItems.find((item) => item.kind === "assistant" && item.model)?.model;
+  const lastAssistantId = !suppressAssistantMetadata ? finalAssistantMessage(turn)?.id : undefined;
+  const assistantDurationMs = turnResponseDurationMs(turn);
+  // Pi can finish a model request and continue tool/reasoning activity. Only
+  // show "Worked for" after the *whole agent run* settles, never mid-stream.
+  const completedWork = useMemo(() => completedWorkDisclosure(
+    turn.agentItems, timelineMode, suppressAssistantMetadata || suppressCompletedWork,
+  ), [turn.agentItems, timelineMode, suppressAssistantMetadata, suppressCompletedWork]);
+  const foldWork = completedWork !== null;
   return (
     <div className="transcript-turn">
       {turn.userItems.length > 0 && (
@@ -6133,15 +6238,10 @@ function TranscriptTurnView({ turn, activeSemiCompactGroupKey }: {
       )}
       {turn.agentItems.length > 0 && (
         <div className="transcript-turn-agent">
-          {timelineMode !== "full"
-            ? compactGroups?.map((group) => group.kind === "activity"
-              ? timelineMode === "semi-compact"
-                ? <MemoSemiCompactRuntimeTranscriptGroup key={group.key} items={group.items} blocks={group.blocks} active={group.key === activeSemiCompactGroupKey} />
-                : <MemoCompactRuntimeTranscriptGroup key={group.key} items={group.items} blocks={group.blocks} />
-              : <MemoTranscript key={group.item.id} item={group.item} />)
-            : agentGroups.map((group) => group.kind === "runtime"
-              ? <MemoRuntimeTranscriptGroup key={group.key} items={group.items} />
-              : <MemoTranscript key={group.item.id} item={group.item} />)}
+          {foldWork && <MemoCompletedWorkDisclosure turnKey={turn.key} earlier={completedWork!.earlier} durationMs={assistantDurationMs} />}
+          {foldWork
+            ? completedWork!.visible.length > 0 && <MemoAgentItems items={completedWork!.visible} activeSemiCompactGroupKey={null} lastAssistantId={lastAssistantId} assistantDurationMs={assistantDurationMs} />
+            : <MemoAgentItems items={turn.agentItems} activeSemiCompactGroupKey={activeSemiCompactGroupKey} lastAssistantId={lastAssistantId} assistantDurationMs={assistantDurationMs} />}
         </div>
       )}
     </div>
@@ -6152,6 +6252,8 @@ const MemoTranscriptTurn = memo(
   TranscriptTurnView,
   (previous, next) => previous.turn.key === next.turn.key
     && previous.activeSemiCompactGroupKey === next.activeSemiCompactGroupKey
+    && previous.suppressAssistantMetadata === next.suppressAssistantMetadata
+    && previous.suppressCompletedWork === next.suppressCompletedWork
     && transcriptItemsShallowEqual(previous.turn.userItems, next.turn.userItems)
     && transcriptItemsShallowEqual(previous.turn.agentItems, next.turn.agentItems),
 );
@@ -6166,6 +6268,7 @@ type TranscriptViewProps = {
   piVersion: string | null;
   commands: CommandInfo[];
   isStreaming: boolean;
+  activeRunFirstUserId: string | null;
   generationStatus: GenerationStatus | null;
   disableVirtualizerScrollCorrection: boolean;
   restoreScrollTop?: number | null;
@@ -6184,6 +6287,7 @@ const TranscriptView = memo(function TranscriptView({
   piVersion,
   commands,
   isStreaming,
+  activeRunFirstUserId,
   generationStatus,
   disableVirtualizerScrollCorrection,
   restoreScrollTop,
@@ -6195,6 +6299,9 @@ const TranscriptView = memo(function TranscriptView({
   onPointerDown,
 }: TranscriptViewProps) {
   const turns = useMemo(() => buildTranscriptTurns(items), [items]);
+  const liveRunFirstTurnIndex = useMemo(() => isStreaming
+    ? firstUnsettledTurnIndex(turns, activeRunFirstUserId)
+    : -1, [turns, isStreaming, activeRunFirstUserId]);
   const liveActivity = useMemo(() => timelineMode === "semi-compact" ? activeSemiCompactActivity(turns, isStreaming) : null, [turns, timelineMode, isStreaming]);
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
@@ -6374,7 +6481,7 @@ const TranscriptView = memo(function TranscriptView({
                   // here: sticky code headers depend on a transform-free chain.
                   className="virtual-transcript-row"
                 >
-                  <MemoTranscriptTurn turn={turn} activeSemiCompactGroupKey={turn.key === liveActivity?.turnKey ? liveActivity.groupKey : null} />
+                  <MemoTranscriptTurn turn={turn} activeSemiCompactGroupKey={turn.key === liveActivity?.turnKey ? liveActivity.groupKey : null} suppressAssistantMetadata={isStreaming && virtualItem.index === turns.length - 1} suppressCompletedWork={isUnsettledWorkTurn(virtualItem.index, liveRunFirstTurnIndex, turns.length - 1, isStreaming)} />
                 </div>
               );
             })}

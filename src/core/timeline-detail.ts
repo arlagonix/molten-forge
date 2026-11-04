@@ -84,6 +84,55 @@ export function activeSemiCompactActivity(
   return last?.kind === "activity" ? { turnKey: turn.key, groupKey: last.key } : null;
 }
 
+/** Fold completed Thinking/tool activity and intermediate prose, even when
+ * Pi finishes without a final text message (thinking-only, tool-only, abort).
+ * Retain the final assistant answer, if any, and all trailing terminal notices
+ * outside the disclosure. A tool failure does not itself break a turn. */
+export function splitCompletedWork(items: readonly TranscriptItem[]): {
+  earlier: TranscriptItem[];
+  visible: TranscriptItem[];
+} | null {
+  let lastActivity = -1;
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    if (item.kind === "thinking" || (item.kind === "tool" && item.runtimeRole !== "session-maintenance")) {
+      lastActivity = index;
+    }
+  }
+  if (lastActivity < 0) return null;
+
+  // A final answer must follow the last runtime activity, otherwise it is
+  // intermediate prose that belongs in the collapsed details.
+  let visibleFrom = lastActivity + 1;
+  for (let index = items.length - 1; index > lastActivity; index--) {
+    if (items[index].kind === "assistant") {
+      visibleFrom = index;
+      break;
+    }
+  }
+  return { earlier: items.slice(0, visibleFrom), visible: items.slice(visibleFrom) };
+}
+
+/** Never surface "Worked for" for an unsettled Pi run (including turns
+ * produced by Steer while the same run is still in progress). */
+export function completedWorkDisclosure(
+  items: readonly TranscriptItem[], mode: TimelineMode, isUnsettledRunTurn: boolean,
+): ReturnType<typeof splitCompletedWork> {
+  return mode === "full" || isUnsettledRunTurn ? null : splitCompletedWork(items);
+}
+
+/** Pi Steer can create multiple user turns without completing the active run.
+ * Mark the full suffix beginning with the run's first prompt as unsettled. */
+export function firstUnsettledTurnIndex(turns: readonly TranscriptTurn[], firstUserId: string | null): number {
+  return firstUserId ? turns.findIndex((turn) => turn.userItems.some((item) => item.id === firstUserId)) : -1;
+}
+
+export function isUnsettledWorkTurn(
+  index: number, firstRunIndex: number, lastIndex: number, isStreaming: boolean,
+): boolean {
+  return isStreaming && (firstRunIndex >= 0 ? index >= firstRunIndex : index === lastIndex);
+}
+
 export type CompactActivitySummary = {
   label: string;
   running: boolean;

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1 — Completed activity and timing improvements (2026-11-04)
+
+Added the `Worked for …` disclosure for completed Pi runs, reduced repeated assistant metadata, improved timing in reopened sessions, and fixed error/Thinking-only grouping, resize markers, and tool chevrons.
+
+See [2.1.1 release notes](docs/releases/v2.1.1.md) for user-facing features, changes, and fixes.
+
 ## 2.1.0 — Chat activity and interface improvements (2026-11-04)
 
 Added the Semi Compact activity view, message details and Pi-backed Fork, refreshed model selection and Settings styling, and improved draft/scroll restoration and composer behavior.

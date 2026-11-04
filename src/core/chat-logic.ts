@@ -23,6 +23,12 @@ export type TranscriptItem = {
   // Stable Pi session-entry id and message metadata (only when supplied by Pi).
   entryId?: string;
   timestamp?: number | string;
+  /** Measured Pi agent_start → agent_settled duration for the live reply. */
+  durationMs?: number;
+  /** Pi AssistantMessage.durationMs: time spent in this single model request. */
+  modelDurationMs?: number;
+  /** Timestamp of a persisted Pi toolResult (the end of execution). */
+  completedAt?: number | string;
   model?: string;
   provider?: string;
   state?: "running" | "done" | "error" | "interrupted";
@@ -363,6 +369,92 @@ export function buildTranscriptTurns(items: TranscriptItem[]): TranscriptTurn[] 
 
   pushCurrent();
   return turns;
+}
+
+/** Only the final assistant text in a logical turn owns message metadata.
+ * Pi may emit many assistant text messages separated by tool calls. */
+export function finalAssistantMessage(turn: TranscriptTurn): TranscriptItem | undefined {
+  for (let i = turn.agentItems.length - 1; i >= 0; i -= 1) {
+    if (turn.agentItems[i].kind === "assistant") return turn.agentItems[i];
+  }
+  return undefined;
+}
+
+/** Pi stores message timestamps in Unix milliseconds, while session entries
+ * use ISO strings. Do not use the user prompt timestamp as the model start. */
+function validTimestamp(value: number | string | undefined): number | undefined {
+  if (value === undefined || value === "") return undefined;
+  const millis = typeof value === "number" ? value : new Date(value).getTime();
+  return Number.isFinite(millis) && millis > 0 ? millis : undefined;
+}
+
+export function validPiModelDurationMs(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/** Prefer live Pi agent_start -> agent_settled timing. For restored turns,
+ * Pi stores each model request's start timestamp and durationMs; toolResult
+ * timestamps also let a tool-only turn include the last tool's execution time.
+ * Never use the user-message timestamp as a substitute for model start. */
+export function turnResponseDurationMs(turn: TranscriptTurn): number | undefined {
+  const items = turn.agentItems;
+  for (let index = items.length - 1; index >= 0; index--) {
+    const live = validPiModelDurationMs(items[index].durationMs);
+    if (live !== undefined) return live;
+  }
+
+  const requests = items.filter((item) =>
+    item.kind === "assistant" || item.kind === "thinking" ||
+    (item.kind === "tool" && item.runtimeRole !== "session-maintenance"));
+  const lastRequest = requests[requests.length - 1];
+  const lastDuration = validPiModelDurationMs(lastRequest?.modelDurationMs);
+  if (lastDuration === undefined) return undefined;
+  if (requests.length === 1 && !requests[0].completedAt) return lastDuration;
+
+  const firstStart = validTimestamp(requests[0]?.timestamp);
+  const lastStart = validTimestamp(lastRequest.timestamp);
+  if (firstStart === undefined || lastStart === undefined || lastStart < firstStart) {
+    // Even without a model timestamp, an isolated response has a native Pi
+    // duration; this excludes any unknown tool execution wall time.
+    return requests.length === 1 ? lastDuration : undefined;
+  }
+
+  let end = lastStart + lastDuration;
+  for (const item of requests) {
+    const completed = validTimestamp(item.completedAt);
+    if (completed !== undefined && completed >= firstStart) end = Math.max(end, completed);
+  }
+  return end - firstStart;
+}
+
+export function formatResponseDuration(durationMs: number | undefined): string {
+  if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) return "";
+  if (durationMs < 1000) return "<1s";
+  const totalSeconds = Math.round(durationMs / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return `${minutes}m ${seconds}s`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
+}
+
+/** Attach the live whole-run duration to the last runtime item. Pi may
+ * settle after Thinking or a tool result without emitting final assistant prose.
+ * Never modify items from an earlier user turn. */
+export function withFinalAssistantDuration(items: TranscriptItem[], durationMs: number): TranscriptItem[] {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return items;
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index];
+    if (item.kind === "user") break;
+    if (item.kind !== "assistant" && item.kind !== "thinking" &&
+      (item.kind !== "tool" || item.runtimeRole === "session-maintenance")) continue;
+    const next = items.slice();
+    next[index] = { ...item, durationMs };
+    return next;
+  }
+  return items;
 }
 
 export function transcriptItemsShallowEqual(left: TranscriptItem[], right: TranscriptItem[]) {
