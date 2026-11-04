@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   Bell,
   Brain,
-  ChevronDown,
   Image as ImageIcon,
   Moon,
   Settings2,
@@ -17,8 +16,10 @@ import type { BackgroundTheme, ThemePreference } from "../core/appearance";
 import type { AppFontFamily } from "../core/ui-preferences";
 import type { CommandInfo, TranscriptItem } from "../core/chat-logic";
 import { PiResourcesSettings } from "./pi-resources-settings";
+import type { TimelineMode } from "../core/timeline-detail";
 import { PiSkillsSettings } from "./pi-skills-settings";
 import { PiToolsSettings } from "./pi-tools-settings";
+import { SettingsInlineSelect } from "./settings-inline-select";
 
 type BackgroundView = { name: string; url: string };
 type BackgroundViews = Partial<Record<BackgroundTheme, BackgroundView>>;
@@ -48,10 +49,14 @@ type SettingsViewProps = {
   themePreference: ThemePreference;
   appFontFamily: AppFontFamily;
   autoExpandThinking: boolean;
+  timelineMode: TimelineMode;
   autoExpandTools: boolean;
   notifyWhenBackground: boolean;
   notificationError: string | null;
   backgroundImagesEnabled: boolean;
+  /* MF appearance settings: phase 2 */
+  wallpaperOverlayPercent: number;
+  onWallpaperOverlayPercentChange: (value: number) => void;
   customBackgrounds: BackgroundViews;
   backgroundPickerTheme: BackgroundTheme | null;
   backgroundError: string | null;
@@ -60,6 +65,7 @@ type SettingsViewProps = {
   onThemePreferenceChange: (theme: ThemePreference) => void;
   onAppFontFamilyChange: (font: AppFontFamily) => void;
   onAutoExpandThinkingChange: (value: boolean) => void;
+  onTimelineModeChange: (value: TimelineMode) => void;
   onAutoExpandToolsChange: (value: boolean) => void;
   onNotifyWhenBackgroundChange: (value: boolean) => void;
   onBackgroundImagesEnabledChange: (value: boolean) => void;
@@ -72,16 +78,20 @@ function GeneralSettings({
   themePreference,
   appFontFamily,
   autoExpandThinking,
+  timelineMode,
   autoExpandTools,
   notifyWhenBackground,
   notificationError,
   backgroundImagesEnabled,
+  wallpaperOverlayPercent,
+  onWallpaperOverlayPercentChange,
   customBackgrounds,
   backgroundPickerTheme,
   backgroundError,
   onThemePreferenceChange,
   onAppFontFamilyChange,
   onAutoExpandThinkingChange,
+  onTimelineModeChange,
   onAutoExpandToolsChange,
   onNotifyWhenBackgroundChange,
   onBackgroundImagesEnabledChange,
@@ -97,7 +107,7 @@ function GeneralSettings({
         <section className="settings-section">
           <h2>General</h2>
           <div className="settings-panel">
-            <label className="settings-control-row">
+            <div className="settings-control-row">
               <span className="settings-row-icon">
                 {resolvedTheme === "light" ? <Sun size={16} /> : <Moon size={16} />}
               </span>
@@ -105,47 +115,32 @@ function GeneralSettings({
                 <strong>Theme</strong>
                 <small>Choose the app appearance, or follow your system.</small>
               </span>
-              <span className="settings-select-shell">
-                <select
-                  className="settings-select"
-                  value={themePreference}
-                  onChange={(event) => onThemePreferenceChange(event.target.value as ThemePreference)}
-                  aria-label="Theme"
-                >
-                  <option value="system">System</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                </select>
-                <ChevronDown className="settings-select-chevron" size={15} aria-hidden="true" />
-              </span>
-            </label>
+              <SettingsInlineSelect label="Theme" value={themePreference} options={[{ value: "system", label: "System" }, { value: "light", label: "Light" }, { value: "dark", label: "Dark" }]} onChange={(value) => onThemePreferenceChange(value as ThemePreference)} />
+            </div>
 
-            <label className="settings-control-row">
+            <div className="settings-control-row">
               <span className="settings-row-icon"><TypeIcon size={16} /></span>
               <span className="settings-row-copy">
                 <strong>Font</strong>
                 <small>Choose Sans, Mono, or Miracode for the application.</small>
               </span>
-              <span className="settings-select-shell">
-                <select
-                  className="settings-select"
-                  value={appFontFamily}
-                  onChange={(event) => onAppFontFamilyChange(event.target.value as AppFontFamily)}
-                  aria-label="Font"
-                >
-                  <option value="sans">Sans</option>
-                  <option value="mono">Mono</option>
-                  <option value="miracode">Miracode</option>
-                </select>
-                <ChevronDown className="settings-select-chevron" size={15} aria-hidden="true" />
+              <SettingsInlineSelect label="Font" value={appFontFamily} options={[{ value: "sans", label: "Sans" }, { value: "mono", label: "Mono" }, { value: "miracode", label: "Miracode" }]} onChange={(value) => onAppFontFamilyChange(value as AppFontFamily)} />
+            </div>
+
+            <div className="settings-control-row">
+              <span className="settings-row-icon"><Wrench size={16} /></span>
+              <span className="settings-row-copy">
+                <strong>Timeline detail</strong>
+                <small>Compact summarizes activity; Semi Compact shows the current activity in Full while Pi works; Full shows all calls.</small>
               </span>
-            </label>
+              <SettingsInlineSelect label="Timeline detail" value={timelineMode} options={[{ value: "compact", label: "Compact" }, { value: "semi-compact", label: "Semi Compact" }, { value: "full", label: "Full" }]} onChange={(value) => onTimelineModeChange(value as TimelineMode)} />
+            </div>
 
             <label className="settings-switch-row">
               <span className="settings-row-icon"><Brain size={16} /></span>
               <span className="settings-row-copy">
                 <strong>Auto-expand thinking</strong>
-                <small>Open thinking while the model is actively reasoning. Completed thinking collapses automatically.</small>
+                <small>In Full and Semi Compact, open active thinking while the model is reasoning. Completed thinking collapses automatically.</small>
               </span>
               <input
                 type="checkbox"
@@ -159,7 +154,7 @@ function GeneralSettings({
               <span className="settings-row-icon"><Wrench size={16} /></span>
               <span className="settings-row-copy">
                 <strong>Auto-expand tool calls</strong>
-                <small>Open tool details while a tool call is active. Completed calls collapse automatically.</small>
+                <small>In Full and Semi Compact, open tool details while a call is active. Completed calls collapse automatically.</small>
               </span>
               <input
                 type="checkbox"
@@ -203,6 +198,22 @@ function GeneralSettings({
               <span className="settings-switch" aria-hidden="true" />
             </label>
 
+            <div className="settings-control-row settings-wallpaper-overlay-row">
+              <span className="settings-row-icon"><ImageIcon size={16} /></span>
+              <span className="settings-row-copy">
+                <strong>Wallpaper overlay</strong>
+                <small>Repeat the wallpaper above panels, as in OpenCode. 0% disables the effect.</small>
+              </span>
+              <input
+                className="settings-wallpaper-overlay-slider"
+                type="range" min={0} max={25} step={1}
+                value={wallpaperOverlayPercent}
+                onChange={(event) => onWallpaperOverlayPercentChange(Number(event.target.value))}
+                disabled={!backgroundImagesEnabled}
+                aria-label="Wallpaper overlay opacity"
+              />
+              <output className="settings-wallpaper-overlay-value">{wallpaperOverlayPercent}%</output>
+            </div>
             {(["light", "dark"] as const).map((backgroundTheme) => {
               const customBackground = customBackgrounds[backgroundTheme];
               const label = `${backgroundTheme === "light" ? "Light" : "Dark"} background`;

@@ -4,13 +4,13 @@ The composer model label is an interactive model picker. It is a thin UI over Pi
 
 ## Opening the picker
 
-- Clicking the current model opens a popover above the composer.
+- Clicking the current model opens a centered modal dialog, inspired by OpenCode’s desktop model picker.
 - Opening the popover silently requests `get_available_models` so the menu reflects Pi's current configured models.
 - A compact searchbar stays pinned at the top of the popover and filters by provider, model id, or `provider/id`.
-- The popover groups matching models by `provider`; provider groups and model rows are sorted for stable scanning.
+- The dialog shows Recent models first (stored locally and de-duplicated), then groups remaining models by `provider`; provider groups and model rows use stable ordering.
 - Exact duplicate `provider/id` rows are suppressed.
-- Escape and pointer input outside the popover close it.
-- Picker open/close state is local to the memoized `ModelSwitcher`, not root `App`, so merely browsing models does not rerender the transcript.
+- Escape and clicking the dialog backdrop close it; Tab focus stays inside the dialog while open.
+- Dialog open/close state is local to the memoized `ModelSwitcher`, not root `App`, so merely browsing models does not rerender the transcript.
 
 ## Selecting a model
 
@@ -34,8 +34,8 @@ The ordinary typed `/model …` command continues to use the same `set_model` RP
 ## Rendering
 
 - The current model id is the compact trigger shown beside the context ring.
-- The popover opens upward so it stays attached to the composer footer.
-- Each provider has a heading and its models beneath it.
+- The picker is centered over the conversation in a fixed modal layer, independent of composer position.
+- Recent models have their own heading; each remaining provider has a heading and its models beneath it.
 - Each model row is intentionally one line and shows only the model id plus selection state; friendly-name descriptions are hidden to maximize list density.
 - The selected model receives a check mark.
 - Dark and light themes both have explicit popover/hover colors.
@@ -49,7 +49,7 @@ When changing this behavior, keep tests for:
 - full-key/id/display-name matching used by `/model`;
 - exact `set_model` RPC construction;
 - silent click-to-switch integration;
-- local popover state rather than root-App state;
+- local dialog state rather than root-App state;
 - search filtering by provider/id and search reset on close;
 - compact one-line rows without friendly-name descriptions;
 - provider headings;

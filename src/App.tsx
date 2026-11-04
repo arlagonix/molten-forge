@@ -8,6 +8,7 @@ import {
   WheelEvent as ReactWheelEvent,
   RefObject,
   ReactNode,
+  TransitionEvent as ReactTransitionEvent,
   type SetStateAction,
   createContext,
   memo,
@@ -25,16 +26,17 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowUp, Brain, Check, ChevronDown, ChevronRight, Image as ImageIcon, Loader2, Maximize2, Menu, Paperclip, Plus, Settings, Square, Terminal, Wrench, X } from "lucide-react";
+import { ArrowUp, BookOpen, Brain, Check, ChevronDown, ChevronRight, FilePenLine, FilePlus2, Image as ImageIcon, Loader2, Maximize2, Copy, GitFork, Menu, Paperclip, Plus, Settings, Square, Terminal, Wrench, X } from "lucide-react";
 import { MarkdownRenderer } from "./components/markdown-renderer";
 import { AttachmentChip } from "./components/attachment-chip";
 import { MAX_ATTACHMENTS_PER_MESSAGE, MAX_WEBVIEW_ATTACHMENT_BYTES, composeAttachmentPrompt, parseAttachmentPrompt, supportsImageInput, uint8ToBase64, type ManagedAttachment } from "./core/attachments";
 import { ModelSwitcher } from "./components/model-switcher";
 import { MessageQueue } from "./components/message-queue";
 import { QueueModeSelect } from "./components/queue-mode-select";
-import { composerOverlayClearance, createPiUserMessageDelivery, normalizePiQueue, sendBehavior, textareaHeightLimit, type PiQueue, type QueueDelivery } from "./core/message-queue";
+import { composerFadeInset, composerOverlayClearance, createPiUserMessageDelivery, normalizePiQueue, sendBehavior, textareaHeightLimit, type PiQueue, type QueueDelivery } from "./core/message-queue";
 import { ContextUsagePopover, type ContextUsageDetails } from "./components/context-usage-popover";
 import { ProjectSessionSidebar } from "./components/project-session-sidebar";
+import { clearReloadViewport, persistReloadDraft, persistReloadViewport, readReloadViewport, reloadViewportApplies, takeReloadDraft, type ReloadViewport } from "./core/reload-state";
 import { type ProjectSummary, projectKeyForSidebar } from "./core/project-sidebar";
 import { readLastProjectSessions, rememberLastProjectSession, writeLastProjectSessions } from "./core/project-history";
 import { executeProjectSwitch } from "./core/project-switch-lifecycle";
@@ -45,6 +47,7 @@ import { ToolOutputContent } from "./components/tool-text-viewer";
 import { LoadingScreen } from "./components/loading-screen";
 import { PiStartupWelcome } from "./components/pi-startup-welcome";
 import { SettingsView, type SettingsSection } from "./components/settings-view";
+import { activeSemiCompactActivity, groupCompactActivityGroups, readTimelineMode, summarizeCompactActivity, type TimelineMode } from "./core/timeline-detail";
 import { shouldNotifyForSettledRun } from "./core/response-notifications";
 import { WindowControls } from "./components/window-controls";
 import { HoverMarqueeText } from "./components/hover-marquee-text";
@@ -80,11 +83,13 @@ import {
   rollingActivityPreview,
 } from "./core/activity-preview";
 import backgroundMountainsDark from "./assets/background-mountains-dark.jpg";
-import backgroundMountainsLight from "./assets/background-mountains-light.jpg";
 import {
   backgroundImageAcceptValue,
   isSupportedBackgroundImage,
   readAppearanceSettings,
+  readWallpaperOverlayPercent,
+  WALLPAPER_OVERLAY_STORAGE_KEY,
+  DEFAULT_WALLPAPER_OVERLAY_PERCENT,
   resolveThemePreference,
   selectActiveBackgroundUrl,
   writeBackgroundImagesEnabled,
@@ -253,7 +258,16 @@ const SIDEBAR_COLLAPSED_STORAGE_KEY = "molten-forge-pi-sidebar-collapsed";
 const LAST_WORKING_DIRECTORY_STORAGE_KEY = "molten-forge-pi-last-working-directory";
 const AUTO_EXPAND_THINKING_STORAGE_KEY = "molten-forge-pi-auto-expand-thinking";
 const AUTO_EXPAND_TOOLS_STORAGE_KEY = "molten-forge-pi-auto-expand-tools";
+const TIMELINE_MODE_STORAGE_KEY = "molten-forge-pi-timeline-mode";
 const BACKGROUND_COMPLETION_NOTIFICATION_KEY = "molten-forge-pi-notify-when-response-completes";
+/* MF appearance surfaces: phase 2 */
+function getInitialWallpaperOverlayPercent() {
+  try {
+    return readWallpaperOverlayPercent(window.localStorage);
+  } catch {
+    return DEFAULT_WALLPAPER_OVERLAY_PERCENT;
+  }
+}
 const PREFERRED_MODEL_STORAGE_KEY = "molten-forge-pi-preferred-model";
 const HISTORY_SYNC_TIMEOUT_MS = 60_000;
 const READER_LAYOUT_INTERACTION_SELECTOR = '[data-reader-layout-interaction="true"]';
@@ -264,7 +278,7 @@ const DEFAULT_SIDEBAR_WIDTH = 260;
 const MIN_SIDEBAR_WIDTH = 190;
 const MAX_SIDEBAR_WIDTH = 520;
 const DEFAULT_BACKGROUND_IMAGE_URLS: Record<BackgroundTheme, string> = {
-  light: backgroundMountainsLight,
+  light: backgroundMountainsDark,
   dark: backgroundMountainsDark,
 };
 
@@ -320,11 +334,7 @@ function getStoredWorkingDirectory() {
 
 function getInitialRecentProjects() {
   try {
-    const projects = readRecentProjects(window.localStorage);
-    const lastWorkingDirectory = getStoredWorkingDirectory();
-    return lastWorkingDirectory
-      ? rememberRecentProject(projects, lastWorkingDirectory)
-      : projects;
+    return readRecentProjects(window.localStorage);
   } catch {
     return [];
   }
@@ -373,16 +383,19 @@ function persistPreferredModel(model: PiModel) {
 }
 
 type ActivityDisplaySettings = {
+  timelineMode: TimelineMode;
   autoExpandThinking: boolean;
   autoExpandTools: boolean;
 };
 
 const ActivityDisplaySettingsContext = createContext<ActivityDisplaySettings>({
+  timelineMode: "compact",
   autoExpandThinking: true,
   autoExpandTools: true,
 });
 
 const WorkingDirectoryContext = createContext("");
+const MessageActionsContext = createContext<{ canFork: boolean; onFork: (entryId: string) => void } | null>(null);
 
 
 function uid(prefix = "item") {
@@ -462,7 +475,11 @@ function historyToTranscript(messages: any[]): TranscriptItem[] {
       const text = extractVisibleContent(message.content);
       if (text) {
         const parsed = parseAttachmentPrompt(text);
-        result.push({ id: uid("history-user"), kind: "user", ...parsed });
+        result.push({
+          id: uid("history-user"), kind: "user", ...parsed,
+          entryId: typeof message.__mfEntryId === "string" ? message.__mfEntryId : undefined,
+          timestamp: message.timestamp ?? message.__mfEntryTimestamp,
+        });
       }
       continue;
     }
@@ -516,7 +533,12 @@ function historyToTranscript(messages: any[]): TranscriptItem[] {
       }
 
       const text = extractText(message);
-      if (text) result.push({ id: uid("history-assistant"), kind: "assistant", text });
+      if (text) result.push({
+        id: uid("history-assistant"), kind: "assistant", text,
+        timestamp: message.timestamp ?? message.__mfEntryTimestamp,
+        model: typeof message.model === "string" ? message.model : undefined,
+        provider: typeof message.provider === "string" ? message.provider : undefined,
+      });
       if (historyFailure) {
         result.push({
           id: uid("history-error"),
@@ -702,13 +724,15 @@ function ChevronIcon({ expanded }: { expanded: boolean }) {
 function HoverSwapActivityIcon({
   icon: Icon,
   hoverIcon: HoverIcon,
+  spinning = false,
 }: {
   icon: typeof Brain;
   hoverIcon: typeof Brain;
+  spinning?: boolean;
 }) {
   return (
     <span className="activity-icon activity-hover-icon" aria-hidden="true">
-      <Icon className="activity-base-icon" size={14} />
+      <Icon className={spinning ? "activity-base-icon activity-spinner-icon" : "activity-base-icon"} size={14} />
       <HoverIcon className="activity-expand-icon" size={14} />
     </span>
   );
@@ -721,8 +745,11 @@ type ComposerProps = {
   isStreaming: boolean;
   isBashRunning: boolean;
   inputBlocked: boolean;
-  beforeSendActions?: ReactNode;
+  modelSelection?: ReactNode;
+  contextControl?: ReactNode;
   draftSetterRef: { current: Dispatch<SetStateAction<string>> };
+  workingDirectory: string;
+  sessionPath: string | null;
   onSubmitRaw: (value: string, attachments: ManagedAttachment[], deliveryMode: QueueDelivery) => void | boolean | Promise<void | boolean>;
   onAbort: () => void | Promise<void>;
   onAbortBash: () => void | Promise<void>;
@@ -734,8 +761,11 @@ const Composer = memo(function Composer({
   isStreaming,
   isBashRunning,
   inputBlocked,
-  beforeSendActions,
+  modelSelection,
+  contextControl,
   draftSetterRef,
+  workingDirectory,
+  sessionPath,
   onSubmitRaw,
   onAbort,
   onAbortBash,
@@ -747,7 +777,19 @@ const Composer = memo(function Composer({
   useEffect(() => {
     try { window.localStorage.setItem("mf-pi-queue-delivery", deliveryMode); } catch {}
   }, [deliveryMode]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(() => {
+    try { return takeReloadDraft(window.sessionStorage, workingDirectory, sessionPath); }
+    catch { return ""; }
+  });
+  const inputRef = useRef(input);
+  inputRef.current = input;
+  useEffect(() => {
+    const persistDraftBeforeReload = () => {
+      try { persistReloadDraft(window.sessionStorage, { cwd: workingDirectory, session: sessionPath, value: inputRef.current }); } catch {}
+    };
+    window.addEventListener("beforeunload", persistDraftBeforeReload);
+    return () => window.removeEventListener("beforeunload", persistDraftBeforeReload);
+  }, [workingDirectory, sessionPath]);
   const [attachments, setAttachments] = useState<ManagedAttachment[]>([]);
   const [attachmentPending, setAttachmentPending] = useState(false);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
@@ -1066,7 +1108,7 @@ const Composer = memo(function Composer({
             }
           }}
           placeholder="Message Pi or type /command…"
-          rows={3}
+          rows={1}
           autoFocus
         />
         <div className="composer-actions">
@@ -1081,10 +1123,11 @@ const Composer = memo(function Composer({
               )}
             </div>
             {attachmentError && <span className="attachment-error" title={attachmentError}>{attachmentError}</span>}
+            <QueueModeSelect value={deliveryMode} onChange={setDeliveryMode} />
+            {modelSelection}
           </div>
           <div className="composer-right-actions">
-            <QueueModeSelect value={deliveryMode} onChange={setDeliveryMode} />
-            {beforeSendActions}
+            {contextControl}
             {isStreaming && !isBashRunning && (
               <button className="primary send-button" type="submit"
                 disabled={(!input.trim() && !attachments.length) || inputBlocked || attachmentPending}
@@ -1132,6 +1175,10 @@ function MoltenForgeGenerationSpinner() {
 
 export default function App() {
   const [cwd, setCwd] = useState(getStoredWorkingDirectory);
+  const pendingReloadViewportRef = useRef<ReloadViewport | null>((() => {
+    try { return readReloadViewport(window.sessionStorage); } catch { return null; }
+  })());
+  const [reloadViewport, setReloadViewport] = useState<ReloadViewport | null>(pendingReloadViewportRef.current);
   const [recentProjects, setRecentProjects] = useState(getInitialRecentProjects);
   const [discoveredProjects, setDiscoveredProjects] = useState<ProjectSummary[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -1186,6 +1233,7 @@ export default function App() {
   const [themePreference, setThemePreference] = useState<ThemePreference>(() => getInitialAppearanceSettings().theme);
   const [systemPrefersDark, setSystemPrefersDark] = useState(getSystemPrefersDark);
   const [backgroundImagesEnabled, setBackgroundImagesEnabled] = useState(() => getInitialAppearanceSettings().backgroundImagesEnabled);
+  const [wallpaperOverlayPercent, setWallpaperOverlayPercent] = useState(getInitialWallpaperOverlayPercent);
   const [customBackgrounds, setCustomBackgrounds] = useState<CustomBackgroundViews>({});
   const [backgroundPickerTheme, setBackgroundPickerTheme] = useState<BackgroundTheme | null>(null);
   const [backgroundError, setBackgroundError] = useState<string | null>(null);
@@ -1194,12 +1242,16 @@ export default function App() {
   const [loadingVisualReadyUrl, setLoadingVisualReadyUrl] = useState<string | null | undefined>(undefined);
   const [autoExpandThinking, setAutoExpandThinking] = useState(() => getStoredBoolean(AUTO_EXPAND_THINKING_STORAGE_KEY, true));
   const [autoExpandTools, setAutoExpandTools] = useState(() => getStoredBoolean(AUTO_EXPAND_TOOLS_STORAGE_KEY, true));
+  const [timelineMode, setTimelineMode] = useState<TimelineMode>(() => {
+    try { return readTimelineMode(window.localStorage, TIMELINE_MODE_STORAGE_KEY); } catch { return "compact"; }
+  });
   const [notifyWhenBackground, setNotifyWhenBackground] = useState(() => getStoredBoolean(BACKGROUND_COMPLETION_NOTIFICATION_KEY, false));
   const [notificationError, setNotificationError] = useState<string | null>(null);
   const backgroundRunStartedRef = useRef(false);
   const [chatResizeMarker, setChatResizeMarker] = useState({ y: 120, visible: false });
   const [sidebarResizeMarker, setSidebarResizeMarker] = useState({ y: 120, visible: false });
   const rememberProject = useCallback((workingDirectory: string) => {
+    persistWorkingDirectory(workingDirectory);
     setRecentProjects((current) => {
       const next = rememberRecentProject(current, workingDirectory);
       try { writeRecentProjects(window.localStorage, next); } catch {}
@@ -1215,13 +1267,25 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (connected && !switchingFolder && activeSessionPath) saveProjectSelection(cwd, activeSessionPath);
-  }, [connected, switchingFolder, cwd, activeSessionPath, saveProjectSelection]);
+    if (connected && !switchingFolder && activeSessionPath &&
+      sessions.some((session) => session.path === activeSessionPath &&
+        Boolean(session.firstMessage?.trim() || session.activityTimestamp))) {
+      saveProjectSelection(cwd, activeSessionPath);
+    }
+  }, [connected, switchingFolder, cwd, activeSessionPath, sessions, saveProjectSelection]);
 
   const discoverProjects = useCallback(async () => {
     try {
       const summaries = await invoke<ProjectSummary[]>("list_projects");
       setDiscoveredProjects(summaries);
+      const savedKeys = new Set(summaries.map((project) => projectKeyForSidebar(project.cwd)));
+      setRecentProjects((current) => {
+        const next = current.filter((project) => savedKeys.has(projectKeyForSidebar(project)));
+        if (next.length !== current.length) {
+          try { writeRecentProjects(window.localStorage, next); } catch {}
+        }
+        return next.length === current.length ? current : next;
+      });
     } catch (error) {
       console.warn("Could not discover Pi project history", error);
     }
@@ -1271,6 +1335,20 @@ export default function App() {
   const composerWrapRef = useRef<HTMLElement | null>(null);
   const chatPaneRef = useRef<HTMLElement | null>(null);
   const sessionSidebarRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const snapshot = () => {
+      const transcript = transcriptRef.current;
+      if (!transcript || !cwd.trim() || !connected) return;
+      try {
+        persistReloadViewport(window.sessionStorage, {
+          cwd, session: activeSessionPath, scrollTop: transcript.scrollTop,
+          atBottom: shouldAutoScroll.current,
+        });
+      } catch {}
+    };
+    window.addEventListener("beforeunload", snapshot);
+    return () => window.removeEventListener("beforeunload", snapshot);
+  }, [cwd, connected, activeSessionPath]);
   const activeChatResizeSideRef = useRef<"left" | "right" | null>(null);
   const sidebarResizingRef = useRef(false);
   const shouldAutoScroll = useRef(true);
@@ -1387,6 +1465,9 @@ export default function App() {
   useEffect(() => {
     try { writeBackgroundImagesEnabled(window.localStorage, backgroundImagesEnabled); } catch {}
   }, [backgroundImagesEnabled]);
+  useEffect(() => {
+    try { window.localStorage.setItem(WALLPAPER_OVERLAY_STORAGE_KEY, String(wallpaperOverlayPercent)); } catch {}
+  }, [wallpaperOverlayPercent]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1864,6 +1945,13 @@ export default function App() {
     setAutoScrollMode,
   ]);
 
+  const finishReloadViewportRestore = useCallback(() => {
+    pendingReloadViewportRef.current = null;
+    setReloadViewport(null);
+    try { clearReloadViewport(window.sessionStorage); } catch {}
+    syncScrollToBottomAffordance();
+  }, [syncScrollToBottomAffordance]);
+
   const preserveChatViewportThroughSettingsChange = useCallback((mutate: () => void) => {
     if (shouldAutoScroll.current) {
       mutate();
@@ -1887,7 +1975,10 @@ export default function App() {
 
   const append = useCallback((item: Omit<TranscriptItem, "id"> & { id?: string }) => {
     const id = item.id ?? uid(item.kind);
-    updateItems((current) => [...current, { ...item, id }]);
+    updateItems((current) => [...current, {
+      ...(item.kind === "user" || item.kind === "assistant" ? { timestamp: Date.now() } : {}),
+      ...item, id,
+    }]);
     return id;
   }, [updateItems]);
 
@@ -2016,6 +2107,11 @@ export default function App() {
     if (!workingDirectory.trim()) return [];
     try {
       const result = await invoke<SessionInfo[]>("list_sessions", { cwd: workingDirectory });
+      // Header-only Pi sessions are not conversations. Keep a just-opened
+      // folder out of persistent recents until it contains real activity.
+      if (result.some((session) => Boolean(session.firstMessage?.trim() || session.activityTimestamp))) {
+        rememberProject(workingDirectory);
+      }
       if (projectKeyForSidebar(lastCwd.current || cwd) === projectKeyForSidebar(workingDirectory)) {
         setSessions(result);
         setSessionsError(false);
@@ -2032,7 +2128,7 @@ export default function App() {
         setSessionsLoading(false);
       }
     }
-  }, [cwd]);
+  }, [cwd, rememberProject]);
 
   const refreshCommands = useCallback(async (): Promise<CommandInfo[]> => {
     if (!connected) return [];
@@ -2586,8 +2682,6 @@ export default function App() {
         if (runtime?.cwd) {
           lastCwd.current = runtime.cwd;
           setCwd(runtime.cwd);
-          persistWorkingDirectory(runtime.cwd);
-          rememberProject(runtime.cwd);
           frozenTranscriptItemsRef.current = null;
           setFrozenTranscriptItems(null);
           setAutoScrollMode(true);
@@ -2745,6 +2839,10 @@ export default function App() {
   }, [autoExpandTools]);
 
   useEffect(() => {
+    try { window.localStorage.setItem(TIMELINE_MODE_STORAGE_KEY, timelineMode); } catch {}
+  }, [timelineMode]);
+
+  useEffect(() => {
     try { window.localStorage.setItem(BACKGROUND_COMPLETION_NOTIFICATION_KEY, String(notifyWhenBackground)); } catch {}
   }, [notifyWhenBackground]);
 
@@ -2790,11 +2888,26 @@ export default function App() {
       pane.style.getPropertyValue("--composer-overlay-clearance"),
     );
     if (!Number.isFinite(lastClearance)) lastClearance = 190;
+    let lastFadeInset = Number.parseFloat(pane.style.getPropertyValue("--composer-fade-inset"));
+    if (!Number.isFinite(lastFadeInset)) lastFadeInset = 0;
 
     const sync = () => {
       const transcriptBottom = transcriptRef.current?.getBoundingClientRect().bottom ?? pane.getBoundingClientRect().bottom;
-      const clearance = composerOverlayClearance(transcriptBottom, composerWrap.getBoundingClientRect().top);
-      if (Math.abs(clearance - lastClearance) < 1) return;
+      const composerTop = composerWrap.getBoundingClientRect().top;
+      const fadeInset = composerFadeInset(transcriptBottom, composerTop);
+      // The 190px minimum clearance can stay unchanged while a short composer
+      // grows. Track its actual top independently so the fade follows it.
+      if (Math.abs(fadeInset - lastFadeInset) >= 1) {
+        lastFadeInset = fadeInset;
+        pane.style.setProperty("--composer-fade-inset", `${fadeInset}px`);
+      }
+      const clearance = composerOverlayClearance(transcriptBottom, composerTop);
+      if (Math.abs(clearance - lastClearance) < 1) {
+        // A theme change may alter the mask/scroll affordance without changing
+        // composer height; keep arrow visibility in sync as well.
+        window.requestAnimationFrame(syncScrollToBottomAffordance);
+        return;
+      }
 
       // The composer overlays the transcript. Growing it must extend the legal
       // transcript bottom instead of covering the last message. Preserve the
@@ -2821,19 +2934,42 @@ export default function App() {
     // A restored tall draft needs its real clearance before the first visible
     // frame. Later growth/shrink is owned by the ResizeObserver below.
     const transcriptBottom = transcriptRef.current?.getBoundingClientRect().bottom ?? pane.getBoundingClientRect().bottom;
-    const initialClearance = composerOverlayClearance(transcriptBottom, composerWrap.getBoundingClientRect().top);
+    const composerTop = composerWrap.getBoundingClientRect().top;
+    const initialClearance = composerOverlayClearance(transcriptBottom, composerTop);
     lastClearance = initialClearance;
     pane.style.setProperty("--composer-overlay-clearance", `${initialClearance}px`);
+    lastFadeInset = composerFadeInset(transcriptBottom, composerTop);
+    pane.style.setProperty("--composer-fade-inset", `${lastFadeInset}px`);
+
+    // WebView2 can retain the old composited CSS mask after a color-scheme
+    // change even when measured geometry is identical. Invalidate that layer
+    // synchronously (before paint) so the fade and arrow reflect the current
+    // theme without resetting the transcript or the reader's scroll position.
+    const transcriptForMask = transcriptRef.current;
+    if (transcriptForMask) {
+      transcriptForMask.style.setProperty("mask-image", "none");
+      transcriptForMask.style.setProperty("-webkit-mask-image", "none");
+      void transcriptForMask.offsetHeight;
+      transcriptForMask.style.removeProperty("mask-image");
+      transcriptForMask.style.removeProperty("-webkit-mask-image");
+    }
 
     const observer = new ResizeObserver(scheduleSync);
     observer.observe(composerWrap);
     observer.observe(pane);
+    // TranscriptView is keyed by session path. Re-observe the new scroll viewport
+    // so the composer fade mask never keeps stale geometry after chat switching.
+    const transcript = transcriptRef.current;
+    if (transcript) observer.observe(transcript);
     const onWindowGeometryChange = () => {
       scheduleSync();
       // A window can gain/lose transcript viewport height while the overlay's
       // own height remains unchanged. Re-land auto-follow readers at bottom.
       if (shouldAutoScroll.current) scheduleScrollToBottom(true, FORCED_SCROLL_SETTLE_FRAMES);
     };
+    // Theme CSS applies without a ResizeObserver notification if dimensions
+    // remain equal. Re-measure after style recalculation (and the next paint).
+    scheduleSync();
     window.addEventListener("resize", onWindowGeometryChange);
     window.addEventListener("focus", onWindowGeometryChange);
     return () => {
@@ -2843,7 +2979,10 @@ export default function App() {
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, [
+    activeSessionPath,
     connected,
+    resolvedTheme,
+    settingsOpen,
     holdReaderAnchorThroughLayoutChange,
     scheduleReaderScrollLockRestore,
     scheduleScrollToBottom,
@@ -3059,17 +3198,28 @@ export default function App() {
   const applyLoadedHistory = useCallback((records: unknown[]) => {
     const loaded = historyToTranscript(Array.isArray(records) ? records : []);
     const landing = historyLandingPosition(loaded.length);
+    const pending = pendingReloadViewportRef.current;
+    const reloading = loaded.length > 0 && pending !== null &&
+      reloadViewportApplies(pending, lastCwd.current || cwd, activeSessionPath);
+    const restoring = Boolean(reloading && pending && !pending.atBottom);
+    const restoreBottom = Boolean(reloading && pending && pending.atBottom);
     frozenTranscriptItemsRef.current = null;
     setFrozenTranscriptItems(null);
     cancelAutoFollowMotion();
     clearReaderScrollLock();
-    setAutoScrollMode(landing === "bottom");
+    setAutoScrollMode(restoreBottom || (!restoring && landing === "bottom"));
     itemsRef.current = loaded;
     setItems(loaded);
     setShowScrollToBottomButton(false);
     setHistoryLoading(false);
-    if (landing === "bottom") {
+    if (restoring) return;
+    if (restoreBottom || landing === "bottom") {
       window.requestAnimationFrame(() => scheduleScrollToBottom(true));
+      if (restoreBottom) {
+        pendingReloadViewportRef.current = null;
+        setReloadViewport(null);
+        try { clearReloadViewport(window.sessionStorage); } catch {}
+      }
       return;
     }
 
@@ -3079,7 +3229,7 @@ export default function App() {
       transcript.scrollTop = 0;
       lastTranscriptScrollTopRef.current = 0;
     }
-  }, [cancelAutoFollowMotion, clearReaderScrollLock, markProgrammaticScroll, scheduleScrollToBottom, setAutoScrollMode]);
+  }, [activeSessionPath, cancelAutoFollowMotion, clearReaderScrollLock, cwd, markProgrammaticScroll, scheduleScrollToBottom, setAutoScrollMode]);
 
   function handleRecord(record: Json) {
     switch (record.type) {
@@ -3867,8 +4017,13 @@ export default function App() {
           const abortTerminal = isAssistantAbortTerminal(record.message);
           setGenerationStatus(abortTerminal ? "Interrupted" : "Composing");
           const text = extractText(record.message);
-          if (assistantId.current && text) patchItem(assistantId.current, { text });
-          else if (text) assistantId.current = append({ kind: "assistant", text });
+          const assistantMeta = {
+            timestamp: record.message?.timestamp ?? Date.now(),
+            model: typeof record.message?.model === "string" ? record.message.model : undefined,
+            provider: typeof record.message?.provider === "string" ? record.message.provider : undefined,
+          };
+          if (assistantId.current) patchItem(assistantId.current, { ...(text ? { text } : {}), ...assistantMeta });
+          else if (text) assistantId.current = append({ kind: "assistant", text, ...assistantMeta });
 
           if (abortTerminal) {
             // A provider-side abort can terminate the assistant message without
@@ -4113,8 +4268,6 @@ export default function App() {
         diffExtensionDisabled = true;
       }
 
-      persistWorkingDirectory(workingDirectory);
-      rememberProject(workingDirectory);
       setConnected(true);
       if (diffExtensionDisabled) {
         append({
@@ -4124,6 +4277,9 @@ export default function App() {
         });
       }
       if (initialSessions) {
+        if (initialSessions.some((session) => Boolean(session.firstMessage?.trim() || session.activityTimestamp))) {
+          rememberProject(workingDirectory);
+        }
         setSessions(initialSessions);
         setSessionsError(false);
         // A project switch is not complete until its chosen chat is restored.
@@ -4676,7 +4832,11 @@ export default function App() {
     toolDefinitionTokens,
   ]);
 
-  const activityDisplaySettings = useMemo(() => ({ autoExpandThinking, autoExpandTools }), [autoExpandThinking, autoExpandTools]);
+  const activityDisplaySettings = useMemo(() => ({
+    timelineMode,
+    autoExpandThinking: timelineMode !== "compact" && autoExpandThinking,
+    autoExpandTools: timelineMode !== "compact" && autoExpandTools,
+  }), [autoExpandThinking, autoExpandTools, timelineMode]);
   const activeBackgroundUrl = selectActiveBackgroundUrl(
     backgroundImagesEnabled,
     resolvedTheme,
@@ -4686,6 +4846,7 @@ export default function App() {
   const appStyle = {
     "--session-sidebar-width": `${sidebarWidth}px`,
     "--app-background-image": activeBackgroundUrl ? `url(${JSON.stringify(activeBackgroundUrl)})` : "none",
+    "--mf-wallpaper-overlay-opacity": String(wallpaperOverlayPercent / 100),
   } as CSSProperties;
 
   const loadingBackgroundUrl = activeBackgroundUrl ?? null;
@@ -4814,21 +4975,32 @@ export default function App() {
 
             {connected ? <WorkingDirectoryContext.Provider value={cwd}>
               <ActivityDisplaySettingsContext.Provider value={activityDisplaySettings}>
+                <MessageActionsContext.Provider value={{
+                  canFork: !isStreaming && !inputBlocked,
+                  onFork: (entryId) => {
+                    if (!window.confirm("Fork this session from the selected message? Pi will create a new session, preserving the original.")) return;
+                    void forkSession(entryId).catch((error) => append({ kind: "error", text: `Could not fork: ${String(error)}` }));
+                  },
+                }}>
                 <TranscriptView
                   key={activeSessionPath ?? "__new-session__"}
                   items={visibleTranscriptItems}
+                  timelineMode={timelineMode}
                   historyLoading={historyLoading}
                   piVersion={piVersion}
                   commands={commands}
                   isStreaming={isStreaming}
                   generationStatus={generationStatus}
                   disableVirtualizerScrollCorrection={isStreaming || visualFlushSettling}
+                  restoreScrollTop={reloadViewportApplies(reloadViewport, cwd, activeSessionPath) && !reloadViewport?.atBottom ? reloadViewport?.scrollTop : null}
+                  onRestoreScroll={finishReloadViewportRestore}
                   transcriptRef={transcriptRef}
                   transcriptContentRef={transcriptContentRef}
                   onScroll={handleTranscriptScroll}
                   onWheel={handleTranscriptWheel}
                   onPointerDown={handleTranscriptPointerDown}
                 />
+                </MessageActionsContext.Provider>
               </ActivityDisplaySettingsContext.Provider>
             </WorkingDirectoryContext.Provider> : (
               <section className="no-project-state">
@@ -4883,27 +5055,27 @@ export default function App() {
                 isBashRunning={isBashRunning}
                 inputBlocked={inputBlocked}
                 draftSetterRef={composerDraftSetterRef}
+                workingDirectory={cwd}
+                sessionPath={activeSessionPath}
                 onSubmitRaw={submitRaw}
                 onAbort={async () => { await interruptGeneration(); }}
                 onAbortBash={abortDirectBash}
-                beforeSendActions={
-                  <>
-                    <ModelSwitcher
-                      models={models}
-                      currentModel={currentModel}
-                      connected={connected}
-                      onRefreshModels={refreshAvailableModels}
-                      onSelectModel={selectModelFromPicker}
-                    />
-                    {contextLimit > 0 && (
-                      <ContextUsagePopover
-                        variant="ring"
-                        details={contextDetails}
-                        onOpen={refreshContextUsage}
-                      />
-                    )}
-                  </>
+                modelSelection={
+                  <ModelSwitcher
+                    models={models}
+                    currentModel={currentModel}
+                    connected={connected}
+                    onRefreshModels={refreshAvailableModels}
+                    onSelectModel={selectModelFromPicker}
+                  />
                 }
+                contextControl={contextLimit > 0 ? (
+                  <ContextUsagePopover
+                    variant="ring"
+                    details={contextDetails}
+                    onOpen={refreshContextUsage}
+                  />
+                ) : null}
               />
 
               {belowEditorWidgets.length > 0 && (
@@ -4933,11 +5105,14 @@ export default function App() {
             themePreference={themePreference}
             appFontFamily={appFontFamily}
             autoExpandThinking={autoExpandThinking}
+            timelineMode={timelineMode}
             autoExpandTools={autoExpandTools}
             notifyWhenBackground={notifyWhenBackground}
             notificationError={notificationError}
             onNotifyWhenBackgroundChange={(value) => void changeBackgroundNotificationSetting(value)}
             backgroundImagesEnabled={backgroundImagesEnabled}
+            wallpaperOverlayPercent={wallpaperOverlayPercent}
+            onWallpaperOverlayPercentChange={setWallpaperOverlayPercent}
             customBackgrounds={customBackgrounds}
             backgroundPickerTheme={backgroundPickerTheme}
             backgroundError={backgroundError}
@@ -4947,6 +5122,7 @@ export default function App() {
             onAppFontFamilyChange={(font) => preserveChatViewportThroughSettingsChange(() => setAppFontFamily(font))}
             onAutoExpandThinkingChange={(value) => preserveChatViewportThroughSettingsChange(() => setAutoExpandThinking(value))}
             onAutoExpandToolsChange={(value) => preserveChatViewportThroughSettingsChange(() => setAutoExpandTools(value))}
+            onTimelineModeChange={(value) => preserveChatViewportThroughSettingsChange(() => setTimelineMode(value))}
             onBackgroundImagesEnabledChange={setBackgroundImagesEnabled}
             onChooseBackgroundImage={chooseBackgroundImage}
             onClearBackgroundImage={(theme) => void clearBackgroundImage(theme)}
@@ -5513,10 +5689,16 @@ function RetryTranscript({ item }: { item: TranscriptItem }) {
   );
 }
 
-function ToolTranscript({ item }: { item: TranscriptItem }) {
+function ToolTranscript({ item, compact = false }: { item: TranscriptItem; compact?: boolean }) {
   const terminalLike = /^(bash|shell|terminal|powershell|pwsh)/i.test(item.title ?? "");
   const running = item.state === "running";
   const fileMutation = isFileMutationTool(item.title);
+  const compactIcon = !compact ? null
+    : terminalLike ? Terminal
+    : /^(read|read_file)$/i.test(item.title ?? "") ? BookOpen
+    : /^(write|create)$/i.test(item.title ?? "") ? FilePlus2
+    : /^(edit|patch|apply_patch)$/i.test(item.title ?? "") ? FilePenLine
+    : Wrench;
   const { autoExpandTools } = useContext(ActivityDisplaySettingsContext);
   const cwd = useContext(WorkingDirectoryContext);
   const [manualExpandedOverride, setManualExpandedOverride] = useState<boolean | undefined>(() =>
@@ -5603,7 +5785,7 @@ function ToolTranscript({ item }: { item: TranscriptItem }) {
         aria-expanded={expanded}
       >
         <HoverSwapActivityIcon
-          icon={terminalLike ? Terminal : Wrench}
+          icon={compactIcon ?? (terminalLike ? Terminal : Wrench)}
           hoverIcon={Maximize2}
         />
         <span className="activity-title">{formatToolDisplayName(item.title ?? "tool")}</span>
@@ -5696,28 +5878,129 @@ function ToolTranscript({ item }: { item: TranscriptItem }) {
   );
 }
 
-function RuntimeTranscriptGroup({ items }: { items: TranscriptItem[] }) {
-  const segments = useMemo(() => segmentRuntimeGroupItems(items), [items]);
+/** One disclosure per continuous activity run, with independently bordered
+ * smart-grouped thinking/tool phases and explicit Pi parallel batches. */
+const compactGroupExpandedById = new Map<string, boolean>();
+
+function CompactRuntimeTranscriptGroup({ items, blocks }: { items: TranscriptItem[]; blocks: TranscriptItem[][] }) {
+  const summary = useMemo(() => summarizeCompactActivity(items), [items]);
+  const groupId = items[0]?.id ?? "";
+  const [expanded, setExpanded] = useState(() => compactGroupExpandedById.get(groupId) ?? false);
+  const hasTools = items.some((item) => item.kind === "tool");
 
   return (
-    <div className="runtime-group">
-      {segments.map((segment) => (
-        segment.kind === "parallel-tools" ? (
-          <div className="parallel-tool-group" key={segment.key}>
-            <div className="parallel-tool-label">Parallel tool calls</div>
-            <div className="parallel-tool-items">
-              {segment.items.map((tool) => <MemoToolTranscript key={tool.id} item={tool} />)}
-            </div>
+    <div className="compact-runtime-episode">
+      <div className={`compact-tool-group${expanded ? " expanded" : ""}${summary.errors ? " has-errors" : ""}`}>
+        <button
+          className="compact-tool-summary"
+          type="button"
+          data-message-id={expanded ? undefined : groupId}
+          data-reader-layout-interaction="true"
+          aria-expanded={expanded}
+          aria-label={`${summary.label}${summary.errors ? `, ${summary.errors} failed` : ""}${summary.interrupted ? `, ${summary.interrupted} interrupted` : ""}`}
+          onClick={() => {
+            const next = !expanded;
+            compactGroupExpandedById.set(groupId, next);
+            setExpanded(next);
+          }}
+        >
+          <HoverSwapActivityIcon
+            icon={summary.running ? Loader2 : hasTools ? Wrench : Brain}
+            hoverIcon={expanded ? ChevronDown : ChevronRight}
+            spinning={summary.running}
+          />
+          <span className="compact-tool-label">{summary.label}</span>
+          {summary.errors > 0 && <span className="compact-tool-failures">{summary.errors} failed</span>}
+          {summary.interrupted > 0 && <span className="compact-tool-interrupted">{summary.interrupted} interrupted</span>}
+        </button>
+        {expanded && (
+          <div className="compact-tool-details">
+            {blocks.map((block) => (
+              <div className="compact-activity-block" key={block[0].id}>
+                {block.map((item) => (
+                  <div className="compact-activity-row" key={item.id} data-parallel-batch={item.toolBatchId}>
+                    {item.kind === "thinking"
+                      ? <MemoThinkingTranscript item={item} />
+                      : <MemoToolTranscript item={item} compact />}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
-        ) : (
-          <MemoTranscript key={segment.item.id} item={segment.item} />
-        )
+        )}
+      </div>
+    </div>
+  );
+}
+
+const MemoCompactRuntimeTranscriptGroup = memo(CompactRuntimeTranscriptGroup);
+
+function RuntimeTranscriptGroup({ items }: { items: TranscriptItem[] }) {
+  // Keep explicit batch metadata and authoritative segmentation even though the
+  // visual treatment is a flat row list with shared, edge-to-edge separators.
+  const segments = useMemo(() => segmentRuntimeGroupItems(items), [items]);
+  return (
+    <div className="runtime-group activity-row-list">
+      {segments.flatMap<{ item: TranscriptItem; parallelBatch?: string }>((segment) => segment.kind === "parallel-tools"
+        ? segment.items.map((item) => ({ item, parallelBatch: segment.key }))
+        : [{ item: segment.item, parallelBatch: undefined }],
+      ).map(({ item, parallelBatch }) => (
+        <div className="runtime-activity-row" key={item.id} data-parallel-batch={parallelBatch}>
+          {item.kind === "thinking"
+            ? <MemoThinkingTranscript item={item} />
+            : <MemoToolTranscript item={item} compact />}
+        </div>
       ))}
     </div>
   );
 }
 
-function Transcript({ item }: { item: TranscriptItem }) {
+function MessageMetadata({ item, responseModel }: { item: TranscriptItem; responseModel?: string }) {
+  const actions = useContext(MessageActionsContext);
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const copyFeedbackTimerRef = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current);
+  }, []);
+  const showCopyFeedback = (status: "copied" | "failed") => {
+    if (copyFeedbackTimerRef.current !== null) window.clearTimeout(copyFeedbackTimerRef.current);
+    setCopyStatus(status);
+    copyFeedbackTimerRef.current = window.setTimeout(() => {
+      setCopyStatus("idle");
+      copyFeedbackTimerRef.current = null;
+    }, 1500);
+  };
+  const timestamp = item.timestamp;
+  const date = timestamp ? new Date(timestamp) : null;
+  const readableDate = date && Number.isFinite(date.getTime()) ? formatSessionDate(timestamp) : "";
+  const fullDate = date && Number.isFinite(date.getTime()) ? date.toLocaleString() : "";
+  const modelName = responseModel ?? item.model;
+  const forkable = item.kind === "user" && Boolean(item.entryId);
+  return (
+    <div className="message-metadata" aria-label="Message details">
+      {modelName && <span className="message-metadata-model" title={item.provider ? `${item.provider} / ${modelName}` : modelName}>{modelName}</span>}
+      {modelName && readableDate && <span className="message-metadata-separator" aria-hidden="true">·</span>}
+      {readableDate && <time title={fullDate} dateTime={date!.toISOString()}>{readableDate}</time>}
+      {forkable && (
+        <button type="button" className="message-meta-action" title={actions?.canFork ? "Fork from this message" : "Fork unavailable during generation"} aria-label="Fork conversation from this message"
+          disabled={!actions?.canFork}
+          onClick={() => actions?.onFork(item.entryId!)}><GitFork size={14} aria-hidden="true" /></button>
+      )}
+      <button type="button" className="message-meta-action"
+        title={copyStatus === "copied" ? "Copied" : copyStatus === "failed" ? "Could not copy" : "Copy message"}
+        aria-label={copyStatus === "copied" ? "Message copied" : "Copy message text"}
+        onClick={() => {
+          void navigator.clipboard.writeText(item.text)
+            .then(() => showCopyFeedback("copied"))
+            .catch((error) => { showCopyFeedback("failed"); console.warn("Copy message failed", error); });
+        }}>
+        {copyStatus === "copied" ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+      </button>
+    </div>
+  );
+}
+
+function Transcript({ item, responseModel }: { item: TranscriptItem; responseModel?: string }) {
   if (item.kind === "user") {
     return (
       <article className="message user" data-message-id={item.id}>
@@ -5725,6 +6008,7 @@ function Transcript({ item }: { item: TranscriptItem }) {
           {item.attachments?.length ? <div className="message-attachments">{item.attachments.map((attachment) => <AttachmentChip key={attachment.id} attachment={attachment} />)}</div> : null}
           {item.text ? <div>{item.text}</div> : null}
         </div>
+        <MessageMetadata item={item} responseModel={responseModel} />
       </article>
     );
   }
@@ -5732,6 +6016,7 @@ function Transcript({ item }: { item: TranscriptItem }) {
     return (
       <article className="message assistant" data-message-id={item.id}>
         <Markdown messageId={item.id}>{item.text || "…"}</Markdown>
+        <MessageMetadata item={item} />
       </article>
     );
   }
@@ -5752,22 +6037,111 @@ const MemoToolTranscript = memo(ToolTranscript);
 const MemoTranscript = memo(Transcript);
 const MemoRuntimeTranscriptGroup = memo(RuntimeTranscriptGroup);
 
-function TranscriptTurnView({ turn }: { turn: TranscriptTurn }) {
+/** Render one complete continuous activity episode using the same canonical
+ * per-phase renderer as Full mode, without changing transcript grouping. */
+const MemoFullActivityEpisode = memo(function FullActivityEpisode({ items }: { items: TranscriptItem[] }) {
+  const groups = useMemo(() => groupTranscriptItems(items), [items]);
+  return (
+    <div className="semi-compact-latest-activity">
+      {groups.map((group) => group.kind === "runtime"
+        ? <MemoRuntimeTranscriptGroup key={group.key} items={group.items} />
+        : <MemoTranscript key={group.item.id} item={group.item} />)}
+    </div>
+  );
+});
+
+/** Semi Compact is a transient live presentation, not a permanent Full
+ * setting for the latest historical episode. Keep the compact disclosure
+ * mounted while swapping views so its expansion preference survives. */
+type SemiCompactTransitionPhase = "collapsed" | "entering" | "opening" | "open" | "closing";
+
+function SemiCompactRuntimeTranscriptGroup({ items, blocks, active }: {
+  items: TranscriptItem[];
+  blocks: TranscriptItem[][];
+  active: boolean;
+}) {
+  const [phase, setPhase] = useState<SemiCompactTransitionPhase>(active ? "entering" : "collapsed");
+
+  useEffect(() => {
+    if (active) {
+      setPhase((current) => current === "collapsed" ? "entering" : current === "closing" ? "opening" : current);
+    } else {
+      setPhase((current) => current === "collapsed" || current === "closing" ? current : "closing");
+    }
+  }, [active]);
+
+  useEffect(() => {
+    if (phase !== "entering") return;
+    const frame = window.requestAnimationFrame(() => setPhase((current) => current === "entering" ? "opening" : current));
+    return () => window.cancelAnimationFrame(frame);
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "opening" && phase !== "closing") return;
+    const complete = () => setPhase((current) => current === phase ? (phase === "opening" ? "open" : "collapsed") : current);
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      complete();
+      return;
+    }
+    // Transitions can be suppressed when a virtualized row leaves the viewport.
+    // Never retain the expensive Full subtree indefinitely.
+    const timeout = window.setTimeout(complete, 360);
+    return () => window.clearTimeout(timeout);
+  }, [phase]);
+
+  const finishTransition = (event: ReactTransitionEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || event.propertyName !== "grid-template-rows") return;
+    if (phase === "opening") setPhase("open");
+    else if (phase === "closing") setPhase("collapsed");
+  };
+  const renderFull = phase !== "collapsed";
+
+  return (
+    <div className={`semi-compact-activity is-${phase}`}>
+      <div className="semi-compact-summary-reveal" aria-hidden={active} inert={active}>
+        <div className="semi-compact-reveal-inner">
+          <MemoCompactRuntimeTranscriptGroup items={items} blocks={blocks} />
+        </div>
+      </div>
+      {renderFull && (
+        <div className="semi-compact-full-reveal" aria-hidden={!active} inert={!active} onTransitionEnd={finishTransition}>
+          <div className="semi-compact-reveal-inner">
+            <MemoFullActivityEpisode items={items} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MemoSemiCompactRuntimeTranscriptGroup = memo(SemiCompactRuntimeTranscriptGroup);
+
+function TranscriptTurnView({ turn, activeSemiCompactGroupKey }: {
+  turn: TranscriptTurn;
+  activeSemiCompactGroupKey: string | null;
+}) {
+  const { timelineMode } = useContext(ActivityDisplaySettingsContext);
   const agentGroups = useMemo(() => groupTranscriptItems(turn.agentItems), [turn.agentItems]);
+  const compactGroups = useMemo(() => timelineMode !== "full" ? groupCompactActivityGroups(agentGroups) : null, [agentGroups, timelineMode]);
+  const responseModel = turn.agentItems.find((item) => item.kind === "assistant" && item.model)?.model;
   return (
     <div className="transcript-turn">
       {turn.userItems.length > 0 && (
         <div className="transcript-turn-users">
-          {turn.userItems.map((item) => <MemoTranscript key={item.id} item={item} />)}
+          {turn.userItems.map((item) => <MemoTranscript key={item.id} item={item} responseModel={responseModel} />)}
         </div>
       )}
       {turn.agentItems.length > 0 && (
         <div className="transcript-turn-agent">
-          {agentGroups.map((group) => (
-            group.kind === "runtime"
+          {timelineMode !== "full"
+            ? compactGroups?.map((group) => group.kind === "activity"
+              ? timelineMode === "semi-compact"
+                ? <MemoSemiCompactRuntimeTranscriptGroup key={group.key} items={group.items} blocks={group.blocks} active={group.key === activeSemiCompactGroupKey} />
+                : <MemoCompactRuntimeTranscriptGroup key={group.key} items={group.items} blocks={group.blocks} />
+              : <MemoTranscript key={group.item.id} item={group.item} />)
+            : agentGroups.map((group) => group.kind === "runtime"
               ? <MemoRuntimeTranscriptGroup key={group.key} items={group.items} />
-              : <MemoTranscript key={group.item.id} item={group.item} />
-          ))}
+              : <MemoTranscript key={group.item.id} item={group.item} />)}
         </div>
       )}
     </div>
@@ -5777,6 +6151,7 @@ function TranscriptTurnView({ turn }: { turn: TranscriptTurn }) {
 const MemoTranscriptTurn = memo(
   TranscriptTurnView,
   (previous, next) => previous.turn.key === next.turn.key
+    && previous.activeSemiCompactGroupKey === next.activeSemiCompactGroupKey
     && transcriptItemsShallowEqual(previous.turn.userItems, next.turn.userItems)
     && transcriptItemsShallowEqual(previous.turn.agentItems, next.turn.agentItems),
 );
@@ -5786,12 +6161,15 @@ const TRANSCRIPT_VIRTUAL_OVERSCAN = 8;
 
 type TranscriptViewProps = {
   items: TranscriptItem[];
+  timelineMode: TimelineMode;
   historyLoading: boolean;
   piVersion: string | null;
   commands: CommandInfo[];
   isStreaming: boolean;
   generationStatus: GenerationStatus | null;
   disableVirtualizerScrollCorrection: boolean;
+  restoreScrollTop?: number | null;
+  onRestoreScroll?: () => void;
   transcriptRef: RefObject<HTMLElement | null>;
   transcriptContentRef: RefObject<HTMLDivElement | null>;
   onScroll: () => void;
@@ -5801,12 +6179,15 @@ type TranscriptViewProps = {
 
 const TranscriptView = memo(function TranscriptView({
   items,
+  timelineMode,
   historyLoading,
   piVersion,
   commands,
   isStreaming,
   generationStatus,
   disableVirtualizerScrollCorrection,
+  restoreScrollTop,
+  onRestoreScroll,
   transcriptRef,
   transcriptContentRef,
   onScroll,
@@ -5814,6 +6195,7 @@ const TranscriptView = memo(function TranscriptView({
   onPointerDown,
 }: TranscriptViewProps) {
   const turns = useMemo(() => buildTranscriptTurns(items), [items]);
+  const liveActivity = useMemo(() => timelineMode === "semi-compact" ? activeSemiCompactActivity(turns, isStreaming) : null, [turns, timelineMode, isStreaming]);
   const turnsRef = useRef(turns);
   turnsRef.current = turns;
   const measuredHeightsRef = useRef(new Map<string, number>());
@@ -5854,6 +6236,30 @@ const TranscriptView = memo(function TranscriptView({
     directDomUpdates: true,
     directDomUpdatesMode: "position",
   });
+
+  // Restore the reader's numeric offset after Pi history and the virtual list
+  // have mounted. Retry briefly while TanStack measures actual row heights;
+  // never turn on auto-follow or replace the transcript virtualization.
+  useLayoutEffect(() => {
+    if (restoreScrollTop == null || !Number.isFinite(restoreScrollTop) || historyLoading || turns.length === 0) return;
+    const scrollElement = transcriptRef.current;
+    if (!scrollElement) return;
+    let frame = 0;
+    let attempts = 0;
+    const restore = () => {
+      virtualizer.scrollToOffset(restoreScrollTop, { align: "start" });
+      attempts += 1;
+      if (attempts < 12) frame = window.requestAnimationFrame(restore);
+      else onRestoreScroll?.();
+    };
+    frame = window.requestAnimationFrame(restore);
+    return () => window.cancelAnimationFrame(frame);
+  }, [restoreScrollTop, historyLoading, turns.length, transcriptRef, virtualizer, onRestoreScroll]);
+
+  useLayoutEffect(() => {
+    measuredHeightsRef.current.clear();
+    virtualizer.measure();
+  }, [timelineMode, virtualizer]);
 
   // Molten Forge owns transcript scroll position while Pi is streaming: the
   // original Electron moving-bottom rAF lerp owns live follow, while
@@ -5968,7 +6374,7 @@ const TranscriptView = memo(function TranscriptView({
                   // here: sticky code headers depend on a transform-free chain.
                   className="virtual-transcript-row"
                 >
-                  <MemoTranscriptTurn turn={turn} />
+                  <MemoTranscriptTurn turn={turn} activeSemiCompactGroupKey={turn.key === liveActivity?.turnKey ? liveActivity.groupKey : null} />
                 </div>
               );
             })}
@@ -5977,7 +6383,7 @@ const TranscriptView = memo(function TranscriptView({
         {isStreaming && (
           <div className="generation-status" aria-live="polite">
             <MoltenForgeGenerationSpinner />
-            <span className="generating-gradient-text">{generationStatus ?? "Working"}</span>
+            <span className="generating-gradient-text"><span>{generationStatus ?? "Working"}</span><span className="generation-shimmer-highlight" aria-hidden="true">{generationStatus ?? "Working"}</span></span>
           </div>
         )}
       </div>

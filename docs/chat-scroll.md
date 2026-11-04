@@ -187,7 +187,50 @@ Activating it is an explicit landing:
 - re-arm normal bottom-follow;
 - settle again after pending virtualizer/Markdown measurements so the control cannot land on a stale pre-flush bottom.
 
-The control follows the measured composer clearance so a tall multiline composer cannot cover it.
+The control sits 16px above the actual measured top of the composer overlay (`--composer-fade-inset`), rather than the 190px minimum transcript clearance. That keeps it close to a short composer and above a taller composer or queued-message strip without changing scroll padding.
 
 
 For queue strip and short-window multiline drafts, also see `docs/pi-queue-and-composer.md`. The resize observer tracks both the composer and chat pane, plus window resize/focus.
+
+## Phase 4: Floating composer fade
+
+The composer **already** overlays the transcript. Preserve its absolute
+positioning, measured bottom clearance, 16px safety gap, queue/widget height
+bounds, center alignment, and existing auto-follow/reader-anchor owners.
+
+The new fade is a 16px `mask-image` gradient on the **transcript scroll viewport**,
+not a backdrop blur, tinted card, or per-message mask. Because the mask belongs
+to the viewport, its horizon remains stationary while virtualized messages
+scroll beneath it. A mask affects only appearance, not hit testing or scroll
+geometry; avoid `transform` on the virtualized rows and their sticky code headers.
+
+`--composer-fade-inset` measures the actual overlap from the transcript's bottom
+to `.composer-wrap`'s top, independently of `--composer-overlay-clearance`.
+The overlay has **no top padding**, so its measured top coincides with the first
+visible composer/queue/widget surface; otherwise the masked viewport would
+show an invisible strip immediately above the composer.
+The latter retains the 190px minimum, needed for scroll clearance and large
+composer/queue layouts. Using that minimum as the fade position would make a
+short composer hide text far above its actual top. The existing ResizeObserver
+updates both values and keeps automatic following/reader intent unchanged.
+
+The mask is disabled for empty and history-loading transcripts, and applies in
+both light/dark themes without an extra image layer or blur. It begins fading
+at the composer top and returns to full opacity 16px above it, where the last
+message is allowed to settle.
+
+
+The mask measurement effect also depends on `activeSessionPath`: the transcript
+DOM is keyed by session, so a new session must rebind its resize observation
+and re-apply the initial `--composer-fade-inset`. Otherwise the old mask may
+leave transcript text exposed beneath the absolute composer after a switch.
+
+## Semi Compact automatic episode contraction
+
+While the agent streams, the latest trailing thinking/tool episode is visible
+as Full rows. When its phase ends, a short height animation replaces those
+rows with a Compact `Used…` disclosure. The animation never uses CSS transforms
+or an independent transcript scroll writer. Existing ResizeObserver and
+virtualizer measurements own height changes; manual-reader freeze and the
+agent-settled final reader-anchor flush remain authoritative. When reduced
+motion is preferred, the transition is instantaneous.

@@ -6,7 +6,10 @@ The visual reference is the old Electron Molten Forge implementation. The wrappe
 
 - the normal chat/sidebar header even before Pi is connected;
 - the sidebar title row while the sidebar is visible;
-- the chat header for the main content column.
+- the chat header for the main content column, visually lifted into the 40px
+  window strip above the inset panel (Phase 4.3). The title and context telemetry
+  stay interactive, and a faint 1px rule separates the strip from the wallpaper
+  workspace. No additional title-bar row is created.
 
 The Tauri window uses `decorations: false`. A compact three-button control cluster is fixed at the top-right and provides minimize, maximize/restore, and close. Interactive controls inside draggable title rows must remain non-draggable.
 

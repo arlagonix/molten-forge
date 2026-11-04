@@ -1,4 +1,6 @@
-"""Chromium regression: content cards stay opaque without backdrop blur.
+"""Chromium regression: foreground cards stay opaque without backdrop blur.
+
+The inset chat header inherits its parent pane rather than painting a card.
 Run with: python tests/opaque-surfaces.browser.py
 """
 from pathlib import Path
@@ -6,7 +8,7 @@ from playwright.sync_api import sync_playwright
 
 root = Path(__file__).resolve().parents[1]
 css = (root / 'src/styles.css').read_text(encoding='utf-8')
-selectors = ['.chat-header', '.composer',
+selectors = ['.composer',
              '.context-popover.context-popover-portal', '.runtime-group', '.thinking', '.tool',
              '.settings-dialog',
              '.model-popover', '.chat-code-header']

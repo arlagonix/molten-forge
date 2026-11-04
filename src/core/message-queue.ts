@@ -38,6 +38,13 @@ export function composerOverlayClearance(transcriptBottom: number, composerTop: 
   return Math.max(190, Math.ceil(transcriptBottom - composerTop) + 16);
 }
 
+/** The fade follows the *visible* composer top, not the minimum transcript
+ * clearance (190px). Otherwise short editors create a premature fade horizon.
+ */
+export function composerFadeInset(transcriptBottom: number, composerTop: number): number {
+  return Math.max(0, Math.ceil(transcriptBottom - composerTop));
+}
+
 /** Never allow a tall draft to occupy most of a short chat window. */
 export function textareaHeightLimit(paneHeight: number, lineHeight: number, topPadding: number, bottomPadding: number): number {
   const configuredMax = lineHeight * 11 + topPadding + bottomPadding;

@@ -39,7 +39,16 @@ describe("historyRecordsFromSessionEntries", () => {
     expect(records).toHaveLength(4);
     expect(records[0]).toMatchObject({ role: "user", content: "before" });
     expect(records[2]).toMatchObject({ role: "__moltenForgeCompactionEntry", tokensBefore: 120000, estimatedTokensAfter: 42000 });
-    expect(records[3]).toMatchObject({ role: "user", content: "after" });
+    expect(records[3]).toMatchObject({ role: "user", content: "after", __mfEntryId: "d" });
+  });
+
+  it("keeps the Pi entry timestamp and stable ID for message actions without mutating Pi records", () => {
+    const message = { role: "user", content: "inspect", timestamp: "2026-11-04T10:00:00Z" };
+    const records = historyRecordsFromSessionEntries([
+      { type: "message", id: "stable-message", parentId: null, timestamp: "2026-11-04T09:59:59Z", message },
+    ], "stable-message") as Array<Record<string, unknown>>;
+    expect(records[0]).toMatchObject({ __mfEntryId: "stable-message", __mfEntryTimestamp: "2026-11-04T09:59:59Z" });
+    expect(message).not.toHaveProperty("__mfEntryId");
   });
 
   it("does not leak entries from an abandoned branch", () => {

@@ -3,6 +3,8 @@ import {
   BACKGROUND_IMAGES_ENABLED_STORAGE_KEY,
   DEFAULT_APPEARANCE_SETTINGS,
   THEME_STORAGE_KEY,
+  DEFAULT_WALLPAPER_OVERLAY_PERCENT,
+  readWallpaperOverlayPercent,
   backgroundExtension,
   backgroundImageAcceptValue,
   isSupportedBackgroundImage,
@@ -57,6 +59,21 @@ describe("appearance settings", () => {
     expect(parseStoredBoolean("yes", false)).toBe(false);
     expect(parseStoredBoolean("true", false)).toBe(true);
     expect(parseStoredBoolean("false", true)).toBe(false);
+  });
+
+  it("defaults wallpaper overlay to 10%, retaining saved 0–25% preferences", () => {
+    const storage = new MemoryStorage();
+    expect(DEFAULT_WALLPAPER_OVERLAY_PERCENT).toBe(10);
+    expect(readWallpaperOverlayPercent(storage)).toBe(10);
+    for (const [stored, expected] of [["0", 0], ["1", 1], ["12", 12], ["25", 25], ["7.6", 8]] as const) {
+      storage.setItem("molten-forge-pi-wallpaper-overlay-percent", stored);
+      expect(readWallpaperOverlayPercent(storage)).toBe(expected);
+    }
+    for (const invalid of ["", "abc", "-1", "26", "Infinity"]) {
+      storage.setItem("molten-forge-pi-wallpaper-overlay-percent", invalid);
+      expect(readWallpaperOverlayPercent(storage)).toBe(10);
+    }
+    expect(readWallpaperOverlayPercent({ getItem: () => { throw new Error("No storage"); } })).toBe(10);
   });
 
   it("writes normalized appearance values", () => {

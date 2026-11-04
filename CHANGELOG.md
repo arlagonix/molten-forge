@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.0 — Chat activity and interface improvements (2026-11-04)
+
+Added the Semi Compact activity view, message details and Pi-backed Fork, refreshed model selection and Settings styling, and improved draft/scroll restoration and composer behavior.
+
+See [2.1.0 release notes](docs/releases/v2.1.0.md) for user-facing features, changes, and fixes.
+
 ## 2.0.0 — Tauri / Pi architecture (2026-10-30)
 
 Molten Forge 2.0.0 replaces the original Electron application with a lightweight Tauri desktop client around the system-installed Pi coding agent.

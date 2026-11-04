@@ -31,9 +31,10 @@ describe("v0.36.56 runtime and composer polish", () => {
     expect(styles).toMatch(/\.thinking-header \.activity-title,[\s\S]*?\.tool-header \.activity-title,[\s\S]*?\.thinking-preview,[\s\S]*?\.tool-preview[\s\S]*?color:\s*var\(--runtime-label-color\) !important;/);
   });
 
-  it("removes shadows from runtime boundaries but keeps their border styling", () => {
+  it("uses restrained, shadowless runtime surfaces instead of legacy dashed borders", () => {
     expect(styles).toMatch(/\.runtime-group,[\s\S]*?html\[data-theme="light"\] \.tool\s*\{\s*box-shadow:\s*none !important;/);
-    expect(styles).toMatch(/\.runtime-group\s*\{[\s\S]*?border:\s*1px dashed/);
+    expect(styles).toMatch(/\.runtime-group\.activity-row-list,[\s\S]*?border:\s*1px solid var\(--mf-surface-border, var\(--border\)\);/);
+    expect(styles).toMatch(/\.runtime-activity-row \+ \.runtime-activity-row,[\s\S]*?border-top:\s*1px solid/);
   });
 
   it("makes icon hover/focus visible without restyling disabled buttons", () => {

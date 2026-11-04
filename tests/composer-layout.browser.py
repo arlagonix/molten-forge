@@ -28,7 +28,7 @@ HTML = '''<!doctype html><html><head><meta name="viewport" content="width=device
     <div class="composer-queue"><div class="composer-queue-header"><span>Queued messages</span></div>
       <div class="composer-queue-items">''' + '<div class="composer-queue-item">Queued item</div>' * 8 + '''</div></div>
     <form class="composer"><div class="composer-attachments" style="height:85px">Attachment previews</div>
-      <textarea rows="3">''' + ('Text\n' * 40) + '''</textarea>
+      <textarea rows="1">''' + ('Text\n' * 40) + '''</textarea>
       <div class="composer-actions"><div class="composer-left-actions">Add</div>
         <div class="composer-right-actions">Model selector • Send</div></div>
     </form>
@@ -71,12 +71,20 @@ def assert_geometry(page, pane_height, *, has_extras=True, width=1200):
         transcript.getBoundingClientRect().bottom, wrap.getBoundingClientRect().top,
       );
       pane.style.setProperty('--composer-overlay-clearance', clearance + 'px');
+      const fadeInset = window.composerLayoutHelpers.composerFadeInset(
+        transcript.getBoundingClientRect().bottom, wrap.getBoundingClientRect().top,
+      );
+      pane.style.setProperty('--composer-fade-inset', fadeInset + 'px');
       transcript.scrollTop = transcript.scrollHeight;
       const last = document.getElementById('last');
       return {
         visibleChat: wrap.getBoundingClientRect().top - transcript.getBoundingClientRect().top,
         lastBottom: last.getBoundingClientRect().bottom,
         composerTop: wrap.getBoundingClientRect().top,
+        surfaceTop: wrap.querySelector('.extension-status, .extension-widgets, .composer-queue, .composer')?.getBoundingClientRect().top,
+        clearance,
+        fadeInset,
+        maskImage: getComputedStyle(transcript).maskImage,
         textareaHeight: textarea.getBoundingClientRect().height,
         textareaMax: getComputedStyle(textarea).maxHeight,
         textareaOverflow: getComputedStyle(textarea).overflowY,
@@ -89,9 +97,13 @@ def assert_geometry(page, pane_height, *, has_extras=True, width=1200):
     print(f"{width}×{pane_height}px, extras={has_extras}: {result}")
     assert result["visibleChat"] >= min(160, pane_height * .33) - 3, "Composer obscures the chat viewport"
     assert result["lastBottom"] <= result["composerTop"] - 8, "Last message cannot clear composer at full scroll"
+    assert result["clearance"] >= result["fadeInset"] + 16, "Fade clips the fully visible final message"
+    assert abs(result["surfaceTop"] - result["composerTop"]) < 1.1, "Invisible gap between fade horizon and first composer surface"
+    assert result["maskImage"].startswith("linear-gradient(to top,"), "Floating transcript fade not applied"
+    assert "--composer-fade-inset" not in result["maskImage"], "Browser failed to resolve fade inset"
     assert result["textareaMax"] == "none", "CSS overrides JS textarea height limit"
     assert result["textareaOverflow"] == "auto", "Flex-shrunk textarea cannot scroll internally"
-    assert result["textareaHeight"] >= 72, "Composer textarea became unusably short"
+    assert result["textareaHeight"] >= 42, "Composer textarea became unusably short"
     if has_extras:
         assert result["queueHeight"] >= 50, "Queued messages collapsed out of view"
         assert result["queueScrollable"] and result["widgetsScrollable"], "Supplementary panels lack internal scroll"
@@ -116,6 +128,25 @@ def main():
                 # Resize the same mounted DOM (no reload) to catch stale geometry.
                 for width, height in ((1200, 800), (1200, 520), (820, 360), (1200, 800)):
                     assert_geometry(page, height, has_extras=has_extras, width=width)
+        # An idle draft should initially have one line but still grow with input.
+        textarea_sizes = page.evaluate('''() => {
+          const textarea = document.querySelector('.composer textarea');
+          textarea.value = '';
+          textarea.style.height = 'auto';
+          textarea.style.height = textarea.scrollHeight + 'px';
+          const compact = textarea.getBoundingClientRect().height;
+          textarea.value = 'one\\ntwo\\nthree';
+          textarea.style.height = 'auto';
+          textarea.style.height = textarea.scrollHeight + 'px';
+          return { compact, expanded: textarea.getBoundingClientRect().height };
+        }''')
+        assert textarea_sizes["compact"] < 60, f"Composer is not a single row: {textarea_sizes}"
+        assert textarea_sizes["expanded"] > textarea_sizes["compact"], "Composer did not grow for multiline input"
+        # Empty/history states retain the original appearance (no fading of welcome/loading).
+        page.evaluate("document.querySelector('.transcript').classList.add('transcript-empty')")
+        assert page.evaluate("getComputedStyle(document.querySelector('.transcript')).maskImage") == "none"
+        page.evaluate("document.querySelector('.transcript').classList.replace('transcript-empty', 'transcript-history-loading')")
+        assert page.evaluate("getComputedStyle(document.querySelector('.transcript')).maskImage") == "none"
         browser.close()
     print("Chromium composer geometry: PASS")
 

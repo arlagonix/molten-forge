@@ -56,7 +56,11 @@ export function historyRecordsFromSessionEntries(entries: unknown, leafId: unkno
   for (const entry of branch) {
     switch (entry.type) {
       case "message":
-        if (entry.message && typeof entry.message === "object") records.push(entry.message);
+        if (entry.message && typeof entry.message === "object") records.push({
+          ...entry.message,
+          __mfEntryId: entry.id,
+          __mfEntryTimestamp: entry.timestamp,
+        });
         break;
       case "compaction":
         records.push({

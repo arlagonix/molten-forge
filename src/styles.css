@@ -1221,10 +1221,10 @@ textarea,
   cursor: progress;
 }
 
-/* One authoritative textarea maximum: JS computes the height. When the whole
-   overlay becomes crowded, flex may shrink it to this readable 3-row floor. */
+/* One-line idle composer (24px line-height + 13px top and 5px bottom
+   padding). JavaScript still grows it with content and caps tall drafts. */
 .composer textarea {
-  min-height: 72px;
+  min-height: 42px;
   max-height: none;
   resize: none;
   overflow-y: auto;
@@ -1379,8 +1379,10 @@ textarea,
   max-width: none;
 }
 
+/* The dock starts at its first visible surface. Top padding used to put the
+   timeline fade 10px above the composer and leave a blank strip. */
 .composer-wrap {
-  padding: 10px 0 14px;
+  padding: 0 0 14px;
 }
 
 .composer {
@@ -1686,15 +1688,7 @@ body.chat-width-resizing * {
 
 /* v0.9: reconnect-safe runtime, mirrored content resizing, resizable sidebar */
 
-/* User messages occupy the same full content column as assistant output. */
-.message.user {
-  width: 100%;
-}
-.user-bubble {
-  display: block;
-  width: 100%;
-  max-width: none;
-}
+/* User turns occupy the full virtualized column; their bubbles do not. */
 
 /* The composer shares the transcript column and keeps the subtle neutral outline
    used by Molten Forge's glass input surface. */
@@ -1879,20 +1873,24 @@ body.sidebar-width-resizing * {
   line-height: 24px;
 }
 
+/* Molten Forge chat geometry: content-sized user bubbles (phase 1) */
 .message.user {
+  display: flex;
+  justify-content: flex-end;
   width: 100%;
 }
-
 .user-bubble {
   display: block;
-  width: 100%;
-  max-width: none;
-  padding: 12px 16px;
-  border: 0;
-  border-radius: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  width: fit-content;
+  max-width: min(82%, 64ch);
+  padding: 8px 12px;
+  border: 1px solid var(--soft-border);
+  border-radius: 10px;
   font-size: 16px;
   line-height: 24px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+  box-shadow: none;
   /* Giant pasted prompts must not turn the whole transcript into one enormous
      virtual row. Keep a generous reading window and scroll the prompt itself. */
   max-height: clamp(240px, 44dvh, 480px);
@@ -1901,6 +1899,14 @@ body.sidebar-width-resizing * {
   scrollbar-width: thin;
 }
 
+
+/* Compact consecutive-user groups, preserving 8px turn-internal spacing. */
+.transcript-turn-users > .message.user:has(+ .message.user) .user-bubble {
+  border-bottom-right-radius: 4px;
+}
+.transcript-turn-users > .message.user + .message.user .user-bubble {
+  border-top-right-radius: 4px;
+}
 /* Direct port of the old .chat-markdown vertical rhythm, expressed without
    Tailwind so ReactMarkdown receives the same spacing in this small wrapper. */
 .markdown-body {
@@ -2779,8 +2785,8 @@ body.sidebar-width-resizing * {
   /* Full-height panes tint the wallpaper, while small cards stay opaque.
      These panes have no backdrop-filter, avoiding the former GPU blur cost. */
   --app-workspace-tint: var(--app-settings-tint);
-  /* Every chrome bar and both sidebars share one solid surface, so no surface
-     can drift into its own hue or read as a translucent pane. */
+  /* Shared default chrome surface. Phase 4.2 intentionally gives the project
+     sidebar a darker, separately opaque Monokai shade. */
   --app-chrome-tint: var(--app-glass-card);
   --app-settings-tint: rgba(30, 30, 30, .82);
   --app-skills-tint: rgba(37, 37, 38, .12);
@@ -2882,6 +2888,7 @@ body.sidebar-width-resizing * {
 }
 
 .settings-control-row + .settings-switch-row,
+.settings-control-row + .settings-background-row,
 .settings-switch-row + .settings-background-row,
 .settings-background-row + .settings-background-row {
   border-top: 1px solid rgba(255,255,255,.075);
@@ -3115,6 +3122,7 @@ body.sidebar-width-resizing * {
 .settings-control-row + .settings-control-row,
 .settings-control-row + .settings-switch-row,
 .settings-switch-row + .settings-switch-row,
+.settings-control-row + .settings-background-row,
 .settings-switch-row + .settings-background-row,
 .settings-background-row + .settings-background-row {
   border-top: 1px solid rgba(255,255,255,.075);
@@ -3198,7 +3206,8 @@ html[data-theme="light"] .sidebar-footer,
 html[data-theme="light"] .command-menu-heading,
 html[data-theme="light"] .settings-control-row + .settings-switch-row,
 html[data-theme="light"] .settings-switch-row + .settings-switch-row,
-html[data-theme="light"] .settings-switch-row + .settings-background-row,
+html[data-theme="light"] .settings-control-row + .settings-background-row,
+.settings-switch-row + .settings-background-row,
 html[data-theme="light"] .settings-background-row + .settings-background-row {
   border-color: var(--border);
 }
@@ -3408,7 +3417,8 @@ html[data-theme="light"] .settings-page-content .settings-section h2 {
 html[data-theme="light"] .settings-control-row + .settings-control-row,
 html[data-theme="light"] .settings-control-row + .settings-switch-row,
 html[data-theme="light"] .settings-switch-row + .settings-switch-row,
-html[data-theme="light"] .settings-switch-row + .settings-background-row,
+html[data-theme="light"] .settings-control-row + .settings-background-row,
+.settings-switch-row + .settings-background-row,
 html[data-theme="light"] .settings-background-row + .settings-background-row {
   border-color: var(--border);
 }
@@ -4548,20 +4558,19 @@ html[data-theme="light"] .tool-text-viewer {
   stroke-width: 2;
 }
 
-/* Pi distinguishes reasoning primarily through typography. Keep the Thinking
-   label/tool chrome upright and italicize the entire reasoning surface,
-   including inline/fenced code fragments. */
+/* Thinking uses upright text throughout for readability. Keep the semantic
+   Thinking color and existing code syntax treatment unchanged. */
 .thinking-preview,
 .thinking-content,
 .thinking-content .markdown-body {
-  font-style: italic;
+  font-style: normal;
 }
 .thinking-content .markdown-body code,
 .thinking-content .markdown-body pre,
 .thinking-content .markdown-body kbd,
 .thinking-content .chat-code-block,
 .thinking-content .chat-code-block * {
-  font-style: italic;
+  font-style: normal;
 }
 
 html[data-theme="light"] .recent-projects-list {
@@ -4802,7 +4811,9 @@ html[data-theme="light"] .tool-text-viewer {
   position: absolute;
   z-index: 21;
   left: calc(50% + var(--chat-content-center-offset, 0px));
-  bottom: calc(var(--composer-overlay-clearance, 190px) - 6px);
+  /* Anchor to the actual overlay top, not the 190px minimum transcript
+     clearance (which can put this button far above a short composer). */
+  bottom: calc(var(--composer-fade-inset, 170px) + 16px);
   width: var(--chat-content-physical-width, min(var(--chat-width, 900px), calc(100% - 48px)));
   display: flex;
   justify-content: flex-end;
@@ -4837,6 +4848,27 @@ html[data-theme="light"] .tool-text-viewer {
 }
 .transcript:not(.transcript-empty):not(.transcript-history-loading) .transcript-content {
   padding-bottom: var(--composer-overlay-clearance, 190px);
+}
+
+/* Phase 4: OpenCode-style content fade at the floating composer edge.
+   Mask the scrolling viewport rather than placing a tinted/blurred sheet over
+   the wallpaper. Its inset tracks the actual composer top (independently from
+   the 190px minimum scroll clearance), so the last line remains fully readable
+   with the existing +16px safety space. Do not mask the inner virtualized list:
+   that would make the fade scroll along with the messages. */
+.transcript:not(.transcript-empty):not(.transcript-history-loading) {
+  -webkit-mask-image: linear-gradient(to top,
+    transparent var(--composer-fade-inset, 0px),
+    rgba(0, 0, 0, .16) calc(var(--composer-fade-inset, 0px) + 4px),
+    rgba(0, 0, 0, .5) calc(var(--composer-fade-inset, 0px) + 8px),
+    rgba(0, 0, 0, .84) calc(var(--composer-fade-inset, 0px) + 12px),
+    #000 calc(var(--composer-fade-inset, 0px) + 16px));
+  mask-image: linear-gradient(to top,
+    transparent var(--composer-fade-inset, 0px),
+    rgba(0, 0, 0, .16) calc(var(--composer-fade-inset, 0px) + 4px),
+    rgba(0, 0, 0, .5) calc(var(--composer-fade-inset, 0px) + 8px),
+    rgba(0, 0, 0, .84) calc(var(--composer-fade-inset, 0px) + 12px),
+    #000 calc(var(--composer-fade-inset, 0px) + 16px));
 }
 
 /* Empty/history states keep the same reserved scrollbar gutter as populated
@@ -5751,8 +5783,12 @@ html[data-theme="light"] .project-session-loading { color: var(--muted-foregroun
 /* v0.36.85 — Pi-owned steering/follow-up queues. Keep composer overlays compact.
    The outer composer-wrap is still the ONLY overlay measured for chat clearance. */
 .composer-queue {
-  width: var(--chat-content-physical-width, min(var(--chat-width, 900px), calc(100% - 48px)));
+  /* Match the composer's measured physical width and center offset,
+     including its 2px edge coverage on both themes and scrollbar layouts. */
+  width: calc(var(--chat-content-physical-width, min(var(--chat-width, 900px), calc(100% - 48px))) + 2px);
   max-width: calc(100% - 2px);
+  position: relative;
+  left: var(--chat-content-center-offset, 0px);
   margin: 0 auto 7px;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -5769,8 +5805,895 @@ html[data-theme="light"] .project-session-loading { color: var(--muted-foregroun
 .composer-queue-item + .composer-queue-item { border-top: 1px solid var(--soft-border); }
 .composer-queue-kind { flex: none; color: var(--pi-thinking-text, var(--muted-foreground)); }
 .composer-queue-text { flex: 1; min-width: 0; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; color: var(--foreground); }
-.composer-queue-mode { display: inline-flex; align-items: center; min-width: 0; }
-.composer-queue-mode select { max-width: 104px; border: 0; border-radius: 4px; color: var(--muted-foreground); background: transparent; font: inherit; font-size: 12px; padding: 4px 2px; cursor: pointer; outline-offset: 1px; }
-.composer-queue-mode select:hover { color: var(--foreground); background: var(--hover); }
-.composer-queue-mode select option { color: var(--foreground); background: var(--background); }
 .composer-attachments { max-height: min(160px, 15dvh); }
+/* MF visual surfaces: phase 2 */
+/* Prefer restrained semantic surface tokens over per-element hard-coded shadows. */
+:root {
+  --mf-surface-border: color-mix(in oklab, var(--foreground) 11%, transparent);
+  --mf-surface-border-strong: color-mix(in oklab, var(--foreground) 16%, transparent);
+  --mf-surface-radius: 10px;
+  --mf-control-radius: 8px;
+}
+html[data-theme="light"] {
+  --mf-surface-border: color-mix(in oklab, var(--foreground) 14%, transparent);
+  --mf-surface-border-strong: color-mix(in oklab, var(--foreground) 20%, transparent);
+}
+/* Settings and utility cards use a single subdued border and uniform curvature. */
+.settings-panel,
+.context-popover,
+.model-popover,
+.command-menu,
+.empty-state-card {
+  border-color: var(--mf-surface-border);
+  border-radius: var(--mf-control-radius);
+  box-shadow: none;
+}
+.settings-panel {
+  background: var(--app-glass-medium);
+  overflow: hidden;
+}
+html[data-theme="light"] .settings-panel,
+html[data-theme="light"] .context-popover,
+html[data-theme="light"] .model-popover,
+html[data-theme="light"] .command-menu,
+html[data-theme="light"] .empty-state-card {
+  border-color: var(--mf-surface-border);
+  box-shadow: none;
+}
+/* Keep the input geometry and Bash warning border behavior unchanged. */
+.composer:not(.composer-bash-mode),
+.composer:not(.composer-bash-mode):hover,
+.composer:not(.composer-bash-mode):focus-within {
+  border-color: var(--mf-surface-border-strong) !important;
+  border-radius: var(--mf-surface-radius);
+  box-shadow: none !important;
+}
+.composer-queue { border-color: var(--mf-surface-border); border-radius: var(--mf-control-radius); }
+.settings-sidebar-row.active { border-color: var(--mf-surface-border); }
+/* Phase 4.4.2: Match OpenCode's plugin compositing. The image is rendered
+   ONCE above the complete desktop surface (including the titlebar and floating
+   composer), rather than between the transcript and composer. The underlying
+   surface colors remain fully opaque; this non-interactive overlay gives all
+   surfaces the same wallpaper tint at a continuous 0–25% opacity. */
+.app-shell.is-connected.background-enabled:not(.background-disabled)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 5000;
+  pointer-events: none;
+  background-image: var(--app-background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  opacity: var(--mf-wallpaper-overlay-opacity, 0);
+}
+.settings-wallpaper-overlay-row {
+  grid-template-columns: 24px minmax(0, 1fr) minmax(90px, 180px) 40px;
+  column-gap: 12px;
+  border-top: 1px solid var(--mf-surface-border);
+}
+.settings-wallpaper-overlay-slider {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.settings-wallpaper-overlay-slider:disabled { opacity: .4; cursor: not-allowed; }
+.settings-wallpaper-overlay-value {
+  justify-self: end;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 690px) {
+  .settings-wallpaper-overlay-row { grid-template-columns: 24px minmax(0, 1fr) 40px; }
+  .settings-wallpaper-overlay-slider { grid-column: 2; grid-row: 2; }
+  .settings-wallpaper-overlay-value { grid-column: 3; grid-row: 2; }
+}
+
+/* Compact timeline: one chronological disclosure over adjacent tool + thinking
+   phases. Full mode deliberately retains the established runtime-group style. */
+.compact-runtime-episode,
+.compact-tool-group { min-width: 0; }
+.compact-tool-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  color: var(--pi-thinking-text, var(--muted-foreground));
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.compact-tool-summary > svg { flex: none; }
+.compact-tool-summary > svg:last-child { margin-left: auto; opacity: .68; }
+.compact-tool-label { overflow: hidden; min-width: 0; text-overflow: ellipsis; white-space: nowrap; }
+.compact-tool-summary:hover { color: var(--foreground); }
+.compact-tool-summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+.compact-tool-failures { flex: none; font-size: 12px; color: var(--danger, var(--error, #df7373)); }
+.compact-tool-interrupted { flex: none; font-size: 12px; color: var(--muted-foreground); }
+.compact-tool-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  margin-top: 2px;
+  min-width: 0;
+  background: var(--app-glass-medium);
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  box-shadow: none;
+}
+.compact-activity-row {
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+}
+/* Dividers belong to full-width rows, not the inset tool header. */
+.compact-activity-row + .compact-activity-row {
+  border-top: 1px solid var(--mf-surface-border, var(--border));
+}
+.compact-activity-row > :is(.thinking, .tool) {
+  display: block;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 7px 11px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.compact-activity-row > :is(.thinking, .tool) > .activity-header { min-width: 0; }
+.compact-activity-row:hover { background: var(--app-glass-card); }
+.compact-activity-row:first-child { border-radius: 7px 7px 0 0; }
+.compact-activity-row:last-child { border-radius: 0 0 7px 7px; }
+.compact-activity-row:only-child { border-radius: 7px; }
+html[data-theme="light"] .compact-tool-summary { color: var(--pi-thinking-text, var(--muted-foreground)); }
+html[data-theme="light"] .compact-tool-summary:hover { color: var(--foreground); }
+
+/* Phase 3.2 — shared activity chrome (Compact and Full).
+   The parent list owns its outer border and edge-to-edge row separators.
+   Never inset separators into a nested tool panel or add a redundant left rail. */
+.compact-tool-summary {
+  padding: 7px 0;
+  min-height: 30px;
+  line-height: 1.4;
+  border-radius: var(--mf-control-radius, 8px);
+}
+/* The summary sits flush with transcript content. No fill on hover/press,
+   including light theme where generic button rules would otherwise apply. */
+html[data-theme="light"] .compact-tool-summary { background: transparent; border: 0; }
+.compact-tool-summary:is(:hover, :active),
+html[data-theme="light"] .compact-tool-summary:is(:hover, :active) {
+  background: transparent;
+  border-color: transparent;
+}
+.compact-tool-failures,
+.compact-tool-interrupted {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+}
+.compact-tool-details { margin-top: 7px; }
+
+/* Full mode shares the same clean surface and divider geometry. */
+.runtime-group.activity-row-list,
+.compact-tool-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 0;
+  padding: 0;
+  overflow: visible; /* Preserve sticky CodeMirror headers and nested scrolling. */
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-medium);
+  box-shadow: none;
+  min-width: 0;
+}
+.runtime-activity-row,
+.compact-activity-row { min-width: 0; width: 100%; padding: 0; margin: 0; }
+.runtime-activity-row + .runtime-activity-row,
+.compact-activity-row + .compact-activity-row {
+  border-top: 1px solid var(--mf-surface-border, var(--border));
+}
+.runtime-activity-row > :is(.thinking, .tool),
+.compact-activity-row > :is(.thinking, .tool) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0 !important;
+  padding: 7px 10px;
+  border: none !important;
+  border-radius: 0;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.runtime-activity-row:hover,
+.compact-activity-row:hover { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+.runtime-activity-row:first-child,
+.compact-activity-row:first-child { border-radius: 7px 7px 0 0; }
+.runtime-activity-row:last-child,
+.compact-activity-row:last-child { border-radius: 0 0 7px 7px; }
+.runtime-activity-row:only-child,
+.compact-activity-row:only-child { border-radius: 7px; }
+
+/* Standalone activity, including Thinking-only, uses the same understated
+   solid surface rather than the legacy dashed container. */
+.transcript-turn-agent > :is(.thinking, .tool) {
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-medium);
+  box-shadow: none;
+  padding: 7px 10px;
+}
+/* Opening any tool or thought reveals its viewer without another vertical
+   divider or the 7px+14px left indentation inherited from the old design. */
+:is(.runtime-activity-row, .compact-activity-row, .transcript-turn-agent > .thinking, .transcript-turn-agent > .tool)
+  :is(.thinking-content, .tool-details) {
+  margin: 8px 0 0;
+  padding: 2px 0 2px;
+  border-left: none;
+  min-width: 0;
+}
+html[data-theme="light"] .runtime-group.activity-row-list,
+html[data-theme="light"] .compact-tool-details,
+html[data-theme="light"] .transcript-turn-agent > :is(.thinking, .tool) {
+  border-color: var(--mf-surface-border, var(--border));
+  box-shadow: none;
+}
+
+/* Phase 3.3 — one disclosure with multiple smart-grouped, bordered blocks.
+   No outer frame: each runtime phase / explicit parallel batch is its own card. */
+.compact-tool-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 9px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+.compact-activity-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-medium);
+  overflow: visible; /* CodeMirror sticky toolbars require visible ancestors. */
+}
+.compact-activity-block .compact-activity-row:first-child { border-radius: 7px 7px 0 0; }
+.compact-activity-block .compact-activity-row:last-child { border-radius: 0 0 7px 7px; }
+.compact-activity-block .compact-activity-row:only-child { border-radius: 7px; }
+/* Reuse the original icon-to-chevron hover/focus transition in the summary. */
+.compact-tool-summary:is(:hover, :focus-visible) .activity-base-icon { display: none !important; }
+.compact-tool-summary:is(:hover, :focus-visible) .activity-expand-icon { display: block !important; }
+html[data-theme="light"] .compact-activity-block {
+  border-color: var(--mf-surface-border, var(--border));
+}
+
+
+/* Phase 4.2.2 — OpenCode Desktop's computed Monokai dark theme variables.
+   The user captured these directly from its active theme in DevTools, not from
+   the raw Monokai syntax palette. Keep Pi semantic content colors unchanged. */
+:root {
+  --mf-shell-gutter: 6px;
+  --mf-shell-top-strip: 40px;
+  --mf-shell-radius: 10px;
+}
+:root:not([data-theme="light"]) {
+  --background: #161712;         /* --background-base */
+  --foreground: #f8f8f2;         /* --text-base */
+  --card: #252621;               /* --surface-base */
+  --muted: #2c2d28;              /* --surface-weak */
+  --muted-foreground: #b7b7b2;   /* --text-weaker */
+  --border: #373732;             /* --border-weaker-base */
+  --soft-border: #373732;
+  --glass: #1e1f1a;              /* --surface-raised-base */
+  --glass-strong: #191a15;       /* --surface-float-base */
+  --glass-card: #252621;
+  --hover: #252621;
+  --selected: #2c2d28;
+  --selected-border: transparent;
+  /* OpenCode v2.2.2 computed Monokai V2 neutral scale (from rendered HTML).
+     Use independent semantic surfaces; the 12% wallpaper is the ONLY
+     composited cross-surface image when overlay mode is enabled. */
+  --mf-opencode-bg-deep: #191a15;       /* --v2-grey-1100 */
+  --mf-opencode-bg-base: #1d1e19;       /* --v2-grey-1000 */
+  --mf-opencode-bg-layer-01: #282923;   /* --v2-grey-800 */
+  --mf-surface-shell: var(--mf-opencode-bg-deep);
+  --mf-surface-workspace: var(--mf-opencode-bg-base);
+  --mf-surface-composer: var(--mf-opencode-bg-layer-01);
+  --mf-surface-composer-border: var(--mf-shell-edge);
+  --app-background-overlay: rgba(22, 23, 18, .48);
+  --app-background-vignette: rgba(22, 23, 18, .30);
+  --app-chrome-tint: var(--mf-surface-shell);
+  --app-workspace-tint: var(--mf-surface-workspace);
+  --app-settings-tint: var(--app-workspace-tint);
+  --mf-shell-frame-bg: var(--mf-surface-shell);
+  --mf-shell-sidebar-bg: var(--mf-surface-shell);
+  --mf-shell-edge: #373732;
+  --app-glass-background: #161712;
+  --app-glass-strong: #1e1f1a;
+  --app-glass-card: #252621;
+  --app-glass-medium: #252621;
+  --app-glass-subtle: #2c2d28;
+  --app-glass-tool: #2c2d28;
+  --app-glass-message: #252621;
+  --app-glass-table: #252621;
+}
+:root[data-theme="light"] {
+  /* Keep the approved warm light palette and the light-theme Pi semantics. */
+  --background: #fdf8ec;
+  --foreground: #292318;
+  --card: #f8f2e7;
+  --muted: #f1eade;
+  --muted-foreground: #756e61;
+  --border: #e2dacc;
+  --soft-border: rgba(41, 35, 24, .09);
+  --hover: rgba(41, 35, 24, .06);
+  --selected: rgba(41, 35, 24, .09);
+  --selected-border: transparent;
+  --app-background-overlay: rgba(253, 248, 236, .42);
+  --app-background-vignette: rgba(253, 248, 236, .22);
+  --app-chrome-tint: #f5f0e5;
+  --app-workspace-tint: #faf7f0;
+  --app-settings-tint: var(--app-workspace-tint);
+  --mf-shell-frame-bg: #f5f0e5;
+  --mf-shell-sidebar-bg: #f5f0e5;
+  --mf-shell-edge: rgba(41, 35, 24, .09);
+}
+/* Keep the frame and workspace on solid semantic surfaces. Wallpaper is
+   composited once over each active workspace and never painted under panels. */
+.app-shell.is-connected { background-color: var(--mf-shell-frame-bg); background-image: none; box-shadow: none; }
+html[data-theme="light"] .app-shell.is-connected { background-color: var(--mf-shell-frame-bg); box-shadow: none; }
+.app-shell::before {
+  display: block;
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0 0 auto 0;
+  height: var(--mf-shell-top-strip);
+  background: var(--mf-shell-frame-bg);
+  pointer-events: none;
+}
+.session-sidebar,
+.settings-sidebar {
+  border-right: 0;
+  background: var(--mf-shell-sidebar-bg);
+}
+.sidebar-titlebar,
+.settings-sidebar-titlebar { border-bottom: 0; }
+.sidebar-footer,
+.settings-back-to-chat { border-top: 0; }
+.chat-pane,
+.settings-main,
+html[data-theme="light"] .chat-pane {
+  margin: var(--mf-shell-top-strip) var(--mf-shell-gutter) var(--mf-shell-gutter) 0;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--mf-shell-edge);
+  border-radius: var(--mf-shell-radius);
+  background-color: var(--app-workspace-tint);
+  box-shadow: none;
+  /* Do not introduce overflow: hidden on the pane: CodeMirror's sticky headers
+     depend on the transcript being the only scrolling ancestor. */
+}
+.workspace.sidebar-hidden .chat-pane { margin-left: var(--mf-shell-gutter); }
+.chat-header,
+.settings-main-titlebar,
+html[data-theme="light"] .chat-header {
+  border-bottom: 0;
+  border-radius: calc(var(--mf-shell-radius) - 1px) calc(var(--mf-shell-radius) - 1px) 0 0;
+  background: transparent;
+}
+/* The settings selection and section separators use the same understated
+   treatment as the session sidebar; no nested floating header strip. */
+.settings-sidebar-row,
+.settings-sidebar-row.active,
+.settings-sidebar-row:hover { border-color: transparent; }
+.settings-sidebar-row.active { background: var(--selected); color: var(--foreground); }
+.settings-sidebar-row:hover { background: var(--hover); color: var(--foreground); }
+.settings-back-to-chat:hover { border-color: transparent; }
+.settings-main-titlebar strong { color: var(--foreground); }
+.chat-heading strong { color: var(--foreground); }
+.sidebar-brand { color: var(--foreground); }
+.sidebar-section-heading { color: var(--muted-foreground); }
+.project-session-heading { color: color-mix(in srgb, var(--foreground) 69%, transparent); }
+.project-session-heading:hover { color: var(--foreground); }
+.project-session-heading.current .project-session-name { color: var(--foreground); }
+.project-session-heading .project-session-folder { color: var(--muted-foreground); }
+.project-session-chat-icon { color: var(--muted-foreground); }
+.project-session-row.active .project-session-chat-icon { color: var(--foreground); }
+.project-session-row.session-row,
+html[data-theme="light"] .project-session-row.session-row {
+  border-color: transparent;
+  box-shadow: none;
+}
+.project-session-row.session-row.active,
+.project-session-row.session-row.active:disabled:hover,
+html[data-theme="light"] .project-session-row.session-row.active,
+html[data-theme="light"] .project-session-row.session-row.active:disabled:hover {
+  border-color: transparent !important;
+  background: var(--selected);
+}
+.session-date, .project-session-loading { color: var(--muted-foreground); }
+
+
+/* Phase 4.3 — move title and telemetry into the existing 40px window strip.
+   Keep the DOM header within .chat-pane so its interactive telemetry and drag
+   region are unchanged, but remove it from the chat grid's layout flow.
+   Do not draw an extra horizontal rule under the lifted header: the chat pane's
+   own border already defines the transition into the transcript area. */
+.chat-pane {
+  position: relative;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.chat-header,
+html[data-theme="light"] .chat-header {
+  position: absolute;
+  z-index: 25;
+  top: calc(-1 * var(--mf-shell-top-strip) - 1px);
+  left: -1px;
+  right: -1px;
+  height: var(--mf-shell-top-strip);
+  padding: 0 112px 0 16px; /* reserve the native window-control cluster */
+  border: 0;
+  border-radius: 0;
+  background: var(--mf-shell-frame-bg);
+}
+/* The header no longer consumes the first 41px of the transcript region. */
+.chat-width-guides { top: 11px; }
+
+/* Apply the same lifted-title treatment to Settings. Keep the active section
+   label in the shared top strip instead of spending vertical space inside the
+   inset panel. */
+.settings-main {
+  position: relative;
+  grid-template-rows: minmax(0, 1fr);
+}
+.settings-main-titlebar,
+html[data-theme="light"] .settings-main-titlebar {
+  position: absolute;
+  z-index: 25;
+  top: calc(-1 * var(--mf-shell-top-strip) - 1px);
+  left: -1px;
+  right: -1px;
+  height: var(--mf-shell-top-strip);
+  padding: 0 112px 0 16px;
+  border: 0;
+  border-radius: 0;
+  background: var(--mf-shell-frame-bg);
+}
+
+
+/* Phase 4.4.2 — OpenCode V2 layered Monokai surfaces.
+   The shell uses deep, chat uses base, and the floating composer uses the
+   slightly raised layer-01. The wallpaper overlays these opaque surfaces once
+   at the window level; no background blur or nested translucent tint is needed.
+   Preserve the existing composer geometry and transcript scroll ancestors. */
+:root:not([data-theme="light"]) .composer,
+:root:not([data-theme="light"]) .composer:hover,
+:root:not([data-theme="light"]) .composer:focus-within {
+  background: var(--mf-surface-composer);
+}
+:root:not([data-theme="light"]) .composer:not(.composer-bash-mode),
+:root:not([data-theme="light"]) .composer:not(.composer-bash-mode):hover,
+:root:not([data-theme="light"]) .composer:not(.composer-bash-mode):focus-within {
+  border-color: var(--mf-surface-composer-border) !important;
+}
+
+/* Semi Compact shows Full only during the live reasoning/tool episode.
+   Animate the incoming Full rows and outgoing Used disclosure using grid
+   tracks, not transforms: transformed ancestors break sticky code headers. */
+.semi-compact-activity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.semi-compact-summary-reveal,
+.semi-compact-full-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  min-width: 0;
+  transition: grid-template-rows 280ms ease-in-out;
+}
+.semi-compact-reveal-inner { min-height: 0; min-width: 0; overflow: hidden; }
+.semi-compact-activity:is(.is-collapsed, .is-entering, .is-closing) .semi-compact-summary-reveal,
+.semi-compact-activity:is(.is-opening, .is-open) .semi-compact-full-reveal {
+  grid-template-rows: 1fr;
+}
+/* Keep the Compact summary focus ring and live CodeMirror sticky headers
+   unclipped once their respective track has settled. */
+.semi-compact-activity.is-collapsed .semi-compact-summary-reveal,
+.semi-compact-activity.is-collapsed .semi-compact-summary-reveal .semi-compact-reveal-inner { overflow: visible; }
+.semi-compact-activity.is-open .semi-compact-full-reveal,
+.semi-compact-activity.is-open .semi-compact-full-reveal .semi-compact-reveal-inner { overflow: visible; }
+.semi-compact-latest-activity {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 8px;
+}
+.semi-compact-latest-activity > :is(.thinking, .tool) {
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-medium);
+  padding: 7px 10px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .semi-compact-summary-reveal,
+  .semi-compact-full-reveal { transition: none; }
+}
+
+/* Composer: delivery and model controls belong to the left. The native select
+   previously reserved Follow-up width even when Steer was selected. */
+.composer-left-actions {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 7px;
+}
+.composer-right-actions {
+  flex: 0 0 auto;
+  gap: 16px !important;
+}
+.composer-queue-mode {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.composer-delivery-trigger,
+html[data-theme="light"] .composer-delivery-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  width: max-content;
+  min-width: 0;
+  height: 24px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  box-shadow: none;
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.composer-delivery-trigger svg {
+  flex: none;
+  opacity: .7;
+  transition: transform 120ms ease;
+}
+.composer-delivery-trigger.active svg { transform: rotate(180deg); }
+.composer-delivery-trigger:is(:hover, .active),
+html[data-theme="light"] .composer-delivery-trigger:is(:hover, .active) {
+  background: var(--hover);
+  color: var(--foreground);
+}
+.composer-delivery-trigger:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.composer-delivery-menu {
+  position: absolute;
+  z-index: 50;
+  left: 0;
+  bottom: calc(100% + 7px);
+  min-width: max-content;
+  padding: 4px;
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-strong);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+}
+.composer-delivery-menu button,
+html[data-theme="light"] .composer-delivery-menu button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.composer-delivery-menu button:is(:hover, :focus-visible),
+html[data-theme="light"] .composer-delivery-menu button:is(:hover, :focus-visible) {
+  background: var(--hover);
+  outline: none;
+}
+.composer-delivery-menu button.selected svg { color: var(--foreground); }
+@media (max-width: 640px) {
+  .composer-left-actions { gap: 3px; }
+  .model-switcher-trigger { max-width: min(165px, 26vw); }
+}
+
+/* Post-4.4.4 runtime polish: all expanded Thinking presentations, including
+   live Semi Compact, use the same clean, rail-free content alignment. */
+.thinking .thinking-content {
+  margin: 4px 0 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.thinking .thinking-content .markdown-body > :first-child {
+  margin-top: 0;
+}
+
+/* Settings navigation and select parity: OpenCode-style plain rows and
+   content-sized borderless inline triggers. The option menu owns its outline. */
+.settings-sidebar-row,
+.settings-sidebar-row.active,
+.settings-sidebar-row:hover,
+html[data-theme="light"] .settings-sidebar-row {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.settings-inline-select { position: relative; justify-self: end; display: inline-flex; min-width: 0; }
+.settings-inline-trigger,
+html[data-theme="light"] .settings-inline-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: max-content;
+  max-width: none;
+  height: 30px;
+  padding: 3px 5px;
+  border: 0 !important;
+  border-radius: 4px;
+  box-shadow: none !important;
+  background: transparent !important;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.settings-inline-trigger svg { flex: none; color: var(--muted-foreground); transition: transform 120ms ease; }
+.settings-inline-trigger.open svg { transform: rotate(180deg); }
+.settings-inline-trigger:hover,
+.settings-inline-trigger.open,
+html[data-theme="light"] .settings-inline-trigger:hover,
+html[data-theme="light"] .settings-inline-trigger.open { background: var(--hover) !important; }
+.settings-inline-trigger:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.settings-inline-menu {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 4px);
+  right: 0;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  padding: 4px;
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: var(--mf-control-radius, 8px);
+  background: var(--app-glass-strong);
+  box-shadow: 0 8px 22px rgba(0,0,0,.22);
+}
+.settings-inline-menu button,
+html[data-theme="light"] .settings-inline-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 22px;
+  padding: 7px 9px;
+  border: 0 !important;
+  border-radius: 4px;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.settings-inline-menu button:is(.highlighted, :hover, :focus-visible),
+html[data-theme="light"] .settings-inline-menu button:is(.highlighted, :hover, :focus-visible) {
+  background: var(--hover) !important;
+  outline: none;
+}
+.settings-inline-menu button svg { flex: none; color: var(--muted-foreground); }
+
+/* OpenCode TextShimmer-style layered highlight. Only the text opacity/clip is
+   animated, not a full-window background gradient on the chat transcript. */
+.generating-gradient-text {
+  position: relative;
+  display: inline-grid;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+.generating-gradient-text > span { grid-area: 1 / 1; }
+.generating-gradient-text .generation-shimmer-highlight {
+  color: var(--foreground);
+  -webkit-text-fill-color: transparent;
+  background: linear-gradient(95deg, transparent 16%, var(--foreground) 45%, var(--foreground) 55%, transparent 84%);
+  background-size: 250% 100%;
+  background-position: 120% center;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: mf-working-shimmer 1.2s linear infinite;
+  transition: opacity 220ms ease;
+}
+@keyframes mf-working-shimmer {
+  from { background-position: 120% center; }
+  to { background-position: -120% center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .generating-gradient-text .generation-shimmer-highlight { animation: none; opacity: 0; }
+}
+
+/* The outer composer must not paint over the rounded corners of its own
+   surface. The absolutely positioned dropdowns are still free to overflow. */
+.composer textarea,
+.composer textarea:is(:focus, :hover),
+html[data-theme="light"] .composer textarea { background: transparent !important; }
+.composer textarea { border-radius: inherit inherit 0 0; }
+.composer-actions { background: transparent; border-radius: 0 0 inherit inherit; }
+
+/* One hover layer per project row: inner button must never paint an inset pill. */
+.project-session-heading .project-session-activate,
+.project-session-heading .project-session-activate:hover,
+.project-session-heading .project-session-activate:disabled,
+.project-session-heading .project-session-activate:disabled:hover,
+html[data-theme="light"] .project-session-heading .project-session-activate,
+html[data-theme="light"] .project-session-heading .project-session-activate:hover {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Model selection is a true centered dialog, not an anchored dropdown. */
+.model-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, .46);
+}
+.model-popover.model-dialog {
+  position: relative;
+  inset: auto;
+  width: min(440px, 100%);
+  max-height: min(580px, calc(100dvh - 32px));
+  min-height: 0;
+  border: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: 10px;
+  background: var(--app-glass-strong);
+  box-shadow: 0 18px 65px rgba(0, 0, 0, .36);
+}
+.model-dialog .model-search-wrap {
+  margin: 0;
+  border: none;
+  border-bottom: 1px solid var(--mf-surface-border, var(--border));
+  border-radius: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  background: transparent;
+}
+.model-dialog .model-search-wrap:focus-within { background: transparent; border-color: var(--mf-surface-border, var(--border)); }
+.model-dialog .model-search-input { font-size: 13px; color: var(--foreground); }
+.model-dialog .model-provider-heading {
+  font-size: 11px; letter-spacing: 0; text-transform: none;
+  background: var(--app-glass-strong); color: var(--muted-foreground);
+  padding: 10px 16px 6px;
+}
+.model-dialog .model-option { padding: 8px 16px; border-radius: 4px; color: var(--foreground); }
+.model-dialog .model-option-id { font-weight: 400; }
+html[data-theme="light"] .model-dialog-backdrop { background: rgba(25, 26, 22, .38); }
+html[data-theme="light"] .model-dialog { background: var(--app-glass-strong); }
+
+/* Steer and model labels share exactly the same type scale and emphasis. */
+.composer-delivery-trigger,
+.composer-model.model-switcher-trigger,
+html[data-theme="light"] .composer-delivery-trigger,
+html[data-theme="light"] .composer-model.model-switcher-trigger {
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: normal;
+}
+.composer-model.model-switcher-trigger:is(:hover, .active),
+html[data-theme="light"] .composer-model.model-switcher-trigger:is(:hover, .active) {
+  color: var(--foreground);
+  background: var(--hover);
+}
+
+/* The broad gradient's bright band is off-glyph at both keyframe endpoints.
+   This makes the shimmer seamless instead of snapping across its final frame. */
+.generating-gradient-text .generation-shimmer-highlight {
+  background: linear-gradient(90deg, transparent 0%, transparent 40%, var(--foreground) 48%, var(--foreground) 52%, transparent 60%, transparent 100%);
+  background-size: 350% 100%;
+  background-position: 0% center;
+  animation: mf-working-shimmer-seamless 1.8s linear infinite;
+  will-change: background-position;
+}
+@keyframes mf-working-shimmer-seamless {
+  from { background-position: 0% center; }
+  to { background-position: 100% center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .generating-gradient-text .generation-shimmer-highlight { animation: none; opacity: 0; }
+}
+
+/* Lightweight message metadata; actions don't sit on top of message text. */
+.message-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 19px;
+  margin-top: 5px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 18px;
+  /* Reserve the row height to avoid reflow and virtual-scroll jumps on hover. */
+  opacity: 0;
+  pointer-events: none;
+}
+/* The message, its own metadata, and keyboard-focused actions all reveal the row. */
+.message:hover .message-metadata,
+.message:focus-within .message-metadata {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (hover: none) {
+  /* Without hover, actions must remain discoverable. */
+  .message .message-metadata { opacity: 1; pointer-events: auto; }
+}
+.message.user .message-metadata { justify-content: flex-end; }
+.message.assistant .message-metadata { justify-content: flex-start; }
+.message-metadata-model { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; max-width: min(36ch, 50vw); }
+.message-metadata time { white-space: nowrap; }
+.message-metadata-separator { flex: none; opacity: .8; user-select: none; }
+.message-meta-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.message-meta-action:is(:hover, :focus-visible) { background: var(--hover); color: var(--foreground); }
+.message-meta-action:focus-visible { outline: 1px solid var(--primary); }
+
+/* Keep the metadata below the right-aligned bubble, never beside it. */
+.message.user { flex-direction: column; align-items: flex-end; }
+.message.user .user-bubble { flex: 0 1 auto; }
+.message-meta-action:disabled { opacity: .35; cursor: default; }

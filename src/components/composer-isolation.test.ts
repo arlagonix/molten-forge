@@ -11,7 +11,7 @@ const rootAppSource = appSource.slice(appStart);
 describe("composer render isolation", () => {
   it("keeps draft state inside the memoized Composer instead of root App", () => {
     expect(composerStart).toBeGreaterThanOrEqual(0);
-    expect(composerSource).toContain('const [input, setInput] = useState("")');
+    expect(composerSource).toContain('const [input, setInput] = useState(() => {');
     expect(composerSource).toContain("const [suggestionIndex, setSuggestionIndex] = useState(0)");
     expect(rootAppSource).not.toContain('const [input, setInput] = useState("")');
     expect(rootAppSource).not.toContain("setSuggestionIndex(");
@@ -39,6 +39,12 @@ describe("composer render isolation", () => {
     expect(composerSource).toContain("const textareaRef = useRef<HTMLTextAreaElement | null>(null)");
     expect(composerSource).toContain('textarea.style.height = "auto"');
     expect(rootAppSource).not.toContain("composerTextareaRef");
+  });
+
+  it("starts with one editable row while preserving auto-growth for multiline drafts", () => {
+    expect(composerSource).toContain("rows={1}");
+    expect(composerSource).toContain("textarea.scrollHeight");
+    expect(composerSource).toContain("textareaHeightLimit(");
   });
 
   it("keeps transcript rendering memoized independently of Composer", () => {
