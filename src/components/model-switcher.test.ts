@@ -51,7 +51,7 @@ describe("model switcher integration contracts", () => {
   });
 
   it("groups rendered options under provider headings", () => {
-    expect(switcherSource).toContain("groupModelsByProvider(filteredModels)");
+    expect(switcherSource).toContain("groupModelsByProvider(filteredModels.filter");
     expect(switcherSource).toContain('className="model-provider-heading"');
   });
 
@@ -87,8 +87,19 @@ describe("model switcher integration contracts", () => {
     expect(switcherSource).toContain('highlighted ? "highlighted" : ""');
   });
 
-  it("closes on Escape and outside pointer input", () => {
-    expect(switcherSource).toContain('if (event.key === "Escape") setOpen(false)');
-    expect(switcherSource).toContain('document.addEventListener("pointerdown", onPointerDown)');
+  it("centers the model selection in a focus-managed modal with backdrop dismissal", () => {
+    expect(switcherSource).toContain('createPortal(');
+    expect(switcherSource).toContain('className="model-dialog-backdrop"');
+    expect(switcherSource).toContain('aria-modal="true"');
+    expect(switcherSource).toContain('event.target === event.currentTarget');
+    expect(switcherSource).toContain('event.key === "Escape"');
+    expect(switcherSource).toContain('event.key === "Tab"');
+    expect(switcherSource).toContain('document.addEventListener("keydown", onKeyDown)');
+  });
+
+  it("displays recent models once without duplicating provider rows", () => {
+    expect(switcherSource).toContain('molten-forge-recent-models');
+    expect(switcherSource).toContain('provider: "Recent"');
+    expect(switcherSource).toContain('!recentSet.has(modelKey(model))');
   });
 });

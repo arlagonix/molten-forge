@@ -1,5 +1,6 @@
 import { Check, ChevronDown, Search } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   filterModels,
   groupModelsByProvider,
@@ -30,29 +31,56 @@ export const ModelSwitcher = memo(function ModelSwitcher({
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
   const optionRefs = useRef(new Map<string, HTMLButtonElement>());
   const filteredModels = useMemo(() => filterModels(models, query), [models, query]);
-  const groups = useMemo(() => groupModelsByProvider(filteredModels), [filteredModels]);
+  // Recent models appear once: in Recent rather than duplicated under a provider.
+  const [recentKeys, setRecentKeys] = useState<string[]>(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("molten-forge-recent-models") ?? "[]");
+      return Array.isArray(saved) ? saved.filter((key): key is string => typeof key === "string").slice(0, 6) : [];
+    } catch { return []; }
+  });
+  const groups = useMemo(() => {
+    const recentOrder = [...new Set([modelKey(currentModel), ...recentKeys].filter(Boolean))];
+    const recentModels = recentOrder.map((key) => filteredModels.find((model) => modelKey(model) === key)).filter((model): model is ModelOption => Boolean(model));
+    const recentSet = new Set(recentModels.map(modelKey));
+    const grouped = groupModelsByProvider(filteredModels.filter((model) => !recentSet.has(modelKey(model))));
+    return recentModels.length ? [{ provider: "Recent", models: recentModels }, ...grouped] : grouped;
+  }, [currentModel, filteredModels, recentKeys]);
   const visibleModels = useMemo(() => groups.flatMap((group) => group.models), [groups]);
+
+  useEffect(() => {
+    if (!open && wasOpenRef.current) triggerRef.current?.focus();
+    wasOpenRef.current = open;
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
 
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      } else if (event.key === "Tab") {
+        // Keep focus inside the modal instead of letting it reach the composer.
+        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled),button:not(:disabled)');
+        if (!focusable?.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
     };
-
-    document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
-    requestAnimationFrame(() => searchRef.current?.focus());
+    const frame = requestAnimationFrame(() => searchRef.current?.focus());
     return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
+      cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
@@ -79,7 +107,7 @@ export const ModelSwitcher = memo(function ModelSwitcher({
 
   const setSearchQuery = (value: string) => {
     setQuery(value);
-    const nextVisible = groupModelsByProvider(filterModels(models, value)).flatMap((group) => group.models);
+    const nextVisible = filterModels(models, value);
     setHighlightedKey(modelKey(nextVisible[0]) || null);
   };
 
@@ -113,6 +141,9 @@ export const ModelSwitcher = memo(function ModelSwitcher({
     setError(null);
     try {
       await onSelectModel(model);
+      const nextRecent = [key, ...recentKeys.filter((recent) => recent !== key)].slice(0, 6);
+      setRecentKeys(nextRecent);
+      try { window.localStorage.setItem("molten-forge-recent-models", JSON.stringify(nextRecent)); } catch { /* Optional UX history. */ }
       setOpen(false);
     } catch (selectionError) {
       setError(String(selectionError));
@@ -127,12 +158,13 @@ export const ModelSwitcher = memo(function ModelSwitcher({
   };
 
   return (
-    <div className="model-switcher" ref={rootRef}>
+    <div className="model-switcher">
       <button
         className={`composer-model model-switcher-trigger ${open ? "active" : ""}`}
+        ref={triggerRef}
         type="button"
         onClick={toggle}
-        disabled={!connected || !currentModel}
+        disabled={!connected}
         title={(currentModel?.name ?? modelKey(currentModel)) || "Select model"}
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -141,8 +173,11 @@ export const ModelSwitcher = memo(function ModelSwitcher({
         <ChevronDown size={12} strokeWidth={1.8} aria-hidden="true" />
       </button>
 
-      {open && (
-        <div className="model-popover" role="dialog" aria-label="Select model">
+      {open && createPortal(
+        <div className="model-dialog-backdrop" onPointerDown={(event) => {
+          if (event.target === event.currentTarget) setOpen(false);
+        }}>
+          <div className="model-popover model-dialog" role="dialog" aria-modal="true" aria-label="Select model" ref={dialogRef}>
           <div className="model-search-wrap">
             <Search size={14} strokeWidth={1.8} aria-hidden="true" />
             <input
@@ -211,7 +246,8 @@ export const ModelSwitcher = memo(function ModelSwitcher({
             )}
           </div>
           {error && <div className="model-popover-error">{error}</div>}
-        </div>
+          </div>
+        </div>, document.body
       )}
     </div>
   );

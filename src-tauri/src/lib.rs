@@ -539,6 +539,9 @@ fn collect_project_summaries(root: &Path) -> Result<Vec<ProjectSummary>, String>
         if cwd.trim().is_empty() { continue; }
         let key = normalize_path_for_compare(Path::new(cwd));
         let Some(session) = read_session_info(&path, &key) else { continue };
+        // Opening a folder can create a header-only Pi session. Do not keep it
+        // in the project navigator until an actual conversation takes place.
+        if session.first_message.is_none() && session.activity_timestamp.is_none() { continue; }
         let timestamp = session.activity_timestamp.or(session.timestamp);
         let candidate = ProjectSummary {
             cwd: cwd.to_string(),
@@ -1628,6 +1631,12 @@ mod tests {
         fs::write(a.join("one.jsonl"), session(&a_cwd, "2026-01-02T00:00:00Z")).expect("a1");
         fs::write(a.join("two.jsonl"), session(&a_cwd, "2026-01-04T00:00:00Z")).expect("a2");
         fs::write(b.join("one.jsonl"), session(&b_cwd, "2026-01-03T00:00:00Z")).expect("b1");
+        // Pi writes a session header as soon as a folder is opened. That
+        // alone must not create a persistent project in the sidebar.
+        let empty_cwd = root.join("just-opened-empty").to_string_lossy().to_string();
+        fs::write(b.join("empty.jsonl"), format!("{}\n",
+            json!({"type":"session","id":"empty","cwd":empty_cwd,"timestamp":"2026-01-05T00:00:00Z"}),
+        )).expect("empty");
         let summaries = collect_project_summaries(&root).expect("project discovery");
         assert_eq!(summaries.len(), 2);
         assert_eq!(summaries[0].cwd, a_cwd);

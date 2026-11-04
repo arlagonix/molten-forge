@@ -15,6 +15,22 @@ export type BackgroundImageInfo = {
 export const THEME_STORAGE_KEY = "molten-forge-pi-theme";
 export const BACKGROUND_IMAGES_ENABLED_STORAGE_KEY = "molten-forge-pi-background-images-enabled";
 
+export const WALLPAPER_OVERLAY_STORAGE_KEY = "molten-forge-pi-wallpaper-overlay-percent";
+export const DEFAULT_WALLPAPER_OVERLAY_PERCENT = 10;
+
+export function readWallpaperOverlayPercent(storage: Pick<Storage, "getItem">): number {
+  try {
+    const stored = storage.getItem(WALLPAPER_OVERLAY_STORAGE_KEY);
+    if (stored === null || stored.trim() === "") return DEFAULT_WALLPAPER_OVERLAY_PERCENT;
+    const value = Number(stored);
+    return Number.isFinite(value) && value >= 0 && value <= 25
+      ? Math.round(value)
+      : DEFAULT_WALLPAPER_OVERLAY_PERCENT;
+  } catch {
+    return DEFAULT_WALLPAPER_OVERLAY_PERCENT;
+  }
+}
+
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
   theme: "system",
   backgroundImagesEnabled: true,

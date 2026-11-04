@@ -119,8 +119,12 @@ describe("chat scroll integration contracts", () => {
     expect(appSource).toContain("const composerWrapRef = useRef<HTMLElement | null>(null)");
     expect(appSource).toContain('ref={composerWrapRef}');
     expect(appSource).toContain('observer.observe(composerWrap)');
+    // TranscriptView is key-mounted per session; reconnect the mask when it changes.
+    const geometryEffect = appSource.slice(appSource.indexOf("const composerWrap = composerWrapRef.current;"), appSource.indexOf("useLayoutEffect(() => {", appSource.indexOf("const composerWrap = composerWrapRef.current;") + 1));
+    expect(geometryEffect).toContain("activeSessionPath,");
+    expect(geometryEffect).toContain("observer.observe(transcript)");
     expect(appSource).toContain('setProperty("--composer-overlay-clearance"');
-    expect(appSource).toContain("composerOverlayClearance(transcriptBottom, composerWrap.getBoundingClientRect().top)");
+    expect(appSource).toContain("composerOverlayClearance(transcriptBottom, composerTop)");
     expect(appSource).toContain("observer.observe(pane)");
     expect(appSource).toContain('window.addEventListener("resize", onWindowGeometryChange)');
     expect(appSource).toContain("holdReaderAnchorThroughLayoutChange(240)");
@@ -178,7 +182,7 @@ describe("chat scroll integration contracts", () => {
     expect(appSource).toContain('aria-label="Scroll to bottom"');
     expect(appSource).toContain("transcript.scrollTop = target");
     expect(appSource).toContain("setAutoScrollMode(true)");
-    expect(styles).toMatch(/\.scroll-to-bottom-anchor\s*\{[\s\S]*?bottom:\s*calc\(var\(--composer-overlay-clearance, 190px\) - 6px\)/);
+    expect(styles).toMatch(/\.scroll-to-bottom-anchor\s*\{[\s\S]*?bottom:\s*calc\(var\(--composer-fade-inset, 170px\) \+ 16px\)/);
   });
 
 

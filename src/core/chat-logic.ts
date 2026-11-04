@@ -20,6 +20,11 @@ export type TranscriptItem = {
   title?: string;
   text: string;
   attachments?: ManagedAttachment[];
+  // Stable Pi session-entry id and message metadata (only when supplied by Pi).
+  entryId?: string;
+  timestamp?: number | string;
+  model?: string;
+  provider?: string;
   state?: "running" | "done" | "error" | "interrupted";
   toolInput?: string;
   toolOutput?: string;

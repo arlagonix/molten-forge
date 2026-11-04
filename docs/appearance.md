@@ -38,6 +38,9 @@ Background images are enabled by default.
 
 The settings screen contains:
 
+The wallpaper overlay slider and both theme-specific background pickers are
+separated by the same subtle row dividers in dark and light themes.
+
 - `Show background image` — master toggle that hides or restores the image without deleting custom choices.
 - `Light background` — uses the bundled light Molten Forge image unless a custom light image is selected.
 - `Dark background` — uses the bundled dark Molten Forge image unless a custom dark image is selected.
@@ -128,31 +131,23 @@ User-message bubbles are an intentional color/alpha exception: their historical
 dark `rgba(52,55,59,.64)` and light primary-color 90%-opacity fills are
 retained through `--app-glass-user-message`, without expensive backdrop blur.
 
-**Full-height pane tints are different from foreground surfaces.** The app's
-wallpaper (bundled or custom) is painted by `.app-shell` behind the content.
-The chat, Settings and Skills workspace panes keep translucent theme-specific
-backgrounds so that wallpaper remains visible. **The sidebars are the
-exception: they are opaque.** The session sidebar and the Settings sidebar must
-read as one solid color with the chat header rather than as a pane over the
-wallpaper, so the left column never looks washed out or half transparent.
-Chat and Settings main share the **same tint**: `--app-workspace-tint` aliases
-`--app-settings-tint`, so changing the Settings tint changes chat identically
-in dark and light themes. Every chrome bar and both sidebars read one token,
-`--app-chrome-tint`, which is `var(--app-glass-card)` itself. That covers the
-chat header, launcher topbar, Settings main titlebar (the "General" heading),
-the session sidebar and the Settings sidebar, so the whole frame reads as a
-single solid neutral surface instead of a mix of darker, bluish panes.
-Do not reintroduce per-surface chrome tokens or light-theme overrides that
-repaint one bar with `--app-glass-strong`/`--app-glass-background`; that
-divergence is what the token exists to prevent. Do not reintroduce a
-`color-mix(... N%, transparent)` or `rgba()`/`oklch()` alpha form here either:
-that is exactly how the sidebars previously drifted into a translucent pane.
-A change that needs to darken or lighten the chat column belongs in the pane
-tint (`--app-workspace-tint`), never in the chrome surface. Skills
-subpanes use `--app-skills-tint` as only a subtle extra
-tint inside the already-tinted Settings pane. Do not make them opaque and do not restore
-costly `backdrop-filter`. The `.app-shell` image/vignette/overlay stays
-translucent, and `Show background image` hides only the actual wallpaper.
+**Full-height shell surfaces (Phase 4.2.2).** Chat and Settings now share
+one solid workspace color (`--app-workspace-tint`, mirrored by
+`--app-settings-tint`). As of Phase 4.4 dark mode uses the computed OpenCode
+V2 `bg-base: #1d1e19`, while the sidebar and frame use V2 `bg-deep:
+#191a15`. The chat title, telemetry and Settings section headings live in the
+solid top strip above the inset pane (Phases 4.3–4.3.2), without a redundant
+separator; the transcript starts at the top of the inset panel.
+
+The selectable wallpaper is drawn *inside* chat and Settings panes (under a
+workspace tint) when enabled without the overlay, not on `.app-shell`.
+This prevents the old wallpaper/blue-gradient/shadow from showing in the 6px
+outer frame. When the topmost image overlay is active, the pane wallpaper is
+suppressed, so the image is drawn only once. Sidebars and gutters remain solid;
+Skills interior tints can still be subtly translucent over the Settings pane.
+This is specific to connected workspaces: the initial launcher/startup background
+behavior is preserved. The settings UI now follows the same inset panel, border,
+sidebar and header treatment as chat.
 
 Translucent hover highlights and modal dimmers are intentional. The initial
 startup background alone retains `filter: blur(18px)` as a bounded effect.
@@ -164,3 +159,75 @@ The live transcript may receive many Pi text/thinking deltas per second. Merge
 adjacent deltas belonging to the same message, kind, and content index for up
 to 50 ms; non-delta RPC events remain ordered synchronous barriers. Do not
 change transcript virtualization or scroll ownership to implement batching.
+
+
+## OpenCode-inspired workspace shell (Phase 4.2)
+
+The normal chat workspace is intentionally inset from the window frame, like
+OpenCode Desktop v2.2.2. Its panel begins below a 40px outer title strip,
+with 6px right/bottom gutters, a 10px corner radius and a faint outer edge.
+The project sidebar remains full-height, with no continuous dividing rail or
+header/footer rules; session selection uses a fill rather than an outline.
+When collapsed, the chat panel also gains a 6px left gutter. The fixed window
+controls stay in the top strip. Sidebar resizing and persisted widths are not
+modified.
+
+Phase 4.2.2 correction: OpenCode Desktop's *computed* dark Monokai colors
+were captured from DevTools. `--background-base` is `#161712`,
+`--surface-raised-base` is `#1e1f1a`, `--surface-base` is `#252621`,
+`--surface-weak` is `#2c2d28`, `--border-weaker-base` is `#373732`,
+and `--text-base` is `#f8f8f2`. The earlier `#272822` value belongs to
+the original syntax palette and is not the dark application background.
+Settings shares the inset chat panel styling. The warm light palette remains
+as previously approved. Pi syntax/semantic colors and the historical user
+bubble palette remain unchanged. Browser tests check that wallpaper is scoped
+to workspaces, inactive gutters contain no wallpaper, and the separate header
+strip is opaque and divided from the wallpaper pane with a 1px rule.
+
+Do not add `overflow: hidden` to `.chat-pane`: the transcript must remain the
+only scrolling ancestor for sticky CodeMirror toolbars. Browser regression
+checks: `tests/monokai-shell.browser.py` and
+`tests/background-visibility.browser.py`.
+
+## OpenCode V2 Monokai surface relationships (Phase 4.4)
+
+For the dark theme, use the **computed V2** color scale from OpenCode
+v2.2.2 rather than the older syntax/theme `--surface-*` palette when
+painting the window shell and composer:
+
+- Shell / sidebar: `--mf-surface-shell` → `#191a15` (`--v2-grey-1100`).
+- Chat / Settings workspace: `--mf-surface-workspace` → `#1d1e19` (`--v2-grey-1000`).
+- Composer: `--mf-surface-composer` → `#282923` (`--v2-grey-800`), raised above the chat base.
+- Composer outline: `--mf-surface-composer-border` → `#373732`, the subtle Monokai edge.
+
+These are deliberately **opaque** surfaces, not independent semi-transparent
+tints that should be multiplied on top of each other. The wallpaper overlay
+uses the single rendering path described below (Phase 4.4.1); there is no
+separate gradient-backed wallpaper mode at 0%. Keep the previous light-theme
+palette and styling unchanged. Do not apply these values to Pi's semantic
+syntax colors or to foreground cards (`--app-glass-medium`).
+
+## Continuous wallpaper opacity and shared compositing (Phase 4.4.2)
+
+The 0–25% wallpaper slider uses one rendering path at every value, including
+0%. The connected application shell owns one non-interactive `::after` layer
+with `opacity: var(--mf-wallpaper-overlay-opacity, 0)` above the entire UI,
+including the solid shell, chat/Settings panels, titlebar and floating composer.
+This matches OpenCode's wallpaper plugin effect: opaque neutral surfaces beneath
+one subtle image tint. The slider **does not** change the alpha of any control.
+At 0% no wallpaper is painted; 1% produces a small continuous change.
+
+Keep this image overlay independent of transcript virtualization, sticky
+headers, scrolling and model controls. `Show background image` hides the image
+without resetting the slider or replacing theme wallpaper selections. The
+composer remains a solid raised `#282923` Monokai surface beneath the image,
+which prevents it from looking much darker than the reference. The light-theme
+neutral surface colors remain unchanged. Test with
+`tests/wallpaper-opacity.browser.py` and `tests/background-visibility.browser.py`.
+
+## Default wallpaper intensity (Phase 4.4.3)
+
+New installations and users without a stored overlay preference start at 10%.
+Previously stored settings, including explicit 0%, are never overwritten.
+`readWallpaperOverlayPercent` in `src/core/appearance.ts` handles missing, malformed,
+and unavailable browser storage; the Settings slider remains 0–25%.

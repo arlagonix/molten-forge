@@ -29,9 +29,9 @@ describe("settings workspace", () => {
   });
 
   it("exposes the sans, mono, and Miracode font choices in General", () => {
-    expect(source).toContain('<option value="sans">Sans</option>');
-    expect(source).toContain('<option value="mono">Mono</option>');
-    expect(source).toContain('<option value="miracode">Miracode</option>');
+    expect(source).toContain('{ value: "sans", label: "Sans" }');
+    expect(source).toContain('{ value: "mono", label: "Mono" }');
+    expect(source).toContain('{ value: "miracode", label: "Miracode" }');
   });
 
   it("offers opt-in background completion notifications", () => {
@@ -42,14 +42,15 @@ describe("settings workspace", () => {
 
   it("uses the app-wide 16px default for primary Settings controls", () => {
     expect(css).toMatch(/\.settings-row-copy strong\s*\{[\s\S]*?font-size:\s*16px;/);
-    expect(css).toMatch(/\.settings-select\s*\{[\s\S]*?font-size:\s*16px;/);
+    expect(css).toMatch(/\.settings-inline-trigger,[\s\S]*?font-size:\s*16px;/);
     expect(css).toMatch(/\.settings-sidebar-row,[\s\S]*?\.settings-back-to-chat\s*\{[\s\S]*?font-size:\s*16px;/);
   });
 
   it("owns select chevron placement instead of relying on the cramped native arrow", () => {
-    expect(source).toContain('className="settings-select-shell"');
-    expect(source).toContain('className="settings-select-chevron"');
-    expect(css).toMatch(/\.settings-select-shell \.settings-select\s*\{[\s\S]*?appearance:\s*none;/);
-    expect(css).toMatch(/\.settings-select-chevron\s*\{[\s\S]*?right:\s*12px;/);
+    expect(source).toContain('SettingsInlineSelect label="Theme"');
+    expect(source).toContain('SettingsInlineSelect label="Font"');
+    expect(source).toContain('SettingsInlineSelect label="Timeline detail"');
+    expect(css).toMatch(/\.settings-inline-trigger,[\s\S]*?width:\s*max-content;/);
+    expect(css).toMatch(/\.settings-inline-trigger,[\s\S]*?border:\s*0 !important;/);
   });
 });

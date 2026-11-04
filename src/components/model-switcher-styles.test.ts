@@ -5,8 +5,9 @@ import { describe, expect, it } from "vitest";
 const styles = readFileSync(fileURLToPath(new URL("../styles.css", import.meta.url)), "utf8");
 
 describe("model switcher visual contracts", () => {
-  it("anchors the model popover above the composer trigger", () => {
-    expect(styles).toMatch(/\.model-popover\s*\{[\s\S]*?bottom:\s*calc\(100% \+ 8px\);/);
+  it("centers the modal in a fixed backdrop rather than anchoring it above the composer", () => {
+    expect(styles).toMatch(/\.model-dialog-backdrop\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?place-items:\s*center;/);
+    expect(styles).toMatch(/\.model-popover\.model-dialog\s*\{[\s\S]*?position:\s*relative;/);
   });
 
   it("keeps the searchbar fixed while the model list owns scrolling", () => {

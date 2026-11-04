@@ -23,6 +23,11 @@ describe("Pi semantic Markdown/code visual contracts", () => {
     expect(styles).toContain(`${name}: ${value};`);
   });
 
+  it("shows live and historical Thinking without a left rail or large first-paragraph gap", () => {
+    expect(styles).toMatch(/\.thinking \.thinking-content\s*\{[^}]*margin:\s*4px 0 0;[^}]*padding:\s*0;[^}]*border:\s*0;/);
+    expect(styles).toMatch(/\.thinking \.thinking-content \.markdown-body > :first-child\s*\{[^}]*margin-top:\s*0;/);
+  });
+
   it("defines Pi's separate light semantic palette", () => {
     expect(styles).toContain(':root[data-theme="light"]');
     expect(styles).toContain("--pi-md-heading: #8f6802;");
@@ -95,9 +100,9 @@ describe("Pi semantic Markdown/code visual contracts", () => {
     expect(codeViewerSource).not.toMatch(/tag:\s*tags\.emphasis[^\n]*fontStyle/);
     expect(codeViewerSource).not.toMatch(/tag:\s*tags\.strong[^\n]*fontWeight/);
   });
-  it("keeps thinking prose, previews, and code fragments italic", () => {
-    expect(styles).toMatch(/\.thinking-preview,[\s\S]*?\.thinking-content,[\s\S]*?\.thinking-content \.markdown-body\s*\{[\s\S]*?font-style:\s*italic;/);
-    expect(styles).toMatch(/\.thinking-content \.markdown-body code,[\s\S]*?font-style:\s*italic;/);
+  it("keeps thinking prose, previews, and code fragments upright", () => {
+    expect(styles).toMatch(/\.thinking-preview,[\s\S]*?\.thinking-content,[\s\S]*?\.thinking-content \.markdown-body\s*\{[\s\S]*?font-style:\s*normal;/);
+    expect(styles).toMatch(/\.thinking-content \.markdown-body code,[\s\S]*?font-style:\s*normal;/);
   });
 
   it("bundles real JetBrains Mono italic faces because font synthesis is disabled", () => {

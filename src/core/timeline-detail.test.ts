@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { TranscriptItem } from "./chat-logic";
-import { groupTranscriptItems } from "./chat-logic";
-import { groupCompactActivityGroups, readTimelineMode, summarizeCompactActivity } from "./timeline-detail";
+import { buildTranscriptTurns, groupTranscriptItems } from "./chat-logic";
+import { activeSemiCompactActivity, groupCompactActivityGroups, readTimelineMode, summarizeCompactActivity } from "./timeline-detail";
 
 const tool = (id: string, title: string, state: TranscriptItem["state"] = "done", toolBatchId?: string): TranscriptItem =>
   ({ id, kind: "tool", title, state, text: "", toolBatchId });
@@ -13,6 +13,7 @@ const prose = (id: string, kind: TranscriptItem["kind"] = "assistant"): Transcri
 it("defaults to Compact, respects Full and survives unavailable storage", () => {
   expect(readTimelineMode({ getItem: () => null }, "pref")).toBe("compact");
   expect(readTimelineMode({ getItem: () => "full" }, "pref")).toBe("full");
+  expect(readTimelineMode({ getItem: () => "semi-compact" }, "pref")).toBe("semi-compact");
   expect(readTimelineMode({ getItem: () => "unexpected" }, "pref")).toBe("compact");
   expect(readTimelineMode({ getItem: () => { throw Error("denied"); } }, "pref")).toBe("compact");
 });
@@ -91,5 +92,53 @@ describe("Compact presentation grouping", () => {
   it("keeps single thinking-only activity and a one-tool batch as distinct runtime blocks", () => {
     expect(shape([thought("a"), thought("b"), tool("c", "Read", "done", "p1"), thought("d"), tool("e", "Read")]))
       .toEqual([[["a", "b", "c"], ["d", "e"]]]);
+  });
+});
+
+
+describe("Semi Compact live activity frontier", () => {
+  const activity = (items: TranscriptItem[], streaming = true) =>
+    activeSemiCompactActivity(buildTranscriptTurns(items), streaming);
+
+  it("reveals the current running thinking/tool episode", () => {
+    const items = [prose("user", "user"), thought("reason", "running"), tool("bash", "Bash", "running")];
+    expect(activity(items)).toEqual({ turnKey: buildTranscriptTurns(items)[0].key, groupKey: "compact-reason" });
+  });
+
+  it("keeps completed tool calls expanded between calls while Pi is still streaming", () => {
+    const items = [prose("user", "user"), thought("reason"), tool("bash", "Bash", "done")];
+    expect(activity(items)?.groupKey).toBe("compact-reason");
+    expect(activity([...items, tool("read", "Read", "running")])?.groupKey).toBe("compact-reason");
+  });
+
+  it("collapses immediately when the assistant starts its answer or Pi settles", () => {
+    const items = [prose("user", "user"), thought("reason"), tool("bash", "Bash", "done")];
+    expect(activity(items, false)).toBeNull();
+    expect(activity([...items, prose("answer")])).toBeNull();
+  });
+
+  it("reactivates only a new trailing episode after assistant prose", () => {
+    const items = [prose("user", "user"), thought("first"), tool("one", "Bash"), prose("interim"),
+      thought("second", "running"), tool("two", "Read", "running")];
+    expect(activity(items)?.groupKey).toBe("compact-second");
+    expect(activity([...items, prose("answer")])).toBeNull();
+  });
+
+  it("never reopens old turns when the next prompt is submitted", () => {
+    const items = [prose("user1", "user"), tool("old", "Bash"), prose("answer"), prose("user2", "user")];
+    expect(activity(items)).toBeNull();
+    expect(activity([...items, thought("new", "running")])?.groupKey).toBe("compact-new");
+  });
+
+  it("does not reopen activity across retry, maintenance, or system boundaries", () => {
+    const prefix = [prose("user", "user"), thought("reason"), tool("tool", "Bash")];
+    expect(activity([...prefix, prose("retry", "retry")])).toBeNull();
+    expect(activity([...prefix, { ...tool("compact", "Compact"), runtimeRole: "session-maintenance" }])).toBeNull();
+    expect(activity([...prefix, prose("notice", "system")])).toBeNull();
+  });
+
+  it("handles empty and prose-only histories", () => {
+    expect(activeSemiCompactActivity([], true)).toBeNull();
+    expect(activity([prose("user", "user"), prose("hello")])).toBeNull();
   });
 });

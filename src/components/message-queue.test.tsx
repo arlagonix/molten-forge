@@ -19,10 +19,12 @@ describe("Pi queued message controls", () => {
     expect(html).toContain("Test afterward");
     expect(html).toContain('aria-label="Retrieve queued messages"');
   });
-  it("exposes both choices in a native keyboard-accessible selector", () => {
-    const html = renderToStaticMarkup(createElement(QueueModeSelect, { value: "followUp", onChange: () => {} }));
-    expect(html).toContain('<option value="followUp" selected="">Follow-up</option>');
-    expect(html).toContain('<option value="steer">Steer</option>');
-    expect(html).toContain('aria-label="Message delivery mode"');
+  it("uses a content-sized and keyboard-accessible trigger", () => {
+    const steer = renderToStaticMarkup(createElement(QueueModeSelect, { value: "steer", onChange: () => {} }));
+    const followUp = renderToStaticMarkup(createElement(QueueModeSelect, { value: "followUp", onChange: () => {} }));
+    expect(steer).toContain('aria-haspopup="menu"');
+    expect(steer).toContain('aria-label="Message delivery mode: Steer"');
+    expect(followUp).toContain('aria-label="Message delivery mode: Follow-up"');
+    expect(followUp).not.toContain('<select');
   });
 });

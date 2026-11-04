@@ -187,7 +187,7 @@ Activating it is an explicit landing:
 - re-arm normal bottom-follow;
 - settle again after pending virtualizer/Markdown measurements so the control cannot land on a stale pre-flush bottom.
 
-The control follows the measured composer clearance so a tall multiline composer cannot cover it.
+The control sits 16px above the actual measured top of the composer overlay (`--composer-fade-inset`), rather than the 190px minimum transcript clearance. That keeps it close to a short composer and above a taller composer or queued-message strip without changing scroll padding.
 
 
 For queue strip and short-window multiline drafts, also see `docs/pi-queue-and-composer.md`. The resize observer tracks both the composer and chat pane, plus window resize/focus.
@@ -218,3 +218,19 @@ The mask is disabled for empty and history-loading transcripts, and applies in
 both light/dark themes without an extra image layer or blur. It begins fading
 at the composer top and returns to full opacity 16px above it, where the last
 message is allowed to settle.
+
+
+The mask measurement effect also depends on `activeSessionPath`: the transcript
+DOM is keyed by session, so a new session must rebind its resize observation
+and re-apply the initial `--composer-fade-inset`. Otherwise the old mask may
+leave transcript text exposed beneath the absolute composer after a switch.
+
+## Semi Compact automatic episode contraction
+
+While the agent streams, the latest trailing thinking/tool episode is visible
+as Full rows. When its phase ends, a short height animation replaces those
+rows with a Compact `Used…` disclosure. The animation never uses CSS transforms
+or an independent transcript scroll writer. Existing ResizeObserver and
+virtualizer measurements own height changes; manual-reader freeze and the
+agent-settled final reader-anchor flush remain authoritative. When reduced
+motion is preferred, the transition is instantaneous.

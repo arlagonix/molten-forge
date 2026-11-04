@@ -79,7 +79,7 @@ Notation: `T` = Thinking, `A/B/C` = sequential tool calls, `[A B]p1` = one expli
 - Rendering code must consume these helpers rather than reimplementing the rules.
 - Any change to these rules must update this document and `src/core/chat-logic.test.ts` in the same change.
 
-## Timeline presentation (Compact / Full)
+## Timeline presentation (Compact / Semi Compact / Full)
 
 Timeline detail is a **UI-only** preference independent from runtime grouping and Pi RPC.
 It is stored under `molten-forge-pi-timeline-mode` and defaults to `compact`.
@@ -104,6 +104,14 @@ It is stored under `molten-forge-pi-timeline-mode` and defaults to `compact`.
   padding or hover/pressed background fill in either theme; focus indication
   remains visible. The collapsed state persists over ordinary virtualization
   remounts.
+- **Semi Compact**: keeps older activity episodes as Compact disclosures, while
+  the **single most recent** contiguous assistant Thinking/tool episode across
+  the entire transcript uses the canonical Full rows and individual tool details.
+  Only the last episode (not the last episode of each historical turn) is Full;
+  a newer episode replaces it automatically. Assistant prose, maintenance,
+  retry and user turns still bound episodes exactly as in Compact. A final
+  prose answer does not erase the last episode from Full presentation.
+  Auto-expand preferences apply to the Full portion as activity streams.
 - **Full**: keeps original canonical runtime grouping and the auto-expand
   preferences. It now uses the **same flat row surface and full-width dividers**
   as expanded Compact, without a nested Parallel tool calls heading; each
@@ -118,3 +126,23 @@ A change of presentation mode must not change the underlying transcript, Pi
 execution state, turn IDs, parallel metadata, or scroll-follow ownership.
 Expanded Compact groups may be collapsed independently, and the UI should
 retain their state across normal virtualized row mounting/unmounting.
+
+## Semi Compact presentation (transcript-only)
+
+The three timeline modes share the same authoritative runtime groups and Pi data:
+
+- **Compact**: completed or running thinking/tool episodes are shown as `Used…` disclosures.
+- **Full**: render all episodes as individual thinking/tool rows.
+- **Semi Compact**: render **only the active, trailing thinking/tool episode of the current Pi run** using Full rows. As soon as assistant prose, a retry/maintenance/system boundary, a new user turn, or `agent_settled` closes that episode, show it as a normal Compact `Used…` disclosure.
+
+A tool's `done` state alone does **not** close the live episode: Pi can issue more
+calls or reasoning before it settles. The live frontier therefore depends on
+Pi's `isStreaming` lifecycle and the last canonical activity group of the
+latest transcript turn. Historical turns are always Compact, including the
+most recent one when no agent is running. New phases after intervening prose
+can be revealed independently. Explicit parallel batches and the existing
+smart-grouped Compact details are unchanged.
+
+Semi Compact uses a short grid-track height transition between a live Full
+episode and the Compact disclosure. It preserves the transcript's transform-free
+virtualizer, CodeMirror sticky header contract, and reduced-motion preference.

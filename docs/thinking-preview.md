@@ -64,4 +64,6 @@ While Thinking is running and collapsed, the compact preview concatenates rollin
 
 ## Thinking typography
 
-Thinking reasoning text and the collapsed preview are italic, matching the established Pi/Molten Forge treatment. The Thinking label/chrome and code/preformatted content remain upright so syntax stays readable.
+Thinking reasoning text, the collapsed preview, and inline/fenced code are rendered
+with normal (upright) font style for readability in both themes. Thinking retains
+its muted semantic color; the Thinking label/chrome remains upright as before.

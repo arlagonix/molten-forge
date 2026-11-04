@@ -4,7 +4,7 @@ import { formatSessionDate } from "../core/session-display";
 import { projectNameFromPath } from "../core/recent-projects";
 import {
   PROJECT_BATCH_SIZE, SESSION_BATCH_SIZE, filterReachableProjects, nextVisibleProjectCount, nextVisibleSessionCount,
-  orderedProjectPaths, projectKeyForSidebar, sortProjectPaths, sortSessionsByActivity, visibleProjectPaths,
+  orderedProjectPaths, projectKeyForSidebar, sortSessionsByActivity, visibleProjectPaths,
   type ProjectSummary,
 } from "../core/project-sidebar";
 
@@ -115,10 +115,11 @@ export function ProjectSessionSidebar({
     return () => window.cancelAnimationFrame(frame);
   }, [activeKey, sessionsError, sessionsLoading, openedKey]);
 
-  const allPaths = useMemo(() => orderedProjectPaths(cwd, [
-    ...projects.map((entry) => entry.cwd), ...recentProjects,
+  // Recent openings are newest-first. Keep the current project at the top even
+  // before its first session; historical Pi projects follow persisted recents.
+  const paths = useMemo(() => orderedProjectPaths(cwd, [
+    ...recentProjects, ...projects.map((entry) => entry.cwd),
   ]), [cwd, recentProjects, projects]);
-  const paths = useMemo(() => sortProjectPaths(allPaths, projects, cwd, sessions), [allPaths, projects, cwd, sessions]);
   // Projects whose folder is gone cannot host a session, so they are not listed.
   const listedPaths = useMemo(() => filterReachableProjects(paths, projects, cwd), [paths, projects, cwd]);
   const visiblePaths = useMemo(

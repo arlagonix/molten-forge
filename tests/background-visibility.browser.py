@@ -1,4 +1,4 @@
-"""Regression: the selectable app wallpaper must remain visible behind pane tints.
+"""Regression: wallpaper is a single continuous overlay on the active workspace.
 
 Run: python tests/background-visibility.browser.py (Playwright + Chromium).
 The CSS from production is loaded without React so both theme and image-toggle
@@ -21,9 +21,8 @@ html,body{width:100%;height:100%;margin:0;}
 .app-shell{height:100%;width:100%;--session-sidebar-width:180px;}
 .workspace{width:100%;height:100%;display:grid;grid-template-columns:180px 1fr;}
 .session-sidebar{height:100%;}
-.chat-pane{height:100%;}
 .transcript{height:100%;}
-</style></head><body><main class="app-shell background-enabled">
+</style></head><body><main class="app-shell is-connected background-enabled">
 <div class="workspace"><aside class="session-sidebar"></aside>
 <section class="chat-pane"><header class="chat-header"></header><div class="transcript"></div></section>
 </div>
@@ -36,19 +35,23 @@ html,body{width:100%;height:100%;margin:0;}
 </div></main>
 </body></html>'''
 
-OPAQUE_PANES = ('.chat-header', '.session-sidebar', '.settings-sidebar')
+OPAQUE_PANES = ('.chat-pane', '.session-sidebar', '.settings-main', '.settings-sidebar')
 
 with sync_playwright() as pw:
     browser = pw.chromium.launch(headless=True, executable_path='/usr/bin/chromium', args=['--no-sandbox'])
     page = browser.new_page(viewport={'width': 800, 'height': 500}, device_scale_factor=1)
     page.set_content(fixture)
     page.add_style_tag(content=css)
-    page.evaluate('(background) => document.querySelector(".app-shell").style.setProperty("--app-background-image", background)', wallpaper)
+    page.evaluate('''(background) => {
+      const shell = document.querySelector('.app-shell');
+      shell.style.setProperty('--app-background-image', background);
+      shell.style.setProperty('--mf-wallpaper-overlay-opacity', '.12');
+    }''', wallpaper)
 
     for theme in ('dark', 'light'):
         page.evaluate('(theme) => { document.documentElement.dataset.theme = theme; }', theme)
         pane_colors = page.evaluate('''() => Object.fromEntries(
-          ['.chat-pane', '.chat-header', '.session-sidebar', '.settings-main', '.settings-sidebar',
+          ['.chat-pane', '.chat-header', '.session-sidebar', '.settings-main', '.settings-main-titlebar', '.settings-sidebar',
            '.pi-skills-list-pane', '.pi-skill-detail-scroll'].map(selector => {
            const el = document.querySelector(selector) || document.createElement('div');
            if (!el.isConnected) { el.className=selector.slice(1); document.body.append(el); }
@@ -67,36 +70,23 @@ with sync_playwright() as pw:
             opacity = opacity_of(color)
             assert values['filter'] == 'none', f'{theme} {selector} expensive blur returned: {values}'
             if selector in OPAQUE_PANES:
-                # The sidebars must read as one solid color with the chat header,
-                # so they must not let the wallpaper through at all.
                 assert opacity == 1, f'{theme} {selector} must be opaque: {color}'
+            elif selector in ('.settings-main-titlebar', '.chat-header'):
+                # Phase 4.3: both titlebars are lifted into the solid top strip.
+                assert opacity == 1, f'{theme} detached titlebar must be opaque: {color}'
             else:
                 assert 0 < opacity < 1, f'{theme} {selector} must be translucent: {color}'
-        # Both sidebars must be exactly the chat header surface.
-        for selector in OPAQUE_PANES:
-            assert pane_colors[selector]['background'] == pane_colors['.chat-header']['background'], (
-                f"{theme} {selector} {pane_colors[selector]['background']} must equal "
-                f"header {pane_colors['.chat-header']['background']}"
-            )
-        # Chat wallpaper tint must visually match the Settings main-pane tint.
-        assert pane_colors['.chat-pane']['background'] == pane_colors['.settings-main']['background'], (
-            f"{theme} chat tint {pane_colors['.chat-pane']['background']} must equal "
-            f"Settings tint {pane_colors['.settings-main']['background']}"
-        )
         # Compare actual pixels with the very same panel and theme when wallpaper is toggled off.
         page.evaluate('document.querySelector(".app-shell").classList.remove("background-disabled")')
         visible = Image.open(BytesIO(page.screenshot())).convert('RGB')
         page.evaluate('document.querySelector(".app-shell").classList.add("background-disabled")')
         hidden = Image.open(BytesIO(page.screenshot())).convert('RGB')
         page.evaluate('document.querySelector(".app-shell").classList.remove("background-disabled")')
-        # Both samples sit inside the translucent chat column (x > 180).
-        for pos in ((300, 240), (420, 240)):
+        # At 12%, both the pane and sidebar receive the same single wallpaper
+        # overlay; neither has its own separately tinted image layer.
+        for pos in ((300, 240), (420, 240), (60, 240), (170, 300)):
             delta = max(abs(a-b) for a,b in zip(visible.getpixel(pos),hidden.getpixel(pos)))
-            assert delta >= 6, f'{theme} wallpaper invisible under chat pane at {pos}: difference {delta}'
-        # x=60/170 sit inside the solid session sidebar; no wallpaper may show.
-        for pos in ((60, 240), (170, 300)):
-            delta = max(abs(a-b) for a,b in zip(visible.getpixel(pos), hidden.getpixel(pos)))
-            assert delta == 0, f'{theme} wallpaper leaks through the solid sidebar at {pos}: {delta}'
+            assert delta >= 6, f'{theme} wallpaper missing from workspace at {pos}: difference {delta}'
         page.evaluate('document.getElementById("settings").hidden = false')
         settings_with_image = Image.open(BytesIO(page.screenshot())).convert('RGB')
         page.evaluate('document.querySelector(".app-shell").classList.add("background-disabled")')
@@ -105,11 +95,23 @@ with sync_playwright() as pw:
             document.querySelector('.app-shell').classList.remove('background-disabled'); }''')
         for pos in ((450, 240), (650, 240), (300, 240)):
             delta = max(abs(a-b) for a,b in zip(settings_with_image.getpixel(pos), settings_without_image.getpixel(pos)))
-            assert delta >= 2, f'{theme} wallpaper invisible under Settings at {pos}: difference {delta}'
-        # The Settings sidebar is solid too.
+            # A small difference demonstrates wallpaper remains visible even
+            # beneath the opaque foreground controls.
+            assert delta >= 1, f'{theme} wallpaper invisible under Settings at {pos}: difference {delta}'
+        # Settings also receives the wallpaper (including its left sidebar),
+        # and the master background toggle hides the overlay everywhere.
         for pos in ((60, 240),):
             delta = max(abs(a-b) for a,b in zip(settings_with_image.getpixel(pos), settings_without_image.getpixel(pos)))
-            assert delta == 0, f'{theme} wallpaper leaks through the solid Settings sidebar at {pos}: {delta}'
-        print(f'{theme}: wallpaper visible in chat/Settings/Skills, hidden under the solid sidebars; toggle works; no blur')
+            assert delta >= 6, f'{theme} wallpaper missing from Settings sidebar at {pos}: difference {delta}'
+        # Gutter and frame are part of the shared wallpaper overlay; there is
+        # no separate CSS background image painted under either pane.
+        for pos in ((798, 270), (480, 497)):
+            delta = max(abs(a-b) for a,b in zip(visible.getpixel(pos), hidden.getpixel(pos)))
+            assert delta >= 3, f'{theme} wallpaper missing from window overlay at {pos}: {delta}'
+        # OpenCode-style wallpaper overlay also lightly tints the detached header.
+        pos = (600, 15)
+        delta = max(abs(a-b) for a,b in zip(visible.getpixel(pos),hidden.getpixel(pos)))
+        assert delta >= 1, f'{theme} detached titlebar did not receive overlay: {delta}'
+        print(f'{theme}: one wallpaper overlay over chat/Settings and sidebar; wallpaper-composited composer/titlebar; toggle works')
     browser.close()
-print('PASS: tinted panes preserve wallpaper across themes')
+print('PASS: single wallpaper layer respects appearance toggle in both themes')

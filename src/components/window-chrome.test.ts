@@ -27,6 +27,18 @@ describe("frameless Molten Forge window chrome", () => {
     expect(styles).toMatch(/\.window-controls\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?top:\s*4px;/);
   });
 
+  it("lifts the chat title and telemetry into the existing solid top strip without adding a redundant separator", () => {
+    expect(styles).toMatch(/\.chat-pane\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\) auto;/);
+    expect(styles).toMatch(/\.chat-header,\s*html\[data-theme="light"\] \.chat-header\s*\{[^}]*position:\s*absolute;[^}]*top:\s*calc\(-1 \* var\(--mf-shell-top-strip\) - 1px\);[^}]*background:\s*var\(--mf-shell-frame-bg\);/);
+    expect(styles).toMatch(/\.chat-width-guides\s*\{\s*top:\s*11px;/);
+  });
+
+
+  it("lifts the settings section title into the same top strip", () => {
+    expect(styles).toMatch(/\.settings-main\s*\{[^}]*position:\s*relative;[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);/);
+    expect(styles).toMatch(/\.settings-main-titlebar,\s*html\[data-theme="light"\] \.settings-main-titlebar\s*\{[^}]*position:\s*absolute;[^}]*top:\s*calc\(-1 \* var\(--mf-shell-top-strip\) - 1px\);[^}]*background:\s*var\(--mf-shell-frame-bg\);/);
+  });
+
   it("keeps top-bar buttons outside the draggable region", () => {
     expect(styles).toMatch(/\[data-tauri-drag-region\] button,[\s\S]*?app-region:\s*no-drag;/);
   });

@@ -1,10 +1,13 @@
-import { segmentRuntimeGroupItems, type TranscriptGroup, type TranscriptItem } from "./chat-logic";
+import { groupTranscriptItems, segmentRuntimeGroupItems, type TranscriptGroup, type TranscriptItem, type TranscriptTurn } from "./chat-logic";
 
-export type TimelineMode = "compact" | "full";
+export type TimelineMode = "compact" | "semi-compact" | "full";
 
 /** Keep the preference independent of Pi's existing per-activity expansion settings. */
 export function readTimelineMode(storage: Pick<Storage, "getItem">, key: string): TimelineMode {
-  try { return storage.getItem(key) === "full" ? "full" : "compact"; }
+  try {
+    const stored = storage.getItem(key);
+    return stored === "full" || stored === "semi-compact" ? stored : "compact";
+  }
   catch { return "compact"; }
 }
 
@@ -64,6 +67,21 @@ export function groupCompactActivityGroups(groups: readonly TranscriptGroup[]): 
   }
   flush();
   return result;
+}
+
+
+/** The live activity at the frontier of Pi's current run. Completed tools
+ * remain visible between calls; only prose/maintenance/retry/user boundaries
+ * or agent settlement collapse the episode. Never reopen historical turns. */
+export function activeSemiCompactActivity(
+  turns: readonly TranscriptTurn[], isStreaming: boolean,
+): { turnKey: string; groupKey: string } | null {
+  if (!isStreaming || !turns.length) return null;
+  const turn = turns[turns.length - 1];
+  if (!turn.agentItems.length) return null;
+  const groups = groupCompactActivityGroups(groupTranscriptItems(turn.agentItems));
+  const last = groups[groups.length - 1];
+  return last?.kind === "activity" ? { turnKey: turn.key, groupKey: last.key } : null;
 }
 
 export type CompactActivitySummary = {

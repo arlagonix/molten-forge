@@ -11,7 +11,7 @@ const rootAppSource = appSource.slice(appStart);
 describe("composer render isolation", () => {
   it("keeps draft state inside the memoized Composer instead of root App", () => {
     expect(composerStart).toBeGreaterThanOrEqual(0);
-    expect(composerSource).toContain('const [input, setInput] = useState("")');
+    expect(composerSource).toContain('const [input, setInput] = useState(() => {');
     expect(composerSource).toContain("const [suggestionIndex, setSuggestionIndex] = useState(0)");
     expect(rootAppSource).not.toContain('const [input, setInput] = useState("")');
     expect(rootAppSource).not.toContain("setSuggestionIndex(");

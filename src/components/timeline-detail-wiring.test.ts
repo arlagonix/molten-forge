@@ -7,17 +7,33 @@ const settings = fs.readFileSync(path.resolve("src/components/settings-view.tsx"
 const css = fs.readFileSync(path.resolve("src/styles.css"), "utf8");
 
 describe("Compact / Full timeline wiring", () => {
-  it("exposes only two modes and stores the choice separately from expansion preferences", () => {
-    expect(settings).toContain('<option value="compact">Compact</option>');
-    expect(settings).toContain('<option value="full">Full</option>');
+  it("exposes three modes and stores the choice separately from expansion preferences", () => {
+    expect(settings).toContain('{ value: "compact", label: "Compact" }');
+    expect(settings).toContain('{ value: "full", label: "Full" }');
+    expect(settings).toContain('{ value: "semi-compact", label: "Semi Compact" }');
     expect(app).toContain('const TIMELINE_MODE_STORAGE_KEY = "molten-forge-pi-timeline-mode"');
     expect(app).toContain('readTimelineMode(window.localStorage, TIMELINE_MODE_STORAGE_KEY)');
     expect(app).toContain('window.localStorage.setItem(TIMELINE_MODE_STORAGE_KEY, timelineMode)');
     expect(app).toContain('onTimelineModeChange={(value) => preserveChatViewportThroughSettingsChange(() => setTimelineMode(value))}');
   });
 
+  it("renders Full only at the live Pi activity frontier and animates back to Used on completion", () => {
+    expect(app).toContain('activeSemiCompactActivity(turns, isStreaming)');
+    expect(app).toContain('activeSemiCompactGroupKey={turn.key === liveActivity?.turnKey ? liveActivity.groupKey : null}');
+    expect(app).toContain('active={group.key === activeSemiCompactGroupKey}');
+    expect(app).toContain('<MemoFullActivityEpisode items={items} />');
+    expect(app).toContain('<MemoCompactRuntimeTranscriptGroup items={items} blocks={blocks} />');
+    expect(app).toContain('inert={!active}');
+    expect(app).toContain('inert={active}');
+    expect(app).toContain('onTransitionEnd={finishTransition}');
+    expect(css).toContain('grid-template-rows: 0fr;');
+    expect(css).toContain('grid-template-rows: 1fr;');
+    expect(css).toContain('@media (prefers-reduced-motion: reduce)');
+    expect(css).toContain('.semi-compact-activity.is-open .semi-compact-full-reveal');
+  });
+
   it("preserves Full renderer and shows stable, individually expandable chronological episodes", () => {
-    expect(app).toContain('timelineMode === "compact"');
+    expect(app).toContain('timelineMode !== "full"');
     expect(app).toContain('groupCompactActivityGroups(agentGroups)');
     expect(app).toContain('MemoRuntimeTranscriptGroup key={group.key} items={group.items}');
     expect(app).toContain('segmentRuntimeGroupItems(items)');
@@ -42,7 +58,7 @@ describe("Compact / Full timeline wiring", () => {
     expect(css).toContain('border-top: 1px solid var(--mf-surface-border, var(--border))');
     expect(css).toContain('.compact-tool-label');
     expect(css).toContain('.runtime-activity-row + .runtime-activity-row');
-    expect(css).toContain('padding: 7px 12px;');
+    expect(css).toContain('padding: 7px 10px;');
     expect(css).toContain('border-left: none;');
   });
   it("uses one summary around independent bordered smart blocks rather than one giant list", () => {
